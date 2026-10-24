@@ -1,0 +1,13 @@
+# Minimal: auto-load Game1 and idle in the world for a few seconds (quick diagnostics).
+wait_menu 90
+wait 8
+click u=0.559 v=0.521      # Load Game
+wait 3
+click u=0.410 v=0.431      # Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+shot loaded
+expect_world

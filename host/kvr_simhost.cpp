@@ -16,6 +16,9 @@
 //   button <A|B|X|Y|MENU|LSTICK|RSTICK> [for=<s>]  press and release a button (default 0.15 s)
 //   click u=<0..1> v=<0..1> [hold=<s>]             point at the panel (top-left origin) and pull the trigger
 //   grip [for=<s>]                    squeeze the right grip (default action) and release
+//   hand <L|R> [x= y= z=] [yaw= pitch= roll=]      place a hand (grip pose, relative to the recenter origin, deg)
+//   swing [dx= dy= dz=] [over=<s>]    sweep the right hand by (dx,dy,dz) m over <s> (default 0.6,0.3,0 in 0.18 s)
+//   trigger [for=<s>]                 pull the right trigger without pointing at the panel
 //   pointer none                      stop pointing
 //   shot <name>                       save <name>_eye0.png, <name>_eye1.png, <name>_panel.png
 //   expect_world                      fail the run unless the world is rendering
@@ -138,6 +141,14 @@ struct Controls {
     float u = 0, v = 0;
 };
 static Controls g_ctl;
+
+// grip poses: resting low in front of the body, weapons pointing forward and slightly up
+struct HandPose {
+    double x, y, z, yaw, pitch, roll;
+};
+static HandPose g_hand[2] = {{-0.22, -0.40, -0.35, 0, 20, 0}, {0.22, -0.40, -0.35, 0, 20, 0}};
+static HandPose g_swingFrom, g_swingTo;
+static double g_swingT0, g_swingDur;  // right-hand sweep in progress when g_swingDur > 0
 struct Release {
     double at;
     int what;  // 0 sticks, 1 button mask, 2 trigger, 3 grip
@@ -171,6 +182,22 @@ static void PublishInput() {
     in.panelV = g_ctl.v;
     QuatYawPitch(g_head.yaw, g_head.pitch, in.aim.quat);  // world pointer follows the head if ever used
     in.aim.pos[0] = (float)g_head.x; in.aim.pos[1] = (float)g_head.y - 0.3f; in.aim.pos[2] = (float)g_head.z - 0.2f;
+    if (g_swingDur > 0) {
+        double t = std::min(1.0, (now - g_swingT0) / g_swingDur);
+        g_hand[1].x = g_swingFrom.x + (g_swingTo.x - g_swingFrom.x) * t;
+        g_hand[1].y = g_swingFrom.y + (g_swingTo.y - g_swingFrom.y) * t;
+        g_hand[1].z = g_swingFrom.z + (g_swingTo.z - g_swingFrom.z) * t;
+        if (t >= 1.0) g_swingDur = 0;
+    }
+    for (int h = 0; h < 2; h++) {
+        const HandPose& hp = g_hand[h];
+        float q[4];
+        QuatYawPitch(hp.yaw, hp.pitch, q);  // roll ignored for now
+        in.grip[h].pos[0] = (float)hp.x; in.grip[h].pos[1] = (float)hp.y; in.grip[h].pos[2] = (float)hp.z;
+        memcpy(in.grip[h].quat, q, sizeof q);
+    }
+    in.gripValid = 3;
+    in.time = now;
     MemoryBarrier();
     in.seq++;
 }
@@ -448,6 +475,28 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.2);
+        } else if (cmd == "hand") {
+            HandPose& hp = g_hand[(!args.empty() && (args[0] == "L" || args[0] == "l")) ? 0 : 1];
+            Arg(args, "x", hp.x); Arg(args, "y", hp.y); Arg(args, "z", hp.z);
+            Arg(args, "yaw", hp.yaw); Arg(args, "pitch", hp.pitch); Arg(args, "roll", hp.roll);
+        } else if (cmd == "swing") {
+            double dx = 0.6, dy = 0.3, dz = 0.0, over = 0.18;
+            Arg(args, "dx", dx); Arg(args, "dy", dy); Arg(args, "dz", dz); Arg(args, "over", over);
+            g_swingFrom = g_hand[1];
+            g_swingTo = g_hand[1];
+            g_swingTo.x += dx; g_swingTo.y += dy; g_swingTo.z += dz;
+            g_swingDur = over;
+            g_swingT0 = Now();
+            RunFor(over + 0.1);
+            g_hand[1] = g_swingFrom;  // back to rest
+            RunFor(0.3);
+        } else if (cmd == "trigger") {
+            double hold = 0.15;
+            Arg(args, "for", hold);
+            g_ctl.trigR = 1;
+            RunFor(hold);
+            g_ctl.trigR = 0;
+            RunFor(0.1);
         } else if (cmd == "grip") {
             double hold = 0.2;
             Arg(args, "for", hold);

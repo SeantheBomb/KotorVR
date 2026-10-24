@@ -88,16 +88,15 @@ void Input_Update(HWND wnd) {
         bool using_ = in.buttons || in.trigR > 0.3f || in.trigL > 0.3f || in.gripR > 0.3f || in.gripL > 0.3f ||
                       fabsf(in.lx) > 0.3f || fabsf(in.ly) > 0.3f || fabsf(in.rx) > 0.3f;
         HWND root = wnd ? GetAncestor(wnd, GA_ROOT) : nullptr;
-        static DWORD lastFocusTry;
-        if (using_ && root && GetForegroundWindow() != root && GetTickCount() - lastFocusTry > 1000) {
-            lastFocusTry = GetTickCount();
-            HWND fg = GetForegroundWindow();
-            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
-            if (fgThread && fgThread != me) AttachThreadInput(me, fgThread, TRUE);
-            BOOL ok = SetForegroundWindow(root);
-            BringWindowToTop(root);
-            if (fgThread && fgThread != me) AttachThreadInput(me, fgThread, FALSE);
-            Log("input: game was in the background, took focus back (%s)", ok ? "ok" : "refused");
+        static DWORD lastActivate;
+        if (using_ && root && GetForegroundWindow() != root && GetTickCount() - lastActivate > 1000) {
+            // Don't steal real focus (attaching to another app's input queue can block for many seconds); just
+            // tell the game it is active so its GUI accepts our posted input.
+            lastActivate = GetTickCount();
+            PostMessageA(root, WM_ACTIVATEAPP, TRUE, 0);
+            PostMessageA(root, WM_ACTIVATE, WA_ACTIVE, 0);
+            static int told;
+            if (told++ < 3) Log("input: game is in the background; posted activation so controller input still lands");
         }
         // movement: left stick in head space -> rotate into the game camera's frame -> W/S forward/back, Z/C strafe
         // (KotOR keymap.2da). KotOR moves relative to its camera, which only turns with the right stick, so without
@@ -250,7 +249,13 @@ public:
     // the two reads we augment
     HRESULT STDMETHODCALLTYPE GetDeviceState(DWORD cb, LPVOID data) override {
         HRESULT hr = m_real->GetDeviceState(cb, data);
-        if (FAILED(hr) || !data) return hr;
+        if (!data) return hr;
+        if (FAILED(hr)) {
+            // background: the device can't be acquired; deliver only the controller state instead of failing
+            if (hr != DIERR_NOTACQUIRED && hr != DIERR_INPUTLOST) return hr;
+            memset(data, 0, cb);
+            hr = DI_OK;
+        }
         Lock();
         if (m_kind == DEV_KEYBOARD && cb >= 256) {
             BYTE* k = (BYTE*)data;

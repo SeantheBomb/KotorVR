@@ -1,0 +1,23 @@
+# Weapons test: auto-load Game1, then show the hands' weapons in a few poses and do a melee swing.
+wait_menu 90
+wait 8                     # the menu ignores clicks for a moment after it appears
+click u=0.559 v=0.521      # main menu: Load Game
+wait 3
+click u=0.410 v=0.431      # save slot: Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 5
+shot hands_rest
+hand R x=0.15 y=-0.15 z=-0.40 yaw=-20 pitch=60    # weapon raised in front of you
+shot hands_raised
+hand R x=0.10 y=-0.25 z=-0.45 yaw=-10 pitch=0     # pointing forward (aim)
+shot hands_forward
+hand L x=-0.10 y=-0.30 z=-0.30 yaw=10 pitch=20    # left hand near the right: two-handed weapons span both
+shot hands_together
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16         # fast diagonal cut
+wait 1
+shot after_swing
+expect_world

@@ -330,9 +330,9 @@ static bool InitXR() {
 
 // ---------------------------------------------------------------- controllers
 static XrActionSet g_actSet;
-static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_btnA, a_btnB, a_btnX, a_btnY, a_menu, a_stickClick;
+static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_gripPose, a_btnA, a_btnB, a_btnX, a_btnY, a_menu, a_stickClick;
 static XrPath g_handPath[2];
-static XrSpace g_aimSpace[2];
+static XrSpace g_aimSpace[2], g_gripSpace[2];
 static Swapchain g_beamSc, g_dotSc;
 static uint32_t g_prevButtons;
 
@@ -368,6 +368,7 @@ static bool InitControls() {
               MakeAction(a_trig, "trigger", XR_ACTION_TYPE_FLOAT_INPUT, true) &&
               MakeAction(a_grip, "grip", XR_ACTION_TYPE_FLOAT_INPUT, true) &&
               MakeAction(a_aim, "aim", XR_ACTION_TYPE_POSE_INPUT, true) &&
+              MakeAction(a_gripPose, "grip_pose", XR_ACTION_TYPE_POSE_INPUT, true) &&
               MakeAction(a_btnA, "button_a", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
               MakeAction(a_btnB, "button_b", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
               MakeAction(a_btnX, "button_x", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
@@ -385,6 +386,8 @@ static bool InitControls() {
         {a_grip, MakePath("/user/hand/right/input/squeeze/value")},
         {a_aim, MakePath("/user/hand/left/input/aim/pose")},
         {a_aim, MakePath("/user/hand/right/input/aim/pose")},
+        {a_gripPose, MakePath("/user/hand/left/input/grip/pose")},
+        {a_gripPose, MakePath("/user/hand/right/input/grip/pose")},
         {a_btnA, MakePath("/user/hand/right/input/a/click")},
         {a_btnB, MakePath("/user/hand/right/input/b/click")},
         {a_btnX, MakePath("/user/hand/left/input/x/click")},
@@ -405,6 +408,8 @@ static bool InitControls() {
         as.subactionPath = g_handPath[h];
         as.poseInActionSpace.orientation.w = 1;
         CHECK_XR(xrCreateActionSpace(g_session, &as, &g_aimSpace[h]));
+        as.action = a_gripPose;
+        CHECK_XR(xrCreateActionSpace(g_session, &as, &g_gripSpace[h]));
     }
     XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
     ai.countActionSets = 1;
@@ -551,6 +556,21 @@ static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& 
     in.gripL = synced ? GetFloat(a_grip, 0) : 0;
     in.gripR = synced ? GetFloat(a_grip, 1) : 0;
     in.buttons = buttons;
+    in.gripValid = 0;
+    if (synced) {
+        XrPosef invOrigin = PoseInv(g_origin);
+        for (int h = 0; h < 2; h++) {
+            XrSpaceLocation gl{XR_TYPE_SPACE_LOCATION};
+            if (XR_SUCCEEDED(xrLocateSpace(g_gripSpace[h], g_local, t, &gl)) &&
+                (gl.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) && (gl.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
+                XrPosef rel = PoseMul(invOrigin, gl.pose);
+                memcpy(in.grip[h].pos, &rel.position, 12);
+                memcpy(in.grip[h].quat, &rel.orientation, 16);
+                in.gripValid |= 1u << h;
+            }
+        }
+    }
+    in.time = (double)t * 1e-9;
     if (pr.hitPanel) {
         in.pointerMode = KVR_POINTER_PANEL;
         in.panelU = pr.u;
@@ -944,6 +964,10 @@ static void Teardown() {
     ResetSwapchain(g_dotSc);
     // children before parents: destroying a live session through its instance deadlocks the Meta runtime
     for (auto& sp : g_aimSpace) {
+        if (sp) xrDestroySpace(sp);
+        sp = XR_NULL_HANDLE;
+    }
+    for (auto& sp : g_gripSpace) {
         if (sp) xrDestroySpace(sp);
         sp = XR_NULL_HANDLE;
     }

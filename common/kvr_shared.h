@@ -8,7 +8,7 @@
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 5
+#define KVR_VERSION 6
 
 #pragma pack(push, 8)
 
@@ -67,6 +67,9 @@ struct KvrInput {
     uint32_t pointerMode;         // KVR_POINTER_*
     float panelU, panelV;         // 0..1, top-left origin, valid for KVR_POINTER_PANEL
     KvrPose aim;                  // right aim pose relative to the recenter origin, for KVR_POINTER_WORLD
+    KvrPose grip[2];              // left/right grip poses relative to the recenter origin (-Z through the fist)
+    uint32_t gripValid;           // bit 0 left, bit 1 right
+    double time;                  // host clock (s) when these poses were sampled, for velocities
 };
 
 struct KvrShared {

@@ -14,6 +14,7 @@
 #include "vr.h"
 #include "scan.h"
 #include "enginecam.h"
+#include "weapons.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -351,6 +352,47 @@ static void QuatToRows(const float q[4], float m[9]) {
 
 // ---------------------------------------------------------------- per-frame eye choice
 static bool g_eyeChosen;
+static double g_zn = 0.1, g_zf = 10000.0;  // the world pass's clip planes (weapon proxies must share its depth)
+
+// Draw the in-hand weapons into the finished world image (scene depth still valid), in this eye's projection.
+static void DrawHandItems() {
+    static void(APIENTRY* p_glMatrixMode)(GLenum);
+    static void(APIENTRY* p_glPushMatrix)();
+    static void(APIENTRY* p_glPopMatrix)();
+    static void(APIENTRY* p_glLoadIdentity)();
+    static void(APIENTRY* p_glViewport)(GLint, GLint, GLsizei, GLsizei);
+    static void(APIENTRY* p_glGetIntegerv2)(GLenum, GLint*);
+    if (!p_glMatrixMode) {
+        HMODULE gl = GetModuleHandleA("opengl32.dll");
+        p_glMatrixMode = (decltype(p_glMatrixMode))GetProcAddress(gl, "glMatrixMode");
+        p_glPushMatrix = (decltype(p_glPushMatrix))GetProcAddress(gl, "glPushMatrix");
+        p_glPopMatrix = (decltype(p_glPopMatrix))GetProcAddress(gl, "glPopMatrix");
+        p_glLoadIdentity = (decltype(p_glLoadIdentity))GetProcAddress(gl, "glLoadIdentity");
+        p_glViewport = (decltype(p_glViewport))GetProcAddress(gl, "glViewport");
+        p_glGetIntegerv2 = (decltype(p_glGetIntegerv2))GetProcAddress(gl, "glGetIntegerv");
+    }
+    GLint mode = GL_MODELVIEW, vp[4];
+    p_glGetIntegerv2(GL_MATRIX_MODE, &mode);
+    p_glGetIntegerv2(GL_VIEWPORT, vp);
+    p_glViewport(0, 0, g_texW, g_texH);
+    p_glMatrixMode(GL_PROJECTION);
+    p_glPushMatrix();
+    p_glLoadIdentity();
+    g_gl.Frustum(g_zn * tan(g_curFov.angleLeft), g_zn * tan(g_curFov.angleRight), g_zn * tan(g_curFov.angleDown),
+                 g_zn * tan(g_curFov.angleUp), g_zn, g_zf);
+    // inv(E) = [Q^T | -Q^T t], column-major
+    float invE[16] = {};
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) invE[c * 4 + r] = g_Q[c * 3 + r];
+    for (int r = 0; r < 3; r++)
+        invE[12 + r] = -(g_Q[0 * 3 + r] * g_t[0] + g_Q[1 * 3 + r] * g_t[1] + g_Q[2 * 3 + r] * g_t[2]);
+    invE[15] = 1;
+    Weapons_Draw(invE);
+    p_glMatrixMode(GL_PROJECTION);
+    p_glPopMatrix();
+    p_glMatrixMode(mode);
+    p_glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
 
 bool VR_IsActive() { return g_vrActive; }
 
@@ -388,6 +430,8 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
 
     KvrPose unused;
     if (!VR_ChooseEye(&unused)) return false;
+    g_zn = zn;
+    g_zf = zf;
 
     g_gl.Frustum(zn * tan(g_curFov.angleLeft), zn * tan(g_curFov.angleRight),
                  zn * tan(g_curFov.angleDown), zn * tan(g_curFov.angleUp), zn, zf);
@@ -476,12 +520,14 @@ bool VR_OnEnvParam(GLenum target, GLuint index, GLfloat* v) {
 void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
+    DrawHandItems();
     Capture(g_curEye, &g_curPose, &g_curFov);
     g_eyeCaptured = true;
     ClearForGui();
 }
 
 void VR_OnSwap(HDC dc) {
+    Weapons_Update();
     static double lastStat, lastSwap;
     static unsigned frames, worldFrames;
     double now = NowMs();
