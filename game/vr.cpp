@@ -354,6 +354,7 @@ static void QuatToRows(const float q[4], float m[9]) {
 
 // ---------------------------------------------------------------- per-frame eye choice
 static bool g_eyeChosen;
+static bool g_inWorldPass;  // between the world perspective and the first ortho (post-processing / GUI)
 static double g_zn = 0.1, g_zf = 10000.0;  // the world pass's clip planes (weapon proxies must share its depth)
 
 // Draw the in-hand weapons into the finished world image (scene depth still valid), in this eye's projection.
@@ -435,6 +436,7 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
     if (!VR_ChooseEye(&unused)) return false;
     g_zn = zn;
     g_zf = zf;
+    g_inWorldPass = true;
 
     g_gl.Frustum(zn * tan(g_curFov.angleLeft), zn * tan(g_curFov.angleRight),
                  zn * tan(g_curFov.angleDown), zn * tan(g_curFov.angleUp), zn, zf);
@@ -513,7 +515,9 @@ bool VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
     return true;
 }
 
+static void NoteBoneParam(GLuint index, const GLfloat* v);
 bool VR_OnEnvParam(GLenum target, GLuint index, GLfloat* v) {
+    if (target == GL_VERTEX_PROGRAM_ARB && index >= 18 && index <= 20) NoteBoneParam(index, v);
     if (g_camState != 3 || target != GL_VERTEX_PROGRAM_ARB || index < 89 || index > 92) return false;
     if (index == 89) { g_camState = 0; return false; }
     memcpy(v, g_envRows[92 - index], 4 * sizeof(float));
@@ -521,6 +525,7 @@ bool VR_OnEnvParam(GLenum target, GLuint index, GLfloat* v) {
 }
 
 void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
+    g_inWorldPass = false;  // post-processing / GUI from here on: nothing here is the player's body
     // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
     DrawHandItems();
@@ -647,4 +652,104 @@ void VR_HeadPos(float out[3]) {
     KvrHostState hs;
     if (!ReadHost(hs)) return;
     for (int i = 0; i < 3; i++) out[i] = (hs.eye[0].pos[i] + hs.eye[1].pos[i]) * 0.5f;
+}
+
+static float g_bone0[3];  // first bone origin (model space) written since the last draw
+static int g_boneFresh;
+
+// Own-body culling, per draw: where does this draw's model origin sit relative to the first-person camera?
+// The modelview at draw time is view(eye) * model, so its translation is the model origin in eye space; the eye
+// pose E (in the camera's frame) takes it back to the camera frame, where the body is a column below the camera.
+// Works for nested node hierarchies and skinned meshes alike (their origin is the model root at the feet).
+// Vertex array state (client-side arrays: the ini disables VBOs), recorded by the glVertexPointer hook.
+static const BYTE* g_vtxPtr;
+static GLint g_vtxSize;
+static GLsizei g_vtxStride;
+void VR_OnVertexPointer(GLint size, GLenum type, GLsizei stride, const void* ptr) {
+    g_vtxPtr = type == GL_FLOAT && size >= 3 ? (const BYTE*)ptr : nullptr;
+    g_vtxSize = size;
+    g_vtxStride = stride ? stride : size * (GLsizei)sizeof(float);
+}
+
+static bool InBodyColumn(const float oc[3]) {
+    return oc[0] * oc[0] + oc[2] * oc[2] < 1.0f * 1.0f && oc[1] > -2.2f && oc[1] < 0.8f;
+}
+
+// eye-space point -> camera (recenter origin) frame
+static void EyeToCam(const float pe[3], float oc[3]) {
+    for (int r = 0; r < 3; r++) oc[r] = g_Q[r * 3 + 0] * pe[0] + g_Q[r * 3 + 1] * pe[1] + g_Q[r * 3 + 2] * pe[2] + g_t[r];
+}
+
+// CPU-skinned meshes have world-space vertices under a view-only modelview, so their origin says nothing:
+// test actual vertices of the draw instead.
+bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices) {
+    if (!g_vrActive || !g_inWorldPass || !g_camPosValid || !g_vtxPtr || count <= 0) return false;
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
+    float mv[16];
+    p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    int hits = 0, tested = 0;
+    __try {
+        GLsizei picks[3] = {0, count / 2, count - 1};
+        for (GLsizei k : picks) {
+            unsigned idx = type == GL_UNSIGNED_SHORT ? ((const unsigned short*)indices)[k]
+                         : type == GL_UNSIGNED_INT ? ((const unsigned*)indices)[k] : ((const unsigned char*)indices)[k];
+            const float* v = (const float*)(g_vtxPtr + (size_t)idx * g_vtxStride);
+            float pe[3], oc[3];
+            for (int r = 0; r < 3; r++) pe[r] = mv[r] * v[0] + mv[4 + r] * v[1] + mv[8 + r] * v[2] + mv[12 + r];
+            EyeToCam(pe, oc);
+            tested++;
+            if (InBodyColumn(oc)) hits++;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    return tested && hits * 2 > tested;  // majority of sampled vertices inside the column
+}
+
+bool VR_ShouldSkipDraw() {
+    if (!g_vrActive || !g_inWorldPass || !g_camPosValid) return false;
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
+    GLint mode = 0;
+    float mv[16];
+    p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    const float* oe = mv + 12;  // model origin in eye space
+    float oc[3];                // ... in the camera (recenter origin) frame: Q * oe + t
+    for (int r = 0; r < 3; r++) oc[r] = g_Q[r * 3 + 0] * oe[0] + g_Q[r * 3 + 1] * oe[1] + g_Q[r * 3 + 2] * oe[2] + g_t[r];
+    (void)mode;
+    // camera frame: +Y up, -Z forward; the body hangs below the camera hook point
+    bool skip = oc[0] * oc[0] + oc[2] * oc[2] < 1.0f * 1.0f && oc[1] > -2.2f && oc[1] < 0.8f;  // body model origin sits ~0.85 m off the camera hook
+    // one-frame diagnostic dump of nearby draws
+    static int dumpFrame = -1;
+    if (false && dumpFrame < 0 && g_worldFrames == 2300) dumpFrame = 2300;  // one-frame draw dump (diagnostics)
+    if (dumpFrame == (int)g_worldFrames && oc[0] * oc[0] + oc[2] * oc[2] < 9.0f) {
+        GLint prog = 0;
+        static void(APIENTRY* p_gi)(GLenum, GLint*);
+        if (!p_gi) p_gi = (decltype(p_gi))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetIntegerv");
+        p_gi(0x8641 /* GL_VERTEX_PROGRAM_BINDING? use ARB current */, &prog);
+        g_log("bodydump: origin cam (%.2f, %.2f, %.2f) skip %d bone0 (%.2f %.2f %.2f) boneFresh %d", oc[0], oc[1], oc[2], skip,
+              g_bone0[0], g_bone0[1], g_bone0[2], g_boneFresh);
+    }
+    g_boneFresh = 0;
+    return skip;
+}
+
+static void NoteBoneParam(GLuint index, const GLfloat* v) {
+    g_bone0[index - 18] = v[3];
+    if (index == 20) g_boneFresh = 1;
+}
+
+bool VR_WantTrace() {
+    return false;  // set to the block below to capture one world frame mid-session (diagnostics)
+    static bool done;
+    if (done || !g_vrActive || g_worldFrames < 2300) return false;
+    done = true;
+    return true;
+}
+
+void VR_DrawOrigin(float out[3]) {
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
+    float mv[16];
+    p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    for (int r = 0; r < 3; r++) out[r] = g_Q[r * 3 + 0] * mv[12] + g_Q[r * 3 + 1] * mv[13] + g_Q[r * 3 + 2] * mv[14] + g_t[r];
 }

@@ -134,9 +134,45 @@ static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [
 static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; } r_glPopMatrix(); }
 static void APIENTRY h_glClear(GLbitfield b) { FIRST("glClear"); T("glClear 0x%x", b); r_glClear(b); }
 static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(b); }
-static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0) return; if (g_tracing) g_traceCount++; T("  glDrawElements mode=%u count=%d", m, c); r_glDrawElements(m, c, t, i); }
-static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_hideDepth >= 0) return; if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
-static void APIENTRY h_glBegin(GLenum m) { FIRST("glBegin"); if (g_tracing) g_traceCount++; T("  glBegin %u", m); r_glBegin(m); }
+static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0 || VR_ShouldSkipDraw() || VR_ShouldSkipElements(c, t, i)) return; if (g_tracing) g_traceCount++; if (g_tracing) { float oc[3]; VR_DrawOrigin(oc); T("  glDrawElements mode=%u count=%d  origin_cam (%.2f %.2f %.2f)", m, c, oc[0], oc[1], oc[2]); } r_glDrawElements(m, c, t, i); }
+static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_hideDepth >= 0 || VR_ShouldSkipDraw()) return; if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
+// Immediate-mode draws can't be skipped (the glVertex calls that follow would error), so an own-body glBegin
+// block draws with colour and depth writes masked off until its glEnd.
+static void(APIENTRY* r_glEnd)();
+static void(APIENTRY* p_glColorMaskReal)(GLboolean, GLboolean, GLboolean, GLboolean);
+static void(APIENTRY* p_glDepthMaskReal)(GLboolean);
+static void(APIENTRY* p_glGetBooleanvReal)(GLenum, GLboolean*);
+static bool g_beginMasked;
+static GLboolean g_savedColorMask[4], g_savedDepthMask;
+static void APIENTRY h_glBegin(GLenum m) {
+    FIRST("glBegin");
+    if (g_tracing) g_traceCount++;
+    if (g_hideDepth >= 0 || VR_ShouldSkipDraw()) {
+        if (!p_glColorMaskReal) {
+            HMODULE gl = GetModuleHandleA("opengl32.dll");
+            p_glColorMaskReal = (decltype(p_glColorMaskReal))GetProcAddress(gl, "glColorMask");
+            p_glDepthMaskReal = (decltype(p_glDepthMaskReal))GetProcAddress(gl, "glDepthMask");
+            p_glGetBooleanvReal = (decltype(p_glGetBooleanvReal))GetProcAddress(gl, "glGetBooleanv");
+        }
+        p_glGetBooleanvReal(GL_COLOR_WRITEMASK, g_savedColorMask);
+        p_glGetBooleanvReal(GL_DEPTH_WRITEMASK, &g_savedDepthMask);
+        p_glColorMaskReal(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        p_glDepthMaskReal(GL_FALSE);
+        g_beginMasked = true;
+        T("  glBegin %u  (own body, masked)", m);
+    } else {
+        T("  glBegin %u", m);
+    }
+    r_glBegin(m);
+}
+static void APIENTRY h_glEnd() {
+    r_glEnd();
+    if (g_beginMasked) {
+        g_beginMasked = false;
+        p_glColorMaskReal(g_savedColorMask[0], g_savedColorMask[1], g_savedColorMask[2], g_savedColorMask[3]);
+        p_glDepthMaskReal(g_savedDepthMask);
+    }
+}
 static void APIENTRY h_glCallLists(GLsizei n, GLenum t, const void* l) { FIRST("glCallLists"); T("  glCallLists %d", n); r_glCallLists(n, t, l); }
 
 static void APIENTRY h_glBindProgramARB(GLenum t, GLuint p) { T("glBindProgramARB 0x%x %u", t, p); r_glBindProgramARB(t, p); }
@@ -272,6 +308,12 @@ static BOOL WINAPI h_SetCursorPos(int x, int y) {
     return r_SetCursorPos(x, y);
 }
 
+static void(APIENTRY* r_glVertexPointer)(GLint, GLenum, GLsizei, const void*);
+static void APIENTRY h_glVertexPointer(GLint size, GLenum type, GLsizei stride, const void* ptr) {
+    VR_OnVertexPointer(size, type, stride, ptr);
+    r_glVertexPointer(size, type, stride, ptr);
+}
+
 struct ProcHook { const char* name; void** real; void* hook; };
 static ProcHook g_procHooks[] = {
     {"wglCreatePbufferARB", (void**)&r_wglCreatePbufferARB, (void*)h_wglCreatePbufferARB},
@@ -309,7 +351,7 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
     g_frame++;
     static bool f10Down;
     bool f10 = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
-    if ((g_frame == 600 || g_frame == 3600 || (f10 && !f10Down)) && !g_tracing) {
+    if ((g_frame == 600 || g_frame == 3600 || (f10 && !f10Down) || VR_WantTrace()) && !g_tracing) {
         char path[MAX_PATH];
         sprintf_s(path, "%s\\kvr\\trace_f%ld.txt", g_dir, g_frame);
         g_trace = _fsopen(path, "w", _SH_DENYNO);
@@ -348,6 +390,8 @@ static IatHook g_iatHooks[] = {
     {"OPENGL32.dll", "glDrawElements", (void**)&r_glDrawElements, (void*)h_glDrawElements},
     {"OPENGL32.dll", "glDrawArrays", (void**)&r_glDrawArrays, (void*)h_glDrawArrays},
     {"OPENGL32.dll", "glBegin", (void**)&r_glBegin, (void*)h_glBegin},
+    {"OPENGL32.dll", "glEnd", (void**)&r_glEnd, (void*)h_glEnd},
+    {"OPENGL32.dll", "glVertexPointer", (void**)&r_glVertexPointer, (void*)h_glVertexPointer},
     {"OPENGL32.dll", "glCallLists", (void**)&r_glCallLists, (void*)h_glCallLists},
     {"OPENGL32.dll", "wglGetProcAddress", (void**)&r_wglGetProcAddress, (void*)h_wglGetProcAddress},
     {"OPENGL32.dll", "glDeleteTextures", (void**)&r_glDeleteTextures, (void*)h_glDeleteTextures},

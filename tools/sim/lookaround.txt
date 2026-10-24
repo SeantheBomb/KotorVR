@@ -1,0 +1,20 @@
+# After walking forward, look right and behind: identifies what follows the player (party members).
+wait_menu 90
+wait 8
+click u=0.559 v=0.521
+wait 3
+click u=0.410 v=0.431
+wait 1.5
+click u=0.499 v=0.671
+pointer none
+wait_world 120
+wait 4
+stick ly=1 for=3
+shot after_walk
+head yaw=-60 over=0.4
+shot look_right
+head yaw=-150 over=0.4
+shot look_behind_right
+head yaw=150 over=0.6
+shot look_behind_left
+expect_world
