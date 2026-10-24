@@ -29,6 +29,9 @@ static long g_frame;
 static bool g_tracing;
 static int g_traceCount;
 static GLenum g_mode = GL_MODELVIEW;
+// own-body hiding: modelview push depth, and the depth at which a hidden node was entered (-1 = none)
+static int g_mvDepth;
+static int g_hideDepth = -1;
 
 void Log(const char* fmt, ...) {
     if (!g_log) return;
@@ -112,6 +115,7 @@ static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
     T("glMultMatrixf [%s] %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f",
       ModeName(g_mode), m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     if (VR_OnMultMatrixf(g_mode, m)) { T("  -> VR eye view"); return; }
+    if (g_mode == GL_MODELVIEW && g_hideDepth < 0 && VR_IsOwnBody(m + 12)) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
     r_glMultMatrixf(m);
 }
 static void APIENTRY h_glMatrixMode(GLenum m) { FIRST("glMatrixMode"); g_mode = m; T("glMatrixMode %s", ModeName(m)); r_glMatrixMode(m); }
@@ -120,15 +124,15 @@ static void APIENTRY h_glOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t, G
     T("glOrtho %.1f %.1f %.1f %.1f %.2f %.2f", l, r, b, t, n, f); VR_OnOrtho(l, r, b, t); r_glOrtho(l, r, b, t, n, f);
 }
 static void APIENTRY h_glViewport(GLint x, GLint y, GLsizei w, GLsizei h) { FIRST("glViewport"); T("glViewport %d %d %d %d", x, y, w, h); r_glViewport(x, y, w, h); }
-static void APIENTRY h_glTranslatef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glTranslatef"); T("glTranslatef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); VR_OnTranslatef(g_mode, x, y, z); r_glTranslatef(x, y, z); }
+static void APIENTRY h_glTranslatef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glTranslatef"); T("glTranslatef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); if (VR_OnTranslatef(g_mode, x, y, z)) { T("  -> VR eye view"); return; } r_glTranslatef(x, y, z); }
 static void APIENTRY h_glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { FIRST("glRotatef"); T("glRotatef [%s] %.3f (%.3f %.3f %.3f)", ModeName(g_mode), a, x, y, z); r_glRotatef(a, x, y, z); }
 static void APIENTRY h_glScalef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glScalef"); T("glScalef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); r_glScalef(x, y, z); }
-static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); r_glPushMatrix(); }
-static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); r_glPopMatrix(); }
+static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) g_mvDepth++; r_glPushMatrix(); }
+static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; } r_glPopMatrix(); }
 static void APIENTRY h_glClear(GLbitfield b) { FIRST("glClear"); T("glClear 0x%x", b); r_glClear(b); }
 static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(b); }
-static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_tracing) g_traceCount++; T("  glDrawElements mode=%u count=%d", m, c); r_glDrawElements(m, c, t, i); }
-static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
+static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0) return; if (g_tracing) g_traceCount++; T("  glDrawElements mode=%u count=%d", m, c); r_glDrawElements(m, c, t, i); }
+static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_hideDepth >= 0) return; if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
 static void APIENTRY h_glBegin(GLenum m) { FIRST("glBegin"); if (g_tracing) g_traceCount++; T("  glBegin %u", m); r_glBegin(m); }
 static void APIENTRY h_glCallLists(GLsizei n, GLenum t, const void* l) { FIRST("glCallLists"); T("  glCallLists %d", n); r_glCallLists(n, t, l); }
 
@@ -310,6 +314,8 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
     }
     f10Down = f10;
     VR_OnSwap(dc);
+    g_mvDepth = 0;
+    g_hideDepth = -1;
     Input_Update(WindowFromDC(dc));
     static DWORD lastChurn;
     if (GetTickCount() - lastChurn > 1000) {
@@ -458,6 +464,7 @@ static void Install() {
     InstallHooks(exe);
     VrGl gl{};
     gl.MultMatrixf = r_glMultMatrixf;
+    gl.Translatef = r_glTranslatef;
     gl.Frustum = (void(APIENTRY*)(GLdouble, GLdouble, GLdouble, GLdouble, GLdouble, GLdouble))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glFrustum");
     gl.GetProcAddress = r_wglGetProcAddress;
     VR_Init(gl, Log);

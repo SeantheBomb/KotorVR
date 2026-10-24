@@ -120,25 +120,30 @@ void Input_Update(HWND wnd) {
         // The game takes the mouse from window messages (its DirectInput mouse is never read), so place the real
         // cursor and post the matching messages. Buttons go out as messages too, on press/release edges.
         if (g_targetValid) {
-            POINT client = {(LONG)lroundf(tx), (LONG)lroundf(ty)};
-            static POINT lastClient = {-1, -1};
+            // Clicks reach the GUI only as window messages (the WndProc converts WM_*BUTTON* into GUI events), so
+            // post them to the game window actually under the cursor, in that window's client coordinates.
+            POINT scr = g_targetScreen;
+            HWND hit = WindowFromPoint(scr);
+            DWORD pid = 0;
+            if (hit) GetWindowThreadProcessId(hit, &pid);
+            HWND dst = (hit && pid == GetCurrentProcessId()) ? hit : wnd;
+            POINT client = scr;
+            ScreenToClient(dst, &client);
+            static POINT lastScr = {-1, -1};
             WPARAM held = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
-            if (client.x != lastClient.x || client.y != lastClient.y) {
-                SetCursorPos(g_targetScreen.x, g_targetScreen.y);
-                PostMessageA(wnd, WM_MOUSEMOVE, held, MAKELPARAM(client.x, client.y));
-                lastClient = client;
+            if (scr.x != lastScr.x || scr.y != lastScr.y) {
+                SetCursorPos(scr.x, scr.y);
+                PostMessageA(dst, WM_MOUSEMOVE, held, MAKELPARAM(client.x, client.y));
+                lastScr = scr;
             }
-            // in-world the game polls the DirectInput mouse for buttons; menus use window messages
-            static LONG lastStateReads;
-            bool diActive = g_nMouseState != lastStateReads;
-            lastStateReads = g_nMouseState;
-            useDiButtons = diActive;
-            for (int b = 0; b < 2 && !diActive; b++) {
+            for (int b = 0; b < 2; b++) {
                 if (mouse[b] != g_msgButtons[b]) {
                     g_msgButtons[b] = mouse[b];
                     WPARAM nowHeld = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
                     UINT msg = b == 0 ? (mouse[b] ? WM_LBUTTONDOWN : WM_LBUTTONUP) : (mouse[b] ? WM_RBUTTONDOWN : WM_RBUTTONUP);
-                    PostMessageA(wnd, msg, nowHeld, MAKELPARAM(client.x, client.y));
+                    BOOL ok = PostMessageA(dst, msg, nowHeld, MAKELPARAM(client.x, client.y));
+                    Log("input: %s %s -> hwnd %p (%s, render wnd %p) client (%ld,%ld) posted=%d", b ? "right" : "left",
+                        mouse[b] ? "down" : "up", dst, dst == hit ? "under cursor" : "fallback", wnd, client.x, client.y, ok);
                 }
             }
         }
@@ -181,9 +186,8 @@ void Input_Update(HWND wnd) {
     }
     Lock();
     memcpy(g_wantKeys, keys, sizeof keys);
-    g_wantMouse[0] = useDiButtons && mouse[0];
-    g_wantMouse[1] = useDiButtons && mouse[1];
-    if (useDiButtons) { g_msgButtons[0] = mouse[0]; g_msgButtons[1] = mouse[1]; }  // keep edges in sync across paths
+    g_wantMouse[0] = false;  // buttons only as window messages (see above)
+    g_wantMouse[1] = false;
     g_pendDx = dx;  // replace, not accumulate: recomputed from fresh feedback every frame
     g_pendDy = dy;
     Unlock();

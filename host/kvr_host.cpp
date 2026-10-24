@@ -803,6 +803,12 @@ static void Frame() {
         // over the stereo view as a HUD 1.6 m ahead covering ~64 deg; Y (or F9) hides it.
         bool hud = world && (g_shared[2].meta.flags & KVR_SLOT_GUI_ONLY);
         bool panelVisible = !world || (hud && !g_shm->showPanel);
+        static DWORD lastHudLog;
+        if (GetTickCount() - lastHudLog > 3000) {
+            lastHudLog = GetTickCount();
+            printf("hud: world=%d hud=%d panelVisible=%d panelFlags=0x%x panelHave=%d hidden(showPanel)=%u cinematic=%u\n", world, hud,
+                   panelVisible, g_shared[2].meta.flags, g_shared[2].have, g_shm->showPanel, g_shm->cinematic);
+        }
         XrPosef panelLocal = world ? XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}} : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
         XrPosef panelPose = PoseMul(g_origin, panelLocal);
         float panelW = world ? 2.0f : 2.4f, panelH = panelW * 0.75f;

@@ -378,13 +378,46 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
     return true;
 }
 
+// The camera's glMultMatrixf(R) is held back and issued together with its glTranslatef(-p), so the pair can be
+// swapped for the last gameplay camera during dialogue (see below).
 bool VR_OnMultMatrixf(GLenum mode, const GLfloat* m) {
     if (g_camState != 1 || mode != GL_MODELVIEW) return false;
     memcpy(g_R, m, sizeof g_R);
-    // inv(E) = [Q^T | -Q^T t]; M' = inv(E) * R. Column-major: M[c*4 + r].
+    g_camState = 2;
+    return true;
+}
+
+// Dialogue / cutscene freeze: gameplay cameras use camerastyle's viewangle (120 via the Override); anything else
+// is a scripted camera. In first person we keep the view at the last gameplay (head) camera while the scripted
+// camera stays nearby, so conversations happen around you instead of cutting between angles.
+static bool g_havePlayCam;
+static float g_camPos[3];   // camera position used for this frame's view (head hook in first person)
+static bool g_camPosValid;
+static float g_playR[16], g_playP[3];
+static const double kGameplayFov = 170.0;  // camerastyle.2da viewangle in Override (culling cone only)
+static const float kFreezeRadius = 12.0f;  // meters; scripted cameras further away are a cut elsewhere
+
+bool VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
+    if (g_camState != 2 || mode != GL_MODELVIEW) return false;
+    float p[3] = {-x, -y, -z};
+    bool gameplay = fabs(g_gameFovy - kGameplayFov) < 0.5;
+    if (gameplay) {
+        memcpy(g_playR, g_R, sizeof g_playR);
+        memcpy(g_playP, p, sizeof g_playP);
+        g_havePlayCam = true;
+    } else if (g_havePlayCam) {
+        float dx = p[0] - g_playP[0], dy = p[1] - g_playP[1], dz = p[2] - g_playP[2];
+        if (dx * dx + dy * dy + dz * dz < kFreezeRadius * kFreezeRadius) {
+            memcpy(g_R, g_playR, sizeof g_R);
+            memcpy(p, g_playP, sizeof p);
+        }
+    }
+    if (g_shm) g_shm->cinematic = gameplay ? 0 : 1;
+
+    // view = inv(E) * R * T(-p); inv(E) = [Q^T | -Q^T t]. Column-major: M[c*4 + r].
     float invE[16] = {};
     for (int r = 0; r < 3; r++)
-        for (int c = 0; c < 3; c++) invE[c * 4 + r] = g_Q[c * 3 + r];  // (Q^T)[r][c] = Q[c][r]
+        for (int c = 0; c < 3; c++) invE[c * 4 + r] = g_Q[c * 3 + r];
     for (int r = 0; r < 3; r++)
         invE[12 + r] = -(g_Q[0 * 3 + r] * g_t[0] + g_Q[1 * 3 + r] * g_t[1] + g_Q[2 * 3 + r] * g_t[2]);
     invE[15] = 1;
@@ -392,24 +425,22 @@ bool VR_OnMultMatrixf(GLenum mode, const GLfloat* m) {
     for (int c = 0; c < 4; c++)
         for (int r = 0; r < 4; r++) {
             float v = 0;
-            for (int k = 0; k < 4; k++) v += invE[k * 4 + r] * m[c * 4 + k];
+            for (int k = 0; k < 4; k++) v += invE[k * 4 + r] * g_R[c * 4 + k];
             out[c * 4 + r] = v;
         }
     g_gl.MultMatrixf(out);
-    g_camState = 2;
-    return true;
-}
+    g_gl.Translatef(-p[0], -p[1], -p[2]);
 
-void VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
-    if (g_camState != 2 || mode != GL_MODELVIEW) return;
-    // camera world transform C = [R^T | p], p = -(x,y,z). C' = C * E.
-    float p[3] = {-x, -y, -z};
+    // camera world transform C = [R^T | p]; vertex programs get C' = C * E
     for (int r = 0; r < 3; r++) {
         float Rt[3] = {g_R[r * 4 + 0], g_R[r * 4 + 1], g_R[r * 4 + 2]};  // row r of R^T = column r of R
         for (int c = 0; c < 3; c++) g_envRows[r][c] = Rt[0] * g_Q[0 * 3 + c] + Rt[1] * g_Q[1 * 3 + c] + Rt[2] * g_Q[2 * 3 + c];
         g_envRows[r][3] = p[r] + Rt[0] * g_t[0] + Rt[1] * g_t[1] + Rt[2] * g_t[2];
     }
+    memcpy(g_camPos, p, sizeof g_camPos);
+    g_camPosValid = true;
     g_camState = 3;
+    return true;
 }
 
 bool VR_OnEnvParam(GLenum target, GLuint index, GLfloat* v) {
@@ -473,6 +504,7 @@ void VR_OnSwap(HDC dc) {
         g_vrActive = g_exportReady && g_shm->host.running;
     }
     g_worldThisFrame = false;
+    g_camPosValid = false;
     g_eyeCaptured = false;
     g_guiOnlyThisFrame = false;
     g_camState = 0;
@@ -505,4 +537,11 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     *x = (float)((nx * 0.5 + 0.5) * g_texW);
     *y = (float)((0.5 - ny * 0.5) * g_texH);
     return true;
+}
+
+bool VR_IsOwnBody(const float t[3]) {
+    if (!g_camPosValid || !g_vrActive) return false;
+    float dx = t[0] - g_camPos[0], dy = t[1] - g_camPos[1], dz = t[2] - g_camPos[2];
+    // KotOR world is Z-up; the camera sits at the character's camera hook, the body is a column below it
+    return dx * dx + dy * dy < 0.45f * 0.45f && dz > -2.2f && dz < 0.6f;
 }
