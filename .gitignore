@@ -6,3 +6,4 @@ build/
 # game code dumps and traces stay local
 dumps/
 traces/
+third_party/

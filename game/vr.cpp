@@ -1,0 +1,434 @@
+// In-game VR layer (x86, inside swkotor.exe).
+//
+// Alternate-eye rendering: every frame that draws the 3D world renders one eye. The camera sequence
+// the engine emits is fixed (see docs/FINDINGS.md):
+//   PROJECTION: glLoadIdentity; gluPerspective(fovy, 4:3, n, f)       -> replaced by the eye frustum
+//   MODELVIEW:  glLoadIdentity; glMultMatrixf(R); glTranslatef(-p)     -> R replaced by inv(E) * R
+//   glProgramEnvParameter4fARB(VERTEX, 92..89) = rows of [R^T | p]      -> replaced by rows of [R^T|p] * E
+// E is the eye pose relative to the recentered head origin, in the game camera's space (both GL/OpenXR:
+// +X right, +Y up, -Z forward, meters). Game camera stays the engine's own (orbit) camera for now.
+//
+// Frame export: async glReadPixels into PBOs -> UpdateSubresource into a keyed-mutex shared D3D11 texture
+// -> kvr_host. (NV_DX_interop crashed the driver alongside the game's pbuffer contexts.)
+
+#include "vr.h"
+
+#include <d3d11_1.h>
+#include <dxgi1_2.h>
+#include <cmath>
+#include <cstring>
+#include <cwchar>
+#include <cstdio>
+
+#include "../common/kvr_shared.h"
+
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+
+#define GL_VERTEX_PROGRAM_ARB 0x8620
+#define GL_PIXEL_PACK_BUFFER_ARB 0x88EB
+#define GL_PIXEL_PACK_BUFFER_BINDING_ARB 0x88ED
+#define GL_STREAM_READ_ARB 0x88E1
+#define GL_READ_ONLY_ARB 0x88B8
+
+// Shared-texture keyed mutex protocol: game acquires KEY_GAME, writes, releases KEY_HOST;
+// host acquires KEY_HOST, copies out, releases KEY_GAME. Neither side touches the texture without the key.
+enum { KEY_GAME = 0, KEY_HOST = 1 };
+
+static VrGl g_gl;
+static void (*g_log)(const char*, ...);
+
+// GL entry points we call directly
+static void(APIENTRY* p_glGetIntegerv)(GLenum, GLint*);
+static void(APIENTRY* p_glReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
+static GLenum(APIENTRY* p_glGetError)();
+static HGLRC(WINAPI* p_wglGetCurrentContext)();
+static void(APIENTRY* p_glGenBuffersARB)(GLsizei, GLuint*);
+static void(APIENTRY* p_glDeleteBuffersARB)(GLsizei, const GLuint*);
+static void(APIENTRY* p_glBindBufferARB)(GLenum, GLuint);
+static void(APIENTRY* p_glBufferDataARB)(GLenum, ptrdiff_t, const void*, GLenum);
+static void*(APIENTRY* p_glMapBufferARB)(GLenum, GLenum);
+static GLboolean(APIENTRY* p_glUnmapBufferARB)(GLenum);
+
+// shared memory
+static KvrShared* g_shm;
+static DWORD g_lastShmTry;
+
+// export state: per slot, two PBOs ping-ponged so a readback is mapped one capture after it was issued
+enum { SLOT_EYE0, SLOT_EYE1, SLOT_PANEL, SLOT_COUNT };
+struct Slot {
+    ID3D11Texture2D* shared = nullptr;  // keyed-mutex NT-handle texture opened by the host
+    IDXGIKeyedMutex* mutex = nullptr;
+    HANDLE sharedHandle = nullptr;
+    GLuint pbo[2] = {0, 0};
+    int next = 0;  // PBO the next readback goes into
+    bool pending[2] = {false, false};
+    KvrPose pose[2];  // metadata captured with each PBO
+    KvrFov fov[2];
+};
+static ID3D11Device* g_dev;
+static ID3D11DeviceContext* g_ctx;
+static Slot g_slots[SLOT_COUNT];
+static int g_texW, g_texH;
+static uint32_t g_texGen;
+static bool g_exportReady, g_exportFailed;
+static HGLRC g_exportCtx;
+static bool g_inCapture;
+static int g_diagLeft = 2;
+
+// stall watchdog: log any export step slower than 20 ms
+static LARGE_INTEGER g_qpf;
+static double NowMs() {
+    LARGE_INTEGER t;
+    if (!g_qpf.QuadPart) QueryPerformanceFrequency(&g_qpf);
+    QueryPerformanceCounter(&t);
+    return t.QuadPart * 1000.0 / g_qpf.QuadPart;
+}
+#define TIMED(label, stmt)                                                               do {                                                                                     double t0_ = NowMs();                                                                stmt;                                                                                double dt_ = NowMs() - t0_;                                                          if (dt_ > 20.0) g_log("STALL %s slot %d: %.1f ms", label, slotIndex, dt_);       } while (0)
+
+// per-frame camera state
+static bool g_vrActive;        // host is running and export is ready
+static bool g_worldThisFrame;  // a world perspective was replaced this frame
+static bool g_eyeCaptured;
+static int g_camState;         // 0 idle, 1 expect R, 2 expect translate, 3 expect env params
+static unsigned g_worldFrames; // parity picks the eye
+static int g_curEye;
+static KvrPose g_curPose;
+static KvrFov g_curFov;
+static float g_R[16];          // game camera rotation as passed to glMultMatrixf (column-major)
+static float g_Q[9];           // eye rotation (row-major 3x3)
+static float g_t[3];           // eye translation
+static float g_envRows[3][4];  // replacement for env params 92, 91, 90
+
+// ---------------------------------------------------------------- shared memory
+static bool EnsureShm() {
+    if (g_shm) return true;
+    DWORD now = GetTickCount();
+    if (now - g_lastShmTry < 1000) return false;
+    g_lastShmTry = now;
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(KvrShared), KVR_SHM_NAME);
+    if (!h) return false;
+    g_shm = (KvrShared*)MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KvrShared));
+    if (g_shm && g_shm->magic != KVR_MAGIC) {
+        ZeroMemory(g_shm, sizeof(KvrShared));
+        g_shm->magic = KVR_MAGIC;
+        g_shm->version = KVR_VERSION;
+    }
+    g_log("shared memory %s", g_shm ? "mapped" : "failed");
+    return g_shm != nullptr;
+}
+
+static bool ReadHost(KvrHostState& out) {
+    for (int tries = 0; tries < 100; tries++) {
+        uint32_t s1 = g_shm->host.seq;
+        if (s1 & 1) continue;
+        MemoryBarrier();
+        memcpy(&out, (const void*)&g_shm->host, sizeof out);
+        MemoryBarrier();
+        if (g_shm->host.seq == s1) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------- export (GL PBO readback -> D3D11 -> host)
+static bool InitDevice() {
+    HMODULE gl = GetModuleHandleA("opengl32.dll");
+    p_glGetIntegerv = (decltype(p_glGetIntegerv))GetProcAddress(gl, "glGetIntegerv");
+    p_glReadPixels = (decltype(p_glReadPixels))GetProcAddress(gl, "glReadPixels");
+    p_glGetError = (decltype(p_glGetError))GetProcAddress(gl, "glGetError");
+    p_wglGetCurrentContext = (decltype(p_wglGetCurrentContext))GetProcAddress(gl, "wglGetCurrentContext");
+    p_glGenBuffersARB = (decltype(p_glGenBuffersARB))g_gl.GetProcAddress("glGenBuffersARB");
+    p_glDeleteBuffersARB = (decltype(p_glDeleteBuffersARB))g_gl.GetProcAddress("glDeleteBuffersARB");
+    p_glBindBufferARB = (decltype(p_glBindBufferARB))g_gl.GetProcAddress("glBindBufferARB");
+    p_glBufferDataARB = (decltype(p_glBufferDataARB))g_gl.GetProcAddress("glBufferDataARB");
+    p_glMapBufferARB = (decltype(p_glMapBufferARB))g_gl.GetProcAddress("glMapBufferARB");
+    p_glUnmapBufferARB = (decltype(p_glUnmapBufferARB))g_gl.GetProcAddress("glUnmapBufferARB");
+    if (!p_glGenBuffersARB || !p_glBindBufferARB || !p_glBufferDataARB || !p_glMapBufferARB || !p_glUnmapBufferARB) {
+        g_log("export: ARB buffer objects not available");
+        return false;
+    }
+    g_exportCtx = p_wglGetCurrentContext();
+
+    // D3D11 on the NVIDIA adapter (same GPU as the host)
+    IDXGIFactory1* fac = nullptr;
+    CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&fac);
+    IDXGIAdapter1* chosen = nullptr;
+    IDXGIAdapter1* a = nullptr;
+    for (UINT i = 0; fac && fac->EnumAdapters1(i, &a) == S_OK; i++) {
+        DXGI_ADAPTER_DESC1 d;
+        a->GetDesc1(&d);
+        if (d.VendorId == 0x10DE && !chosen) { chosen = a; continue; }
+        a->Release();
+    }
+    if (fac) fac->Release();
+    D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+    HRESULT hr = D3D11CreateDevice(chosen, chosen ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &fl, 1,
+                                   D3D11_SDK_VERSION, &g_dev, nullptr, &g_ctx);
+    if (chosen) chosen->Release();
+    if (FAILED(hr)) { g_log("export: D3D11CreateDevice failed 0x%08X", hr); return false; }
+    g_log("export device ready (PBO readback), ctx %p", g_exportCtx);
+    return true;
+}
+
+static void DestroySlots() {
+    bool glOk = p_wglGetCurrentContext && p_wglGetCurrentContext() == g_exportCtx;
+    for (auto& s : g_slots) {
+        if (s.pbo[0] && glOk) p_glDeleteBuffersARB(2, s.pbo);
+        if (s.mutex) s.mutex->Release();
+        if (s.shared) s.shared->Release();
+        if (s.sharedHandle) CloseHandle(s.sharedHandle);
+        s = Slot{};
+    }
+}
+
+void VR_BeforeShareLists() {}  // PBOs are plain buffer objects; context sharing is harmless now
+
+// (Re)create the export resources at the window's client size. Names carry a generation so the
+// host can reopen after a resize while it still holds the previous ones.
+static bool CreateSlots(int w, int h) {
+    DestroySlots();
+    g_texW = w;
+    g_texH = h;
+    g_texGen++;
+    const wchar_t* bases[SLOT_COUNT] = {KVR_TEX_NAME_EYE0, KVR_TEX_NAME_EYE1, KVR_TEX_NAME_PANEL};
+    for (int i = 0; i < SLOT_COUNT; i++) {
+        Slot& s = g_slots[i];
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = w;
+        d.Height = h;
+        d.MipLevels = 1;
+        d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        d.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+        if (FAILED(g_dev->CreateTexture2D(&d, nullptr, &s.shared))) { g_log("export: texture creation failed"); return false; }
+        s.shared->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)&s.mutex);
+        IDXGIResource1* res = nullptr;
+        s.shared->QueryInterface(__uuidof(IDXGIResource1), (void**)&res);
+        wchar_t name[96];
+        swprintf_s(name, L"%s_%u", bases[i], g_texGen);
+        HRESULT hr = res ? res->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, name, &s.sharedHandle) : E_FAIL;
+        if (res) res->Release();
+        if (FAILED(hr)) { g_log("export: CreateSharedHandle failed 0x%08X", hr); return false; }
+
+        GLint prev = 0;
+        p_glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING_ARB, &prev);
+        p_glGenBuffersARB(2, s.pbo);
+        for (GLuint b : s.pbo) {
+            p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, b);
+            p_glBufferDataARB(GL_PIXEL_PACK_BUFFER_ARB, (ptrdiff_t)w * h * 4, nullptr, GL_STREAM_READ_ARB);
+        }
+        p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, prev);
+    }
+    for (auto& e : g_shm->eyes) e.frameId = 0;
+    g_shm->panel.frameId = 0;
+    g_shm->texWidth = w;
+    g_shm->texHeight = h;
+    g_shm->texGeneration = g_texGen;
+    g_log("export resources %dx%d gen %u", w, h, g_texGen);
+    return true;
+}
+
+// Deliver a finished readback to the host if it has consumed the previous one.
+static void Deliver(int slotIndex, int which) {
+    Slot& s = g_slots[slotIndex];
+    if (!s.pending[which]) return;
+    s.pending[which] = false;
+    HRESULT acq;
+    TIMED("acquire", acq = s.mutex->AcquireSync(KEY_GAME, 0));
+    if (acq != S_OK) return;  // host still holds the last frame; drop this one
+    GLint prev = 0;
+    p_glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING_ARB, &prev);
+    p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, s.pbo[which]);
+    const void* px;
+    TIMED("map", px = p_glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB));
+    bool ok = px != nullptr;
+    if (ok) {
+        TIMED("upload", g_ctx->UpdateSubresource(s.shared, 0, nullptr, px, g_texW * 4, 0));
+        if (g_diagLeft > 0 && slotIndex == SLOT_PANEL) {
+            g_diagLeft--;
+            const unsigned char* c = (const unsigned char*)px + ((g_texH / 2) * g_texW + g_texW / 2) * 4;
+            g_log("diag panel center = %u %u %u %u", c[0], c[1], c[2], c[3]);
+        }
+        p_glUnmapBufferARB(GL_PIXEL_PACK_BUFFER_ARB);
+    }
+    p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, prev);
+    if (ok) {
+        KvrEyeSlot* out = slotIndex == SLOT_PANEL ? &g_shm->panel : &g_shm->eyes[slotIndex];
+        out->pose = s.pose[which];
+        out->fov = s.fov[which];
+        out->width = g_texW;
+        out->height = g_texH;
+        out->frameId++;
+    }
+    TIMED("release", s.mutex->ReleaseSync(ok ? KEY_HOST : KEY_GAME));
+    TIMED("flush", g_ctx->Flush());
+}
+
+// Start an async readback of the current back buffer into a slot; deliver the one issued two captures ago.
+static void Capture(int slotIndex, const KvrPose* pose, const KvrFov* fov) {
+    Slot& s = g_slots[slotIndex];
+    if (!s.shared || !s.pbo[0]) return;
+    if (p_wglGetCurrentContext() != g_exportCtx) {
+        static int n;
+        if (n++ < 5) g_log("capture skipped: current ctx %p != export ctx %p", p_wglGetCurrentContext(), g_exportCtx);
+        return;
+    }
+    g_inCapture = true;
+    int w = s.next;
+    Deliver(slotIndex, w);
+    GLint prev = 0;
+    p_glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING_ARB, &prev);
+    p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, s.pbo[w]);
+    TIMED("readpixels", p_glReadPixels(0, 0, g_texW, g_texH, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+    p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, prev);
+    s.pending[w] = true;
+    if (pose) s.pose[w] = *pose;
+    if (fov) s.fov[w] = *fov;
+    s.next = w ^ 1;
+    GLenum err = p_glGetError();
+    if (err != GL_NO_ERROR) {
+        static int n;
+        if (n++ < 10) g_log("capture slot %d: glError 0x%x", slotIndex, err);
+    }
+    g_inCapture = false;
+}
+
+// ---------------------------------------------------------------- math
+static void QuatToRows(const float q[4], float m[9]) {
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w);     m[2] = 2 * (x * z + y * w);
+    m[3] = 2 * (x * y + z * w);     m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z - x * w);
+    m[6] = 2 * (x * z - y * w);     m[7] = 2 * (y * z + x * w);     m[8] = 1 - 2 * (x * x + y * y);
+}
+
+// ---------------------------------------------------------------- hooks
+void VR_Init(const VrGl& gl, void (*log)(const char*, ...)) {
+    g_gl = gl;
+    g_log = log;
+}
+
+bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) {
+    g_camState = 0;
+    if (!g_vrActive) return false;
+    // world/dialogue cameras only: GUI 3D (portraits, menu model) uses fovy 22.7 or non-4:3 aspect
+    double expect = (double)g_texW / g_texH;
+    if (fovy < 25.0 || fabs(aspect - expect) > 0.05) return false;
+    KvrHostState hs;
+    if (!ReadHost(hs) || !hs.running) return false;
+
+    g_curEye = g_worldFrames & 1;
+    g_curPose = hs.eye[g_curEye];
+    g_curFov = hs.fov[g_curEye];
+    QuatToRows(g_curPose.quat, g_Q);
+    memcpy(g_t, g_curPose.pos, sizeof g_t);
+
+    g_gl.Frustum(zn * tan(g_curFov.angleLeft), zn * tan(g_curFov.angleRight),
+                 zn * tan(g_curFov.angleDown), zn * tan(g_curFov.angleUp), zn, zf);
+    g_worldThisFrame = true;
+    g_camState = 1;
+    return true;
+}
+
+bool VR_OnMultMatrixf(GLenum mode, const GLfloat* m) {
+    if (g_camState != 1 || mode != GL_MODELVIEW) return false;
+    memcpy(g_R, m, sizeof g_R);
+    // inv(E) = [Q^T | -Q^T t]; M' = inv(E) * R. Column-major: M[c*4 + r].
+    float invE[16] = {};
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) invE[c * 4 + r] = g_Q[c * 3 + r];  // (Q^T)[r][c] = Q[c][r]
+    for (int r = 0; r < 3; r++)
+        invE[12 + r] = -(g_Q[0 * 3 + r] * g_t[0] + g_Q[1 * 3 + r] * g_t[1] + g_Q[2 * 3 + r] * g_t[2]);
+    invE[15] = 1;
+    float out[16];
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++) {
+            float v = 0;
+            for (int k = 0; k < 4; k++) v += invE[k * 4 + r] * m[c * 4 + k];
+            out[c * 4 + r] = v;
+        }
+    g_gl.MultMatrixf(out);
+    g_camState = 2;
+    return true;
+}
+
+void VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
+    if (g_camState != 2 || mode != GL_MODELVIEW) return;
+    // camera world transform C = [R^T | p], p = -(x,y,z). C' = C * E.
+    float p[3] = {-x, -y, -z};
+    for (int r = 0; r < 3; r++) {
+        float Rt[3] = {g_R[r * 4 + 0], g_R[r * 4 + 1], g_R[r * 4 + 2]};  // row r of R^T = column r of R
+        for (int c = 0; c < 3; c++) g_envRows[r][c] = Rt[0] * g_Q[0 * 3 + c] + Rt[1] * g_Q[1 * 3 + c] + Rt[2] * g_Q[2 * 3 + c];
+        g_envRows[r][3] = p[r] + Rt[0] * g_t[0] + Rt[1] * g_t[1] + Rt[2] * g_t[2];
+    }
+    g_camState = 3;
+}
+
+bool VR_OnEnvParam(GLenum target, GLuint index, GLfloat* v) {
+    if (g_camState != 3 || target != GL_VERTEX_PROGRAM_ARB || index < 89 || index > 92) return false;
+    if (index == 89) { g_camState = 0; return false; }
+    memcpy(v, g_envRows[92 - index], 4 * sizeof(float));
+    return true;
+}
+
+void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
+    // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
+    if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
+    Capture(g_curEye, &g_curPose, &g_curFov);
+    g_eyeCaptured = true;
+}
+
+void VR_OnSwap(HDC dc) {
+    static double lastStat, lastSwap;
+    static unsigned frames, worldFrames;
+    double now = NowMs();
+    if (lastSwap > 0 && now - lastSwap > 250) g_log("STALL frame gap %.0f ms (vr %d)", now - lastSwap, g_vrActive);
+    lastSwap = now;
+    frames++;
+    if (g_worldThisFrame) worldFrames++;
+    if (now - lastStat > 1000) {
+        if (g_vrActive) g_log("stats: %u fps, %u world, eyes %u/%u, panel %u", frames, worldFrames,
+                              g_shm ? g_shm->eyes[0].frameId : 0, g_shm ? g_shm->eyes[1].frameId : 0, g_shm ? g_shm->panel.frameId : 0);
+        frames = worldFrames = 0;
+        lastStat = now;
+    }
+    if (EnsureShm()) {
+        g_shm->gameAlive++;
+        if (!g_exportReady && !g_exportFailed && g_shm->host.running) {
+            g_exportReady = InitDevice();
+            g_exportFailed = !g_exportReady;
+        }
+        if (g_exportReady) {
+            RECT rc;
+            if (GetClientRect(WindowFromDC(dc), &rc)) {
+                int w = rc.right - rc.left, h = rc.bottom - rc.top;
+                if (w > 0 && h > 0 && (w != g_texW || h != g_texH)) {
+                    if (!CreateSlots(w, h)) { g_log("export: slot creation failed"); DestroySlots(); g_exportReady = false; g_exportFailed = true; }
+                }
+            }
+        }
+        if (g_exportReady) {
+            if (g_worldThisFrame && !g_eyeCaptured) Capture(g_curEye, &g_curPose, &g_curFov);
+            Capture(SLOT_PANEL, nullptr, nullptr);
+            if (g_worldThisFrame) {
+                g_shm->lastWorldFrame = g_shm->gameAlive;
+                g_worldFrames++;
+            }
+        }
+        static bool f8, f9;
+        bool k8 = (GetAsyncKeyState(VK_F8) & 0x8000) != 0, k9 = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+        if (k8 && !f8) g_shm->recenterReq = 1;
+        if (k9 && !f9) g_shm->showPanel = !g_shm->showPanel;
+        f8 = k8;
+        f9 = k9;
+        g_vrActive = g_exportReady && g_shm->host.running;
+    }
+    g_worldThisFrame = false;
+    g_eyeCaptured = false;
+    g_camState = 0;
+}
+
+bool VR_IsOurTexture(GLuint) { return false; }  // export no longer owns GL textures (PBO readback)
+
+bool VR_InCapture() { return g_inCapture; }
