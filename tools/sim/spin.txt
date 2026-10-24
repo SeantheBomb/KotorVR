@@ -1,0 +1,43 @@
+# Spin test: auto-load Game1, then turn the head through 360 deg in 30 deg steps and look up/down,
+# screenshotting both eyes at every step. Checks stereo, head tracking and what culls at each heading.
+wait_menu 90
+wait 8                     # the menu ignores clicks for a moment after it appears
+click u=0.559 v=0.521      # main menu: Load Game
+wait 3
+click u=0.410 v=0.431      # save slot: Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 5                     # let the area settle after the load
+head yaw=0 pitch=0
+shot spin_000
+head yaw=30 over=0.5
+shot spin_030
+head yaw=60 over=0.5
+shot spin_060
+head yaw=90 over=0.5
+shot spin_090
+head yaw=120 over=0.5
+shot spin_120
+head yaw=150 over=0.5
+shot spin_150
+head yaw=180 over=0.5
+shot spin_180
+head yaw=210 over=0.5
+shot spin_210
+head yaw=240 over=0.5
+shot spin_240
+head yaw=270 over=0.5
+shot spin_270
+head yaw=300 over=0.5
+shot spin_300
+head yaw=330 over=0.5
+shot spin_330
+head yaw=360 over=0.5
+head yaw=0 pitch=45 over=0.5
+shot look_up
+head pitch=-45 over=0.8
+shot look_down
+head pitch=0 over=0.4
+expect_world

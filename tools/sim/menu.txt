@@ -1,0 +1,4 @@
+# Capture the main menu so click coordinates can be read off the screenshot.
+wait_menu 90
+wait 6
+shot menu

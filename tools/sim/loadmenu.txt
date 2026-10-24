@@ -1,0 +1,6 @@
+# Probe: open the Load Game screen and capture it.
+wait_menu 90
+wait 4
+click u=0.559 v=0.521      # Load Game
+wait 3
+shot loadmenu

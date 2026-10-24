@@ -1,0 +1,20 @@
+# Walk test: auto-load Game1, walk forward with the left stick for 3 s, then strafe, screenshot each stage.
+wait_menu 90
+wait 8                     # the menu ignores clicks for a moment after it appears
+click u=0.559 v=0.521      # main menu: Load Game
+wait 3
+click u=0.410 v=0.431      # save slot: Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 5
+shot walk_start
+stick ly=1 for=3           # forward
+shot walk_forward
+stick lx=1 for=1.5         # strafe right
+shot walk_strafe
+head yaw=90 over=0.5       # look left, then walk: tests head-relative locomotion
+stick ly=1 for=2
+shot walk_looking_left
+expect_world
