@@ -48,3 +48,24 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 ## Open
 - Round length constant (no 3000/6000 immediates in the round functions; likely data-driven).
 - Scene render entry point in the exe (needed for synchronized two-pass stereo instead of alternate-eye).
+
+## Engine objects (Steam build) — found 2026-10-24
+
+| What | How |
+|---|---|
+| App / server | `app = [0x7A39FC]`, `server = [app+8]`, `internal = [server+4]`, client `[app+4]` |
+| Creature by id | `0x4AE770(server, id)` thiscall -> server creature (type-checked, vtable+0x30 cast) |
+| Object by id | `0x4AE750(server, id)` -> any object |
+| Party table | `internal + 0x1B770`; leader id `+0xEC` (-1 = the PC leads) |
+| Player list | `[internal + 0x10064]` CExoLinkedList; `0x5E9B60` GetAtPos; element vtable[1] cast -> player; PC id `[player+0x38]` |
+| Inventory | `[creature + 0xA2C]`; `0x5A4C20(inv, slot)` -> item; slot 0x10 right hand, 0x20 left |
+| Item base type | `[item + 0x0C]` = baseitems.2da row |
+| Combat round | `[creature + 0x9C8]`; RoundStarted byte `+0x934`, Timer `+0x944`, RoundLength `+0x94C`, RoundPaused `+0x958` |
+| Scene camera setup | `0x45C540` virtual thiscall; pos `+0x7C`, quat (w,x,y,z) `+0x88`, fovy `+0x1D0`, frustum planes `[+0x1F8]` |
+| GUI click gate | WndProc builds WM_*BUTTON* -> GUI via `0x5DF590`; input ignored while the app is inactive |
+| Resolution whitelist | `0x5F0C60` (patched to accept any mode) |
+
+## Weapon classes (baseitems.2da `weaponwield`)
+
+1 baton · 2 one-hand blades/sabers (saber when damageflags 4096) · 3 two-handed melee (staff, double blades,
+warblade, ghaffi stick) · 4 pistols · 5 rifles/carbines/bowcaster · 6 repeaters. Full row map in game/weapons.cpp.

@@ -321,6 +321,24 @@ WeaponClass Weapon_Right() { return g_right; }
 WeaponClass Weapon_Left() { return g_left; }
 void* Weapon_PlayerCreature() { return g_player; }
 
+// Combat round object at [creature + 0x9C8]; RoundStarted byte at +0x934, RoundLength (ms) at +0x94C
+// (offsets from the round's save code at 0x4D3EC0).
+bool Weapon_PlayerInCombat() {
+    if (!g_player) return false;
+    __try {
+        BYTE* round = *(BYTE**)((BYTE*)g_player + 0x9C8);
+        if (!round) return false;
+        bool started = *(round + 0x934) != 0;
+        static bool logged;
+        if (started && !logged) {
+            logged = true;
+            Log("weapons: combat round active, RoundLength %ld, Timer %ld", *(long*)(round + 0x94C), *(long*)(round + 0x944));
+        }
+        return started;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 void Weapons_Update() {
     static DWORD last;
     DWORD now = GetTickCount();

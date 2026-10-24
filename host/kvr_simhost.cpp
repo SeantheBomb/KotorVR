@@ -19,7 +19,7 @@
 //   hand <L|R> [x= y= z=] [yaw= pitch= roll=]      place a hand (grip pose, relative to the recenter origin, deg)
 //   swing [dx= dy= dz=] [over=<s>]    sweep the right hand by (dx,dy,dz) m over <s> (default 0.6,0.3,0 in 0.18 s)
 //   trigger [for=<s>]                 pull the right trigger without pointing at the panel
-//   pointer none                      stop pointing
+//   pointer none|world                stop pointing / point into the world along the head direction
 //   shot <name>                       save <name>_eye0.png, <name>_eye1.png, <name>_panel.png
 //   expect_world                      fail the run unless the world is rendering
 //   end                               stop (implicit at end of file)
@@ -505,7 +505,8 @@ int main(int argc, char** argv) {
             g_ctl.gripR = 0;
             RunFor(0.1);
         } else if (cmd == "pointer") {
-            g_ctl.pointer = KVR_POINTER_NONE;
+            // "pointer none" stops pointing; "pointer world" points the right hand where the head looks
+            g_ctl.pointer = (!args.empty() && args[0] == "world") ? KVR_POINTER_WORLD : KVR_POINTER_NONE;
         } else if (cmd == "shot") {
             std::string name = args.empty() ? "shot" : args[0];
             RunFor(0.3);  // a few fresh frames of both eyes at the current pose

@@ -31,6 +31,8 @@ WeaponClass Weapon_Right();
 WeaponClass Weapon_Left();
 // Server-side player creature (party leader), or null; refreshed by Weapons_Update.
 void* Weapon_PlayerCreature();
+// The player's combat round is running (KotOR is in combat with something).
+bool Weapon_PlayerInCombat();
 
 // Once per frame (game thread).
 void Weapons_Update();

@@ -15,6 +15,9 @@
 
 #include "../common/kvr_shared.h"
 #include "vr.h"
+#include "gestures.h"
+#include "weapons.h"
+#include "features.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -45,6 +48,21 @@ static DWORD g_lastInjectTick;
 // absolute cursor path: if the game reads the hardware cursor via GetCursorInfo we just hand it the target
 static bool g_targetValid;
 static bool g_msgButtons[2];  // button state last posted as window messages
+
+// recent cursor targets, so a melee swing can attack what the hand pointed at just before the swing moved it
+struct TargetSample {
+    double t;
+    POINT scr;
+    float tx, ty;
+};
+static TargetSample g_targetHist[64];
+static int g_targetHead;
+// scripted click: move to (tx, ty) and click once the GUI has seen the hover
+static int g_autoClickFrames;  // frames remaining (press during the middle of the run)
+static float g_autoTx, g_autoTy;
+// keys pressed by gestures for a few frames
+static int g_gestureKeyFrames;
+static BYTE g_gestureKey;
 static POINT g_targetScreen;
 static DWORD g_lastCursorInfoTick;
 static volatile LONG g_nCursorInfo, g_nSetCursor, g_nMouseState, g_nMouseData;
@@ -116,13 +134,43 @@ void Input_Update(HWND wnd) {
         // camera rotate: right stick X -> A/D
         if (in.rx < -0.6f) keys[DIK_A] = 0x80;
         if (in.rx > 0.6f) keys[DIK_D] = 0x80;
+        // ---- motion gestures (melee swings, shots, Force moves) and the attacks they trigger
+        float headPos[3] = {0, 0, 0};
+        VR_HeadPos(headPos);
+        Gestures_Update(in, headPos);
+        double now = Gestures_Now();
+        float swingQ;
+        // Attacks go through KotOR's Default Action (R) on the current target: clicking would make the character
+        // walk to the floor when the swing / shot isn't over an enemy. Grip selects / uses what the hand points at.
+        bool inWorld = in.pointerMode == KVR_POINTER_WORLD && Features().gestures;
+        bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
+        if (Gestures_TakeSwing(&swingQ) && fighting) {
+            g_gestureKey = DIK_R;
+            g_gestureKeyFrames = 6;
+            Log("input: swing -> attack current target");
+        }
+        static bool trigWas;
+        bool trigNow = in.trigR > 0.6f;
+        if (trigNow && !trigWas && fighting) {
+            if (!Weapon_Profile(Weapon_Right()).melee) Gestures_OnShot();
+            g_gestureKey = DIK_R;
+            g_gestureKeyFrames = 6;
+        }
+        trigWas = trigNow;
+        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyFrames = 6; }  // target slot 2: Force powers
+        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyFrames = 6; }  // personal power slot
+        if (g_gestureKeyFrames > 0) {
+            g_gestureKeyFrames--;
+            if (g_gestureKeyFrames >= 2) keys[g_gestureKey] = 0x80;  // press, then release for two frames
+        }
+
         if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause
         if (in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) keys[DIK_ESCAPE] = 0x80;   // menu / back
         if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
         // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
         // object your right hand points at (the game highlights it through its own hover feedback)
         bool world = in.pointerMode == KVR_POINTER_WORLD;
-        mouse[0] = in.trigR > 0.6f || (world && in.gripR > 0.7f);
+        mouse[0] = (!world && in.trigR > 0.6f) || (world && in.gripR > 0.7f);
         mouse[1] = in.trigL > 0.6f;
 
         // cursor steering toward the pointer target
@@ -136,6 +184,16 @@ void Input_Update(HWND wnd) {
             haveTarget = w > 0;
         } else if (in.pointerMode == KVR_POINTER_WORLD) {
             haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
+        }
+        if (g_autoClickFrames > 0) {
+            g_autoClickFrames--;
+            tx = g_autoTx;
+            ty = g_autoTy;
+            haveTarget = true;
+            mouse[0] = g_autoClickFrames <= 6 && g_autoClickFrames >= 3;  // hold a few frames after the hover settles
+        } else if (haveTarget && in.pointerMode == KVR_POINTER_WORLD) {
+            g_targetHist[g_targetHead] = {now, {0, 0}, tx, ty};
+            g_targetHead = (g_targetHead + 1) % 64;
         }
         g_targetValid = false;
         if (haveTarget && wnd) {

@@ -32,6 +32,8 @@ struct KvrPose;
 bool VR_IsActive();
 // Head yaw relative to the game camera (radians, + = turned left); 0 when VR is inactive.
 float VR_HeadYaw();
+// Head (eye 0) position in the recenter-origin frame.
+void VR_HeadPos(float out[3]);
 bool VR_ChooseEye(KvrPose* out);
 void VR_EngineCamApplied(const float basePos[3]);
 void VR_SetCinematic(bool on);

@@ -15,6 +15,8 @@
 #include "scan.h"
 #include "enginecam.h"
 #include "weapons.h"
+#include "combat.h"
+#include "features.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -356,6 +358,7 @@ static double g_zn = 0.1, g_zf = 10000.0;  // the world pass's clip planes (weap
 
 // Draw the in-hand weapons into the finished world image (scene depth still valid), in this eye's projection.
 static void DrawHandItems() {
+    if (!Features().weaponProxies) return;
     static void(APIENTRY* p_glMatrixMode)(GLenum);
     static void(APIENTRY* p_glPushMatrix)();
     static void(APIENTRY* p_glPopMatrix)();
@@ -528,6 +531,7 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
 
 void VR_OnSwap(HDC dc) {
     Weapons_Update();
+    Combat_EndFrame();
     static double lastStat, lastSwap;
     static unsigned frames, worldFrames;
     double now = NowMs();
@@ -635,4 +639,12 @@ float VR_HeadYaw() {
     float fwdRight = -2 * (x * z + w * y);
     float fwdForward = 1 - 2 * (x * x + y * y);
     return atan2f(-fwdRight, fwdForward);
+}
+
+void VR_HeadPos(float out[3]) {
+    out[0] = out[1] = out[2] = 0;
+    if (!g_shm) return;
+    KvrHostState hs;
+    if (!ReadHost(hs)) return;
+    for (int i = 0; i < 3; i++) out[i] = (hs.eye[0].pos[i] + hs.eye[1].pos[i]) * 0.5f;
 }
