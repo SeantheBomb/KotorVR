@@ -1,0 +1,8 @@
+build/
+*.bin
+*.obj
+*.lib
+*.exp
+# game code dumps and traces stay local
+dumps/
+traces/
