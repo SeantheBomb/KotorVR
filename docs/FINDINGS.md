@@ -9,7 +9,23 @@ time the game calls `DirectInput8Create`; probe dumps it then (`.text` entropy 6
   `glMultMatrixf` / `glRotatef` / `glTranslatef`. No `glLoadMatrixf` import.
 - System `opengl32`/`glu32` exports are hot-patchable (`mov edi,edi` + 5 bytes int3).
 - `GDI32!SwapBuffers` is a `jmp [ptr]` stub; hook `opengl32!wglSwapBuffers` instead.
-- v1 IAT-only hooks produced no frame trace — unconfirmed why; v2 hot-patches exports and logs first calls.
+- Steam overlay (`GameOverlayRenderer.dll`) detours `opengl32!wglSwapBuffers`, so it is not hot-patchable, and
+  the exe never calls `SwapBuffers` through its IAT. Frame boundary = swap the `jmp [ptr]` slot inside
+  `GDI32!SwapBuffers` (works, v3).
+- `glLoadIdentity` / `glPushMatrix` / `glPopMatrix` are not hot-patchable (`mov eax, fs:[18]`); IAT hooks work for them.
+- Game renders at 800x600 (4:3). GPU: RTX 5070 Ti (WGL_NV_DX_interop2 path for GL -> D3D11 sharing).
+
+### In-world frame (traces/trace_f66200.txt)
+1. `glClear(COLOR|DEPTH|STENCIL)`
+2. `PROJECTION: glLoadIdentity; gluPerspective(55, 1.3333, 0.1, 10000)`. fovy from camerastyle; 45 / 34.5 seen in
+   dialogue. GUI 3D (portraits, menu model) uses fovy 22.726 with aspect 0.37-2.8, so filter on aspect ~1.333.
+3. `MODELVIEW: glLoadIdentity; glMultMatrixf(R); glTranslatef(-camPos)` is **the camera**. Single injection point.
+4. `glProgramEnvParameter4fARB(VERTEX, 89..92)` = same camera as rows [R | camPos]; 93..95 constants. Vertex
+   programs use it, so per-eye offsets must rewrite these too.
+5. Scene: per-object `glPushMatrix; glMultMatrixf(world); glDrawElements; glPopMatrix`; ARB vp 11 for skinned meshes.
+6. `glClear(STENCIL)`: stencil shadows.
+7. Post: ortho glow/blur chain at 512/256/128/64/256 viewports (render-to-texture).
+8. GUI: `glOrtho(0,800,0,600)` and `glOrtho(0,1,0,1)` with per-widget viewports (minimap 6,474 120x120).
 
 ## Combat (addresses valid for this Steam build only)
 | VA | What |
@@ -31,3 +47,4 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 
 ## Open
 - Round length constant (no 3000/6000 immediates in the round functions; likely data-driven).
+- Scene render entry point in the exe (needed for synchronized two-pass stereo instead of alternate-eye).
