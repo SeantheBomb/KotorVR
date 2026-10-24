@@ -858,7 +858,8 @@ static void Frame() {
         // controllers: publish state, then draw the right-hand laser and the panel cursor
         PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
-        if (pr.aimValid && tracked) {
+        // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback
+        if (pr.aimValid && tracked && pr.hitPanel) {
             const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, white[4] = {1, 1, 1, 1};
             FillSwapchain(g_beamSc, cyan);
             Quat aq{pr.aimLocal.orientation.x, pr.aimLocal.orientation.y, pr.aimLocal.orientation.z, pr.aimLocal.orientation.w};

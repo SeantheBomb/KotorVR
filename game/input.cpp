@@ -83,6 +83,22 @@ void Input_Update(HWND wnd) {
     bool mouse[2] = {false, false};
     LONG dx = 0, dy = 0;
     if (ReadInput(in) && in.active) {
+        // KotOR ignores GUI input while it is not the foreground app. When the player is actively using the
+        // controllers and something else took focus (Meta dashboard, a desktop window), take it back.
+        bool using_ = in.buttons || in.trigR > 0.3f || in.trigL > 0.3f || in.gripR > 0.3f || in.gripL > 0.3f ||
+                      fabsf(in.lx) > 0.3f || fabsf(in.ly) > 0.3f || fabsf(in.rx) > 0.3f;
+        HWND root = wnd ? GetAncestor(wnd, GA_ROOT) : nullptr;
+        static DWORD lastFocusTry;
+        if (using_ && root && GetForegroundWindow() != root && GetTickCount() - lastFocusTry > 1000) {
+            lastFocusTry = GetTickCount();
+            HWND fg = GetForegroundWindow();
+            DWORD fgThread = fg ? GetWindowThreadProcessId(fg, nullptr) : 0, me = GetCurrentThreadId();
+            if (fgThread && fgThread != me) AttachThreadInput(me, fgThread, TRUE);
+            BOOL ok = SetForegroundWindow(root);
+            BringWindowToTop(root);
+            if (fgThread && fgThread != me) AttachThreadInput(me, fgThread, FALSE);
+            Log("input: game was in the background, took focus back (%s)", ok ? "ok" : "refused");
+        }
         // movement: left stick in head space -> rotate into the game camera's frame -> W/S forward/back, Z/C strafe
         // (KotOR keymap.2da). KotOR moves relative to its camera, which only turns with the right stick, so without
         // this the stick would steer like tank controls whenever you look around.
@@ -104,8 +120,10 @@ void Input_Update(HWND wnd) {
         if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause
         if (in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) keys[DIK_ESCAPE] = 0x80;   // menu / back
         if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
-        if (in.gripR > 0.7f) keys[DIK_R] = 0x80;                                // default action
-        mouse[0] = in.trigR > 0.6f;
+        // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
+        // object your right hand points at (the game highlights it through its own hover feedback)
+        bool world = in.pointerMode == KVR_POINTER_WORLD;
+        mouse[0] = in.trigR > 0.6f || (world && in.gripR > 0.7f);
         mouse[1] = in.trigL > 0.6f;
 
         // cursor steering toward the pointer target
@@ -140,13 +158,19 @@ void Input_Update(HWND wnd) {
             POINT client = scr;
             ScreenToClient(dst, &client);
             static POINT lastScr = {-1, -1};
+            static int settledFrames;  // frames since the cursor last moved
             WPARAM held = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
             if (scr.x != lastScr.x || scr.y != lastScr.y) {
                 SetCursorPos(scr.x, scr.y);
                 PostMessageA(dst, WM_MOUSEMOVE, held, MAKELPARAM(client.x, client.y));
+                // only a real jump resets the settle count; hand tremor of a pixel or two must not block clicks
+                if (labs(scr.x - lastScr.x) + labs(scr.y - lastScr.y) > 6) settledFrames = 0;
                 lastScr = scr;
             }
+            settledFrames++;
             for (int b = 0; b < 2; b++) {
+                // a press must arrive after the GUI has seen the hover at this spot (it ignores press-on-arrival)
+                if (mouse[b] && !g_msgButtons[b] && settledFrames < 3) continue;
                 if (mouse[b] != g_msgButtons[b]) {
                     g_msgButtons[b] = mouse[b];
                     WPARAM nowHeld = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
@@ -189,8 +213,8 @@ void Input_Update(HWND wnd) {
     static DWORD lastDbg;
     if (GetTickCount() - lastDbg > 1000) {
         lastDbg = GetTickCount();
-        Log("input: ptr mode %u target %s (%ld,%ld) | game cursor %s (%ld,%ld) | GetCursorInfo %ld SetCursorPos %ld mouseState %ld mouseData %ld | gain %.2f inj (%ld,%ld)",
-            in.active ? in.pointerMode : 0, g_targetValid ? "yes" : "no", g_targetScreen.x, g_targetScreen.y,
+        Log("input: fg %d | ptr mode %u target %s (%ld,%ld) | game cursor %s (%ld,%ld) | GetCursorInfo %ld SetCursorPos %ld mouseState %ld mouseData %ld | gain %.2f inj (%ld,%ld)",
+            wnd && GetForegroundWindow() == GetAncestor(wnd, GA_ROOT), in.active ? in.pointerMode : 0, g_targetValid ? "yes" : "no", g_targetScreen.x, g_targetScreen.y,
             g_haveCursor ? "seen" : "never", g_cursorScreen.x, g_cursorScreen.y, g_nCursorInfo, g_nSetCursor, g_nMouseState,
             g_nMouseData, g_gain, dx, dy);
     }
