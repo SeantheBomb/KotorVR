@@ -65,6 +65,7 @@ struct Slot {
     bool pending[2] = {false, false};
     KvrPose pose[2];  // metadata captured with each PBO
     KvrFov fov[2];
+    uint32_t flags[2] = {0, 0};
 };
 static ID3D11Device* g_dev;
 static ID3D11DeviceContext* g_ctx;
@@ -99,6 +100,7 @@ static float g_R[16];          // game camera rotation as passed to glMultMatrix
 static float g_Q[9];           // eye rotation (row-major 3x3)
 static float g_t[3];           // eye translation
 static float g_envRows[3][4];  // replacement for env params 92, 91, 90
+static double g_gameFovy = 55.0, g_gameAspect = 4.0 / 3.0;  // the game's own projection (drives its picking)
 
 // ---------------------------------------------------------------- shared memory
 static bool EnsureShm() {
@@ -109,7 +111,7 @@ static bool EnsureShm() {
     HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(KvrShared), KVR_SHM_NAME);
     if (!h) return false;
     g_shm = (KvrShared*)MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KvrShared));
-    if (g_shm && g_shm->magic != KVR_MAGIC) {
+    if (g_shm && (g_shm->magic != KVR_MAGIC || g_shm->version != KVR_VERSION)) {
         ZeroMemory(g_shm, sizeof(KvrShared));
         g_shm->magic = KVR_MAGIC;
         g_shm->version = KVR_VERSION;
@@ -260,11 +262,15 @@ static void Deliver(int slotIndex, int which) {
         out->fov = s.fov[which];
         out->width = g_texW;
         out->height = g_texH;
+        out->flags = s.flags[which];
         out->frameId++;
     }
     TIMED("release", s.mutex->ReleaseSync(ok ? KEY_HOST : KEY_GAME));
     TIMED("flush", g_ctx->Flush());
 }
+
+static void ClearForGui();
+static bool g_guiOnlyThisFrame;  // this frame's GUI was drawn over black (panel capture is GUI-only)
 
 // Start an async readback of the current back buffer into a slot; deliver the one issued two captures ago.
 static void Capture(int slotIndex, const KvrPose* pose, const KvrFov* fov) {
@@ -286,6 +292,7 @@ static void Capture(int slotIndex, const KvrPose* pose, const KvrFov* fov) {
     s.pending[w] = true;
     if (pose) s.pose[w] = *pose;
     if (fov) s.fov[w] = *fov;
+    s.flags[w] = (slotIndex == SLOT_PANEL && g_guiOnlyThisFrame) ? KVR_SLOT_GUI_ONLY : 0;
     s.next = w ^ 1;
     GLenum err = p_glGetError();
     if (err != GL_NO_ERROR) {
@@ -293,6 +300,43 @@ static void Capture(int slotIndex, const KvrPose* pose, const KvrFov* fov) {
         if (n++ < 10) g_log("capture slot %d: glError 0x%x", slotIndex, err);
     }
     g_inCapture = false;
+}
+
+// After the eye image is taken, clear to black so the GUI pass draws onto nothing: the panel capture at swap
+// is then GUI-only, which the host keys over the stereo world as a HUD.
+static void ClearForGui() {
+    static void(APIENTRY* p_glClear)(GLbitfield);
+    static void(APIENTRY* p_glClearColor)(GLclampf, GLclampf, GLclampf, GLclampf);
+    static void(APIENTRY* p_glColorMask)(GLboolean, GLboolean, GLboolean, GLboolean);
+    static GLboolean(APIENTRY* p_glIsEnabled)(GLenum);
+    static void(APIENTRY* p_glDisable)(GLenum);
+    static void(APIENTRY* p_glEnable)(GLenum);
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    static void(APIENTRY* p_glGetBooleanv)(GLenum, GLboolean*);
+    if (!p_glClear) {
+        HMODULE gl = GetModuleHandleA("opengl32.dll");
+        p_glClear = (decltype(p_glClear))GetProcAddress(gl, "glClear");
+        p_glClearColor = (decltype(p_glClearColor))GetProcAddress(gl, "glClearColor");
+        p_glColorMask = (decltype(p_glColorMask))GetProcAddress(gl, "glColorMask");
+        p_glIsEnabled = (decltype(p_glIsEnabled))GetProcAddress(gl, "glIsEnabled");
+        p_glDisable = (decltype(p_glDisable))GetProcAddress(gl, "glDisable");
+        p_glEnable = (decltype(p_glEnable))GetProcAddress(gl, "glEnable");
+        p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(gl, "glGetFloatv");
+        p_glGetBooleanv = (decltype(p_glGetBooleanv))GetProcAddress(gl, "glGetBooleanv");
+    }
+    GLfloat cc[4];
+    GLboolean mask[4];
+    p_glGetFloatv(GL_COLOR_CLEAR_VALUE, cc);
+    p_glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+    GLboolean scissor = p_glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) p_glDisable(GL_SCISSOR_TEST);
+    p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    p_glClearColor(0, 0, 0, 0);
+    p_glClear(GL_COLOR_BUFFER_BIT);
+    p_glClearColor(cc[0], cc[1], cc[2], cc[3]);
+    p_glColorMask(mask[0], mask[1], mask[2], mask[3]);
+    if (scissor) p_glEnable(GL_SCISSOR_TEST);
+    g_guiOnlyThisFrame = true;
 }
 
 // ---------------------------------------------------------------- math
@@ -315,6 +359,9 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
     // world/dialogue cameras only: GUI 3D (portraits, menu model) uses fovy 22.7 or non-4:3 aspect
     double expect = (double)g_texW / g_texH;
     if (fovy < 25.0 || fabs(aspect - expect) > 0.05) return false;
+    g_gameFovy = fovy;
+    g_gameAspect = aspect;
+
     KvrHostState hs;
     if (!ReadHost(hs) || !hs.running) return false;
 
@@ -377,6 +424,7 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
     Capture(g_curEye, &g_curPose, &g_curFov);
     g_eyeCaptured = true;
+    ClearForGui();
 }
 
 void VR_OnSwap(HDC dc) {
@@ -426,9 +474,35 @@ void VR_OnSwap(HDC dc) {
     }
     g_worldThisFrame = false;
     g_eyeCaptured = false;
+    g_guiOnlyThisFrame = false;
     g_camState = 0;
 }
 
 bool VR_IsOurTexture(GLuint) { return false; }  // export no longer owns GL textures (PBO readback)
 
 bool VR_InCapture() { return g_inCapture; }
+
+const KvrShared* VR_Shared() { return g_shm; }
+
+void VR_ClientSize(int* w, int* h) {
+    *w = g_texW;
+    *h = g_texH;
+}
+
+bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], float* x, float* y) {
+    if (g_texW <= 0) return false;
+    float Q[9];
+    QuatToRows(aimQuat, Q);
+    // forward = Q * (0, 0, -1)
+    float d[3] = {-Q[2], -Q[5], -Q[8]};
+    float a[3] = {aimPos[0] + d[0] * 10.0f, aimPos[1] + d[1] * 10.0f, aimPos[2] + d[2] * 10.0f};
+    if (a[2] > -0.05f) return false;  // pointing behind the game camera
+    double t = tan(g_gameFovy * 3.14159265358979 / 360.0);
+    double nx = (a[0] / -a[2]) / (t * g_gameAspect);
+    double ny = (a[1] / -a[2]) / t;
+    nx = nx < -1 ? -1 : nx > 1 ? 1 : nx;
+    ny = ny < -1 ? -1 : ny > 1 ? 1 : ny;
+    *x = (float)((nx * 0.5 + 0.5) * g_texW);
+    *y = (float)((0.5 - ny * 0.5) * g_texH);
+    return true;
+}

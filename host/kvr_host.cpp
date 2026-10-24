@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <vector>
+#include <algorithm>
 
 #include "../common/kvr_shared.h"
 
@@ -77,7 +78,7 @@ static bool OpenShared() {
     bool existed = GetLastError() == ERROR_ALREADY_EXISTS;
     g_shm = (KvrShared*)MapViewOfFile(h, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KvrShared));
     if (!g_shm) return false;
-    if (!existed || g_shm->magic != KVR_MAGIC) {
+    if (!existed || g_shm->magic != KVR_MAGIC || g_shm->version != KVR_VERSION) {
         ZeroMemory(g_shm, sizeof(KvrShared));
         g_shm->magic = KVR_MAGIC;
         g_shm->version = KVR_VERSION;
@@ -110,7 +111,7 @@ static SharedTex g_shared[3] = {{KVR_TEX_NAME_EYE0}, {KVR_TEX_NAME_EYE1}, {KVR_T
 static uint32_t g_sharedW, g_sharedH, g_sharedGen;
 
 static const char* kShader = R"(
-cbuffer P : register(b0) { float2 uvScale; float decodeSrgb; float pad; };
+cbuffer P : register(b0) { float2 uvScale; float decodeSrgb; float guiKey; };
 Texture2D t : register(t0);
 SamplerState s : register(s0);
 void vs(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0) {
@@ -120,8 +121,10 @@ void vs(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEX
 }
 float4 ps(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float3 c = t.Sample(s, uv).rgb;
+    // GUI-only frames are drawn over black: key black out so the HUD floats over the stereo world
+    float a = guiKey > 0.5 ? saturate(max(c.r, max(c.g, c.b)) * 4.0) : 1.0;
     if (decodeSrgb > 0.5) c = pow(abs(c), 2.2);
-    return float4(c, 1);
+    return float4(c, a);
 }
 )";
 
@@ -252,6 +255,8 @@ static bool CreateSwapchain(Swapchain& sc, int32_t w, int32_t h) {
     return true;
 }
 
+static bool InitControls();
+
 static bool InitXR() {
     const char* exts[] = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
     XrInstanceCreateInfo ici{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -269,7 +274,10 @@ static bool InitXR() {
         if (r != XR_ERROR_FORM_FACTOR_UNAVAILABLE) { printf("xrGetSystem failed: %d\n", r); return false; }
         static bool told;
         if (!told) { printf("waiting for headset (connect Air Link)...\n"); told = true; }
-        Sleep(1000);
+        Sleep(2000);
+        // the runtime only notices a newly connected headset on a fresh instance
+        xrDestroyInstance(g_inst);
+        CHECK_XR(xrCreateInstance(&ici, &g_inst));
     }
 
     PFN_xrGetD3D11GraphicsRequirementsKHR getReq;
@@ -311,7 +319,247 @@ static bool InitXR() {
     printf("eye swapchains %ux%u\n", g_viewCfg[0].recommendedImageRectWidth, g_viewCfg[0].recommendedImageRectHeight);
     g_shm->host.recommendedW = g_viewCfg[0].recommendedImageRectWidth;
     g_shm->host.recommendedH = g_viewCfg[0].recommendedImageRectHeight;
+    return InitControls();
+}
+
+// ---------------------------------------------------------------- controllers
+static XrActionSet g_actSet;
+static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_btnA, a_btnB, a_btnX, a_btnY, a_menu, a_stickClick;
+static XrPath g_handPath[2];
+static XrSpace g_aimSpace[2];
+static Swapchain g_beamSc, g_dotSc;
+static uint32_t g_prevButtons;
+
+static XrPath MakePath(const char* s) {
+    XrPath p = XR_NULL_PATH;
+    xrStringToPath(g_inst, s, &p);
+    return p;
+}
+
+static bool MakeAction(XrAction& a, const char* name, XrActionType type, bool perHand) {
+    XrActionCreateInfo ci{XR_TYPE_ACTION_CREATE_INFO};
+    strcpy_s(ci.actionName, name);
+    strcpy_s(ci.localizedActionName, name);
+    ci.actionType = type;
+    if (perHand) {
+        ci.countSubactionPaths = 2;
+        ci.subactionPaths = g_handPath;
+    }
+    XrResult r = xrCreateAction(g_actSet, &ci, &a);
+    if (XR_FAILED(r)) printf("xrCreateAction %s failed: %d\n", name, r);
+    return XR_SUCCEEDED(r);
+}
+
+static bool InitControls() {
+    XrActionSetCreateInfo si{XR_TYPE_ACTION_SET_CREATE_INFO};
+    strcpy_s(si.actionSetName, "kotor");
+    strcpy_s(si.localizedActionSetName, "KotOR");
+    CHECK_XR(xrCreateActionSet(g_inst, &si, &g_actSet));
+    g_handPath[0] = MakePath("/user/hand/left");
+    g_handPath[1] = MakePath("/user/hand/right");
+    bool ok = MakeAction(a_move, "move", XR_ACTION_TYPE_VECTOR2F_INPUT, false) &&
+              MakeAction(a_turn, "turn", XR_ACTION_TYPE_VECTOR2F_INPUT, false) &&
+              MakeAction(a_trig, "trigger", XR_ACTION_TYPE_FLOAT_INPUT, true) &&
+              MakeAction(a_grip, "grip", XR_ACTION_TYPE_FLOAT_INPUT, true) &&
+              MakeAction(a_aim, "aim", XR_ACTION_TYPE_POSE_INPUT, true) &&
+              MakeAction(a_btnA, "button_a", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
+              MakeAction(a_btnB, "button_b", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
+              MakeAction(a_btnX, "button_x", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
+              MakeAction(a_btnY, "button_y", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
+              MakeAction(a_menu, "menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
+              MakeAction(a_stickClick, "stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, true);
+    if (!ok) return false;
+
+    XrActionSuggestedBinding b[] = {
+        {a_move, MakePath("/user/hand/left/input/thumbstick")},
+        {a_turn, MakePath("/user/hand/right/input/thumbstick")},
+        {a_trig, MakePath("/user/hand/left/input/trigger/value")},
+        {a_trig, MakePath("/user/hand/right/input/trigger/value")},
+        {a_grip, MakePath("/user/hand/left/input/squeeze/value")},
+        {a_grip, MakePath("/user/hand/right/input/squeeze/value")},
+        {a_aim, MakePath("/user/hand/left/input/aim/pose")},
+        {a_aim, MakePath("/user/hand/right/input/aim/pose")},
+        {a_btnA, MakePath("/user/hand/right/input/a/click")},
+        {a_btnB, MakePath("/user/hand/right/input/b/click")},
+        {a_btnX, MakePath("/user/hand/left/input/x/click")},
+        {a_btnY, MakePath("/user/hand/left/input/y/click")},
+        {a_menu, MakePath("/user/hand/left/input/menu/click")},
+        {a_stickClick, MakePath("/user/hand/left/input/thumbstick/click")},
+        {a_stickClick, MakePath("/user/hand/right/input/thumbstick/click")},
+    };
+    XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+    sb.interactionProfile = MakePath("/interaction_profiles/oculus/touch_controller");
+    sb.suggestedBindings = b;
+    sb.countSuggestedBindings = (uint32_t)(sizeof b / sizeof b[0]);
+    CHECK_XR(xrSuggestInteractionProfileBindings(g_inst, &sb));
+
+    for (int h = 0; h < 2; h++) {
+        XrActionSpaceCreateInfo as{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+        as.action = a_aim;
+        as.subactionPath = g_handPath[h];
+        as.poseInActionSpace.orientation.w = 1;
+        CHECK_XR(xrCreateActionSpace(g_session, &as, &g_aimSpace[h]));
+    }
+    XrSessionActionSetsAttachInfo ai{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+    ai.countActionSets = 1;
+    ai.actionSets = &g_actSet;
+    CHECK_XR(xrAttachSessionActionSets(g_session, &ai));
+
+    if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16)) return false;
+    printf("controls ready\n");
     return true;
+}
+
+static float GetFloat(XrAction a, int hand) {
+    XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+    gi.action = a;
+    gi.subactionPath = hand >= 0 ? g_handPath[hand] : XR_NULL_PATH;
+    XrActionStateFloat st{XR_TYPE_ACTION_STATE_FLOAT};
+    return XR_SUCCEEDED(xrGetActionStateFloat(g_session, &gi, &st)) && st.isActive ? st.currentState : 0.0f;
+}
+static XrVector2f GetVec2(XrAction a) {
+    XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+    gi.action = a;
+    XrActionStateVector2f st{XR_TYPE_ACTION_STATE_VECTOR2F};
+    if (XR_SUCCEEDED(xrGetActionStateVector2f(g_session, &gi, &st)) && st.isActive) return st.currentState;
+    return {0, 0};
+}
+static bool GetBool(XrAction a, int hand) {
+    XrActionStateGetInfo gi{XR_TYPE_ACTION_STATE_GET_INFO};
+    gi.action = a;
+    gi.subactionPath = hand >= 0 ? g_handPath[hand] : XR_NULL_PATH;
+    XrActionStateBoolean st{XR_TYPE_ACTION_STATE_BOOLEAN};
+    return XR_SUCCEEDED(xrGetActionStateBoolean(g_session, &gi, &st)) && st.isActive && st.currentState;
+}
+
+static XrQuaternionf QuatFromBasis(Vec3 x, Vec3 y, Vec3 z) {  // columns of a rotation matrix
+    float m00 = x.x, m11 = y.y, m22 = z.z, tr = m00 + m11 + m22;
+    XrQuaternionf q;
+    if (tr > 0) {
+        float s = sqrtf(tr + 1.0f) * 2;
+        q = {(y.z - z.y) / s, (z.x - x.z) / s, (x.y - y.x) / s, 0.25f * s};
+    } else if (m00 > m11 && m00 > m22) {
+        float s = sqrtf(1.0f + m00 - m11 - m22) * 2;
+        q = {0.25f * s, (y.x + x.y) / s, (z.x + x.z) / s, (y.z - z.y) / s};
+    } else if (m11 > m22) {
+        float s = sqrtf(1.0f + m11 - m00 - m22) * 2;
+        q = {(y.x + x.y) / s, 0.25f * s, (z.y + y.z) / s, (z.x - x.z) / s};
+    } else {
+        float s = sqrtf(1.0f + m22 - m00 - m11) * 2;
+        q = {(z.x + x.z) / s, (z.y + y.z) / s, 0.25f * s, (x.y - y.x) / s};
+    }
+    return q;
+}
+static Vec3 V(const XrVector3f& v) { return {v.x, v.y, v.z}; }
+static Vec3 Sub(Vec3 a, Vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+static Vec3 Add(Vec3 a, Vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+static Vec3 Mul(Vec3 a, float s) { return {a.x * s, a.y * s, a.z * s}; }
+static float Dot(Vec3 a, Vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static Vec3 Cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+static Vec3 Norm(Vec3 a) {
+    float l = sqrtf(Dot(a, a));
+    return l > 1e-6f ? Mul(a, 1.0f / l) : Vec3{0, 0, 1};
+}
+
+static void FillSwapchain(Swapchain& sc, const float rgba[4]) {
+    uint32_t idx = 0;
+    XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    xrAcquireSwapchainImage(sc.handle, &ai, &idx);
+    XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wi.timeout = XR_INFINITE_DURATION;
+    xrWaitSwapchainImage(sc.handle, &wi);
+    g_ctx->ClearRenderTargetView(sc.rtvs[idx], rgba);
+    XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    xrReleaseSwapchainImage(sc.handle, &ri);
+}
+
+struct PointerResult {
+    bool aimValid = false;
+    XrPosef aimLocal{};
+    bool hitPanel = false;
+    float u = 0, v = 0, dist = 0;
+};
+
+// Sync controllers, publish them to the game, and work out where the right-hand laser points.
+// panelPose/panelW/panelH describe the panel quad in LOCAL space when it is visible.
+static bool HudSolidAt(float u, float v);
+
+static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& panelPose, float panelW, float panelH, bool world, bool hud) {
+    PointerResult pr;
+    XrActiveActionSet aas{g_actSet, XR_NULL_PATH};
+    XrActionsSyncInfo syn{XR_TYPE_ACTIONS_SYNC_INFO};
+    syn.countActiveActionSets = 1;
+    syn.activeActionSets = &aas;
+    bool synced = XR_SUCCEEDED(xrSyncActions(g_session, &syn));
+
+    XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
+    if (synced && XR_SUCCEEDED(xrLocateSpace(g_aimSpace[1], g_local, t, &loc)) &&
+        (loc.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) && (loc.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {
+        pr.aimValid = true;
+        pr.aimLocal = loc.pose;
+    }
+    if (pr.aimValid && panelVisible) {
+        XrPosef inv = PoseInv(panelPose);
+        XrPosef o = PoseMul(inv, pr.aimLocal);  // aim in panel space
+        Quat q{o.orientation.x, o.orientation.y, o.orientation.z, o.orientation.w};
+        Vec3 d = qrot(q, {0, 0, -1});
+        if (d.z < -1e-4f || d.z > 1e-4f) {
+            float tt = -o.position.z / d.z;
+            if (tt > 0) {
+                float hx = o.position.x + d.x * tt, hy = o.position.y + d.y * tt;
+                if (fabsf(hx) <= panelW / 2 && fabsf(hy) <= panelH / 2) {
+                    pr.u = hx / panelW + 0.5f;
+                    pr.v = 0.5f - hy / panelH;
+                    pr.dist = tt;
+                    // on the HUD only visible GUI counts; elsewhere the laser goes through to the world
+                    pr.hitPanel = !hud || HudSolidAt(pr.u, pr.v);
+                }
+            }
+        }
+    }
+
+    uint32_t buttons = 0;
+    if (synced) {
+        if (GetBool(a_btnA, -1)) buttons |= KVR_BTN_A;
+        if (GetBool(a_btnB, -1)) buttons |= KVR_BTN_B;
+        if (GetBool(a_btnX, -1)) buttons |= KVR_BTN_X;
+        if (GetBool(a_btnY, -1)) buttons |= KVR_BTN_Y;
+        if (GetBool(a_menu, -1)) buttons |= KVR_BTN_MENU;
+        if (GetBool(a_stickClick, 0)) buttons |= KVR_BTN_LSTICK;
+        if (GetBool(a_stickClick, 1)) buttons |= KVR_BTN_RSTICK;
+    }
+    uint32_t pressed = buttons & ~g_prevButtons;
+    g_prevButtons = buttons;
+    if (pressed & KVR_BTN_Y) g_shm->showPanel = !g_shm->showPanel;
+    if (pressed & KVR_BTN_RSTICK) g_shm->recenterReq = 1;
+
+    KvrInput& in = g_shm->input;
+    in.seq++;
+    MemoryBarrier();
+    in.active = synced ? 1 : 0;
+    XrVector2f mv = synced ? GetVec2(a_move) : XrVector2f{0, 0};
+    XrVector2f tn = synced ? GetVec2(a_turn) : XrVector2f{0, 0};
+    in.lx = mv.x; in.ly = mv.y; in.rx = tn.x; in.ry = tn.y;
+    in.trigL = synced ? GetFloat(a_trig, 0) : 0;
+    in.trigR = synced ? GetFloat(a_trig, 1) : 0;
+    in.gripL = synced ? GetFloat(a_grip, 0) : 0;
+    in.gripR = synced ? GetFloat(a_grip, 1) : 0;
+    in.buttons = buttons;
+    if (pr.hitPanel) {
+        in.pointerMode = KVR_POINTER_PANEL;
+        in.panelU = pr.u;
+        in.panelV = pr.v;
+    } else if (pr.aimValid && world) {
+        in.pointerMode = KVR_POINTER_WORLD;
+        XrPosef rel = PoseMul(PoseInv(g_origin), pr.aimLocal);
+        memcpy(in.aim.pos, &rel.position, 12);
+        memcpy(in.aim.quat, &rel.orientation, 16);
+    } else {
+        in.pointerMode = KVR_POINTER_NONE;
+    }
+    MemoryBarrier();
+    in.seq++;
+    return pr;
 }
 
 static void PollEvents() {
@@ -363,14 +611,14 @@ static void Pull(SharedTex& s, const volatile KvrEyeSlot& slot) {
 }
 
 // Draw a pulled texture into the acquired swapchain image.
-static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t validW, uint32_t validH) {
+static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t validW, uint32_t validH, bool guiKey = false) {
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(g_ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         float* p = (float*)m.pData;
         p[0] = (float)validW / g_sharedW;
         p[1] = (float)validH / g_sharedH;
         p[2] = g_scSrgb ? 1.0f : 0.0f;
-        p[3] = 0;
+        p[3] = guiKey ? 1.0f : 0.0f;
         g_ctx->Unmap(g_cb, 0);
     }
     D3D11_VIEWPORT vp{0, 0, (float)sc.w, (float)sc.h, 0, 1};
@@ -452,6 +700,49 @@ static XrPosef ToXr(const KvrPose& p) {
     return {{p.quat[0], p.quat[1], p.quat[2], p.quat[3]}, {p.pos[0], p.pos[1], p.pos[2]}};
 }
 
+// Is there visible GUI under the laser? Samples an 8x8 block of the HUD texture; the readback is one frame behind.
+static bool HudSolidAt(float u, float v) {
+    static ID3D11Texture2D* st[2];
+    static int cur;
+    static bool pending[2];
+    static bool lastSolid;
+    SharedTex& p = g_shared[2];
+    if (!p.local || !g_sharedW) return false;
+    if (!st[0]) {
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = d.Height = 8;
+        d.MipLevels = d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.Usage = D3D11_USAGE_STAGING;
+        d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        g_dev->CreateTexture2D(&d, nullptr, &st[0]);
+        g_dev->CreateTexture2D(&d, nullptr, &st[1]);
+    }
+    int prev = cur ^ 1;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (pending[prev] && SUCCEEDED(g_ctx->Map(st[prev], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m))) {
+        int maxc = 0;
+        for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++) {
+                const unsigned char* px = (const unsigned char*)m.pData + y * m.RowPitch + x * 4;
+                maxc = std::max(maxc, (int)std::max(px[0], std::max(px[1], px[2])));
+            }
+        g_ctx->Unmap(st[prev], 0);
+        lastSolid = maxc > 24;
+        pending[prev] = false;
+    }
+    // GL rows are bottom-up in the texture
+    int w = (int)p.meta.width, h = (int)p.meta.height;
+    int x = std::min(std::max((int)(u * w) - 4, 0), w - 8);
+    int y = std::min(std::max((int)((1.0f - v) * h) - 4, 0), h - 8);
+    D3D11_BOX box{(UINT)x, (UINT)y, 0, (UINT)x + 8, (UINT)y + 8, 1};
+    g_ctx->CopySubresourceRegion(st[cur], 0, 0, 0, 0, p.local, 0, &box);
+    pending[cur] = true;
+    cur ^= 1;
+    return lastSolid;
+}
+
 static void Frame() {
     XrFrameWaitInfo fwi{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState fs{XR_TYPE_FRAME_STATE};
@@ -508,28 +799,63 @@ static void Frame() {
             proj.views = pv;
             layers.push_back((XrCompositionLayerBaseHeader*)&proj);
         }
-        if (!world || g_shm->showPanel) {
+        // Menus (no world): opaque theater screen 2.4 m ahead. In the world the panel carries only the GUI, keyed
+        // over the stereo view as a HUD 1.6 m ahead covering ~64 deg; Y (or F9) hides it.
+        bool hud = world && (g_shared[2].meta.flags & KVR_SLOT_GUI_ONLY);
+        bool panelVisible = !world || (hud && !g_shm->showPanel);
+        XrPosef panelLocal = world ? XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}} : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
+        XrPosef panelPose = PoseMul(g_origin, panelLocal);
+        float panelW = world ? 2.0f : 2.4f, panelH = panelW * 0.75f;
+        if (panelVisible) {
             const KvrEyeSlot& slot = g_shared[2].meta;
             uint32_t idx = AcquireImage(g_panelSc);
-            if (g_shared[2].have) Blit(g_panelSc, idx, g_shared[2], slot.width, slot.height);
+            if (g_shared[2].have) Blit(g_panelSc, idx, g_shared[2], slot.width, slot.height, hud);
             else ClearSwapchain(g_panelSc, idx);
-            static DWORD lastDump;
-            if (g_shared[2].have && GetTickCount() - lastDump > 10000) {
-                lastDump = GetTickCount();
-                DumpTex(g_shared[2].local, "C:\\Users\\SeanF\\Documents\\KotorVR\\traces\\host_panel_src.bmp");
-                DumpTex(g_panelSc.images[idx].texture, "C:\\Users\\SeanF\\Documents\\KotorVR\\traces\\host_panel_swap.bmp");
-            }
             ReleaseImage(g_panelSc);
-            // theater screen 2.4 m ahead when there is no world; smaller and low when overlaid on the world
-            XrPosef local = world ? XrPosef{{-0.2588f, 0, 0, 0.9659f}, {0, -0.55f, -1.2f}}   // pitched 30 deg toward the viewer
-                                  : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
             quad.space = g_local;
-            quad.pose = PoseMul(g_origin, local);
-            float wM = world ? 0.8f : 2.4f;
-            quad.size = {wM, wM * 0.75f};
+            quad.pose = panelPose;
+            quad.size = {panelW, panelH};
             quad.subImage.swapchain = g_panelSc.handle;
             quad.subImage.imageRect = {{0, 0}, {g_panelSc.w, g_panelSc.h}};
+            quad.layerFlags = hud ? (XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT) : 0;
             layers.push_back((XrCompositionLayerBaseHeader*)&quad);
+        }
+
+        // controllers: publish state, then draw the right-hand laser and the panel cursor
+        PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
+        static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        if (pr.aimValid && tracked) {
+            const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, white[4] = {1, 1, 1, 1};
+            FillSwapchain(g_beamSc, cyan);
+            Quat aq{pr.aimLocal.orientation.x, pr.aimLocal.orientation.y, pr.aimLocal.orientation.z, pr.aimLocal.orientation.w};
+            Vec3 o = V(pr.aimLocal.position), d = qrot(aq, {0, 0, -1});
+            float len = pr.hitPanel ? pr.dist : 3.0f;
+            Vec3 c = Add(o, Mul(d, len * 0.5f));
+            Vec3 head = V(views[0].pose.position);
+            Vec3 toHead = Sub(head, c);
+            Vec3 z = Norm(Sub(toHead, Mul(d, Dot(toHead, d))));  // face the viewer, perpendicular to the beam
+            Vec3 x = Cross(d, z);
+            beam.space = g_local;
+            beam.pose.orientation = QuatFromBasis(x, d, z);
+            beam.pose.position = {c.x, c.y, c.z};
+            beam.size = {0.004f, len};
+            beam.subImage.swapchain = g_beamSc.handle;
+            beam.subImage.imageRect = {{0, 0}, {g_beamSc.w, g_beamSc.h}};
+            layers.push_back((XrCompositionLayerBaseHeader*)&beam);
+            if (pr.hitPanel) {
+                FillSwapchain(g_dotSc, white);
+                Vec3 hit = Add(o, Mul(d, pr.dist));
+                Quat pq{panelPose.orientation.x, panelPose.orientation.y, panelPose.orientation.z, panelPose.orientation.w};
+                Vec3 n = qrot(pq, {0, 0, 1});
+                Vec3 p = Add(hit, Mul(n, 0.004f));
+                dot.space = g_local;
+                dot.pose.orientation = panelPose.orientation;
+                dot.pose.position = {p.x, p.y, p.z};
+                dot.size = {0.015f, 0.015f};
+                dot.subImage.swapchain = g_dotSc.handle;
+                dot.subImage.imageRect = {{0, 0}, {g_dotSc.w, g_dotSc.h}};
+                layers.push_back((XrCompositionLayerBaseHeader*)&dot);
+            }
         }
     }
 
@@ -541,8 +867,17 @@ static void Frame() {
     xrEndFrame(g_session, &fei);
 }
 
+static BOOL WINAPI OnConsoleClose(DWORD) {
+    // Ctrl+C or the terminal tab closing: tell the game the host is gone so it stops exporting
+    if (g_shm) g_shm->host.running = 0;
+    g_quit = true;
+    Sleep(200);
+    return FALSE;
+}
+
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
+    SetConsoleCtrlHandler(OnConsoleClose, TRUE);
     if (!OpenShared()) { printf("shared memory failed\n"); return 1; }
     if (!InitXR()) { printf("OpenXR init failed\n"); return 1; }
     printf("kvr_host running. In game: F8 recenter, F9 toggle panel. Ctrl+C to quit.\n");

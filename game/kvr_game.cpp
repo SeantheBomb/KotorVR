@@ -15,6 +15,7 @@
 #include <cmath>
 
 #include "vr.h"
+#include "input.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -29,7 +30,7 @@ static bool g_tracing;
 static int g_traceCount;
 static GLenum g_mode = GL_MODELVIEW;
 
-static void Log(const char* fmt, ...) {
+void Log(const char* fmt, ...) {
     if (!g_log) return;
     va_list a; va_start(a, fmt); vfprintf(g_log, fmt, a); va_end(a);
     fputc('\n', g_log); fflush(g_log);
@@ -251,6 +252,19 @@ static int CountThreads() {
     return n;
 }
 
+static BOOL(WINAPI* r_GetCursorInfo)(PCURSORINFO);
+static BOOL WINAPI h_GetCursorInfo(PCURSORINFO ci) {
+    BOOL r = r_GetCursorInfo(ci);
+    if (r && ci) Input_OnGameGetCursorInfo(ci);
+    return r;
+}
+
+static BOOL(WINAPI* r_SetCursorPos)(int, int);
+static BOOL WINAPI h_SetCursorPos(int x, int y) {
+    Input_OnGameSetCursorPos(x, y);
+    return r_SetCursorPos(x, y);
+}
+
 struct ProcHook { const char* name; void** real; void* hook; };
 static ProcHook g_procHooks[] = {
     {"wglCreatePbufferARB", (void**)&r_wglCreatePbufferARB, (void*)h_wglCreatePbufferARB},
@@ -296,6 +310,7 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
     }
     f10Down = f10;
     VR_OnSwap(dc);
+    Input_Update(WindowFromDC(dc));
     static DWORD lastChurn;
     if (GetTickCount() - lastChurn > 1000) {
         lastChurn = GetTickCount();
@@ -330,6 +345,8 @@ static IatHook g_iatHooks[] = {
     {"OPENGL32.dll", "glBindTexture", (void**)&r_glBindTexture, (void*)h_glBindTexture},
     {"OPENGL32.dll", "wglMakeCurrent", (void**)&r_wglMakeCurrent, (void*)h_wglMakeCurrent},
     {"OPENGL32.dll", "wglShareLists", (void**)&r_wglShareLists, (void*)h_wglShareLists},
+    {"USER32.dll", "SetCursorPos", (void**)&r_SetCursorPos, (void*)h_SetCursorPos},
+    {"USER32.dll", "GetCursorInfo", (void**)&r_GetCursorInfo, (void*)h_GetCursorInfo},
     {"OPENGL32.dll", "wglCreateContext", (void**)&r_wglCreateContext, (void*)h_wglCreateContext},
     {"OPENGL32.dll", "wglDeleteContext", (void**)&r_wglDeleteContext, (void*)h_wglDeleteContext},
 };
@@ -448,7 +465,50 @@ static void Install() {
 
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE inst, DWORD ver, REFIID riid, LPVOID* out, LPUNKNOWN outer) {
     Install();
-    return g_realCreate ? g_realCreate(inst, ver, riid, out, outer) : E_FAIL;
+    HRESULT hr = g_realCreate ? g_realCreate(inst, ver, riid, out, outer) : E_FAIL;
+    static const GUID IID_DI8A = {0xBF798030, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+    if (SUCCEEDED(hr) && out && *out && IsEqualGUID(riid, IID_DI8A)) {
+        *out = Input_WrapDirectInput(*out);
+        Log("input: IDirectInput8A wrapped");
+    }
+    return hr;
+}
+
+// ---- early code patches -----------------------------------------------------------------------------
+// The resolution whitelist is read during startup, before DirectInput8Create. SteamStub decrypts .text after
+// our DLL loads, so a thread waits for the original bytes to appear, then patches them.
+struct CodePatch { DWORD va; const char* what; BYTE orig[12]; int origLen; BYTE repl[12]; int replLen; };
+static CodePatch g_earlyPatches[] = {
+    // 0x5F0C60: resolution validator (800x600, 1024x768, 1280x960/1024, 1600x1200 only) -> return 1
+    {0x5F0C60, "resolution whitelist", {0x8B, 0x44, 0x24, 0x04, 0x3D, 0x20, 0x03, 0x00, 0x00}, 9,
+     {0xB8, 0x01, 0x00, 0x00, 0x00, 0xC2, 0x08, 0x00}, 8},
+};
+
+static DWORD WINAPI EarlyPatchThread(LPVOID) {
+    DWORD start = GetTickCount();
+    int pending = (int)(sizeof g_earlyPatches / sizeof g_earlyPatches[0]);
+    bool done[8] = {};
+    while (pending > 0 && GetTickCount() - start < 30000) {
+        for (int i = 0; i < (int)(sizeof g_earlyPatches / sizeof g_earlyPatches[0]); i++) {
+            if (done[i]) continue;
+            CodePatch& p = g_earlyPatches[i];
+            BYTE* at = (BYTE*)(ULONG_PTR)p.va;
+            __try {
+                if (memcmp(at, p.orig, p.origLen) != 0) continue;
+            } __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+            DWORD old;
+            VirtualProtect(at, p.replLen, PAGE_EXECUTE_READWRITE, &old);
+            memcpy(at, p.repl, p.replLen);
+            VirtualProtect(at, p.replLen, old, &old);
+            FlushInstructionCache(GetCurrentProcess(), at, p.replLen);
+            done[i] = true;
+            pending--;
+            Log("early patch applied: %s at 0x%08X after %lu ms", p.what, p.va, GetTickCount() - start);
+        }
+        if (pending > 0) SwitchToThread();
+    }
+    if (pending > 0) Log("WARNING: %d early patch(es) not applied (bytes never matched)", pending);
+    return 0;
 }
 
 BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
@@ -467,6 +527,7 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
         g_realDI8 = LoadLibraryA(sys);
         g_realCreate = g_realDI8 ? (DI8Create_t)GetProcAddress(g_realDI8, "DirectInput8Create") : nullptr;
         Log("kvr probe loaded; real dinput8=%p create=%p", g_realDI8, g_realCreate);
+        CloseHandle(CreateThread(nullptr, 0, EarlyPatchThread, nullptr, 0, nullptr));
     }
     return TRUE;
 }

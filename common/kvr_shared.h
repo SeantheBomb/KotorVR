@@ -8,7 +8,7 @@
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 2
+#define KVR_VERSION 5
 
 #pragma pack(push, 8)
 
@@ -37,6 +37,36 @@ struct KvrEyeSlot {
     KvrPose pose;    // pose the eye was rendered with (for the projection layer)
     KvrFov fov;
     uint32_t width, height;  // valid region of the texture
+    uint32_t flags;          // KVR_SLOT_*
+};
+
+enum : uint32_t {
+    KVR_SLOT_GUI_ONLY = 1u << 0,  // panel holds only the GUI drawn over black (world frames): key out black
+};
+
+// Controller buttons (KvrInput::buttons)
+enum : uint32_t {
+    KVR_BTN_A = 1u << 0,
+    KVR_BTN_B = 1u << 1,
+    KVR_BTN_X = 1u << 2,
+    KVR_BTN_Y = 1u << 3,
+    KVR_BTN_MENU = 1u << 4,
+    KVR_BTN_LSTICK = 1u << 5,
+    KVR_BTN_RSTICK = 1u << 6,
+};
+
+enum : uint32_t { KVR_POINTER_NONE = 0, KVR_POINTER_PANEL = 1, KVR_POINTER_WORLD = 2 };
+
+// Host -> game controller state. Written under a seqlock like KvrHostState.
+struct KvrInput {
+    volatile uint32_t seq;
+    uint32_t active;              // controllers are being tracked
+    float lx, ly, rx, ry;         // thumbsticks, -1..1 (+y forward / +x right)
+    float trigL, trigR, gripL, gripR;
+    uint32_t buttons;             // KVR_BTN_*
+    uint32_t pointerMode;         // KVR_POINTER_*
+    float panelU, panelV;         // 0..1, top-left origin, valid for KVR_POINTER_PANEL
+    KvrPose aim;                  // right aim pose relative to the recenter origin, for KVR_POINTER_WORLD
 };
 
 struct KvrShared {
@@ -52,6 +82,8 @@ struct KvrShared {
     volatile uint32_t showPanel;    // toggled in-game (F9)
     volatile uint32_t recenterReq;  // set in-game (F8), cleared by host
     volatile uint32_t lastWorldFrame;  // gameAlive value of the last frame that rendered the 3D world
+    KvrInput input;                    // host -> game controller state
+    volatile uint32_t cinematic;       // game is on a dialogue/cutscene camera (world FOV != gameplay FOV)
 };
 
 #pragma pack(pop)

@@ -1,0 +1,345 @@
+// Controller input injection (x86, inside swkotor.exe).
+//
+// The game reads keyboard and mouse through DirectInput 8 and keeps its own cursor, which it mirrors to the
+// hardware cursor with SetCursorPos. We wrap the IDirectInput8A it creates; its keyboard and mouse devices get
+// controller-derived keys, buttons and mouse deltas merged into both immediate (GetDeviceState) and buffered
+// (GetDeviceData) reads. The cursor is steered to the laser target by injecting deltas, using the game's own
+// SetCursorPos calls as feedback (it scales deltas by its sensitivity setting, so the gain self-calibrates).
+
+#define DIRECTINPUT_VERSION 0x0800
+#include "input.h"
+
+#include <dinput.h>
+#include <cmath>
+#include <cstring>
+
+#include "../common/kvr_shared.h"
+#include "vr.h"
+
+#pragma comment(lib, "dxguid.lib")
+
+extern void Log(const char* fmt, ...);
+
+// ---------------------------------------------------------------- desired state (computed per frame)
+static BYTE g_wantKeys[256];   // DIK_* -> 0x80 when held
+static bool g_wantMouse[2];    // left, right
+static LONG g_pendDx, g_pendDy;  // mouse delta not yet delivered to the game
+static CRITICAL_SECTION g_cs;
+static bool g_csInit;
+
+static void Lock() {
+    if (!g_csInit) { InitializeCriticalSection(&g_cs); g_csInit = true; }
+    EnterCriticalSection(&g_cs);
+}
+static void Unlock() { LeaveCriticalSection(&g_cs); }
+
+// cursor feedback
+static bool g_haveCursor;
+static POINT g_cursorScreen;
+static DWORD g_cursorStamp;   // tick of the last game SetCursorPos
+static float g_gain = 1.0f;   // observed cursor pixels per injected mickey
+static LONG g_lastInjX, g_lastInjY;
+static POINT g_lastCursorAtInject;
+static DWORD g_lastInjectTick;
+
+// absolute cursor path: if the game reads the hardware cursor via GetCursorInfo we just hand it the target
+static bool g_targetValid;
+static bool g_msgButtons[2];  // button state last posted as window messages
+static POINT g_targetScreen;
+static DWORD g_lastCursorInfoTick;
+static volatile LONG g_nCursorInfo, g_nSetCursor, g_nMouseState, g_nMouseData;
+
+void Input_OnGameGetCursorInfo(PCURSORINFO ci) {
+    InterlockedIncrement(&g_nCursorInfo);
+    g_lastCursorInfoTick = GetTickCount();
+    if (g_targetValid) ci->ptScreenPos = g_targetScreen;
+}
+
+void Input_OnGameSetCursorPos(int x, int y) {
+    InterlockedIncrement(&g_nSetCursor);
+    g_cursorScreen = {x, y};
+    g_haveCursor = true;
+    g_cursorStamp = GetTickCount();
+}
+
+static bool ReadInput(KvrInput& out) {
+    const KvrShared* shm = VR_Shared();
+    if (!shm) return false;
+    for (int tries = 0; tries < 100; tries++) {
+        uint32_t s1 = shm->input.seq;
+        if (s1 & 1) continue;
+        MemoryBarrier();
+        memcpy(&out, (const void*)&shm->input, sizeof out);
+        MemoryBarrier();
+        if (shm->input.seq == s1) return true;
+    }
+    return false;
+}
+
+void Input_Update(HWND wnd) {
+    KvrInput in{};
+    BYTE keys[256] = {};
+    bool useDiButtons = false;
+    bool mouse[2] = {false, false};
+    LONG dx = 0, dy = 0;
+    if (ReadInput(in) && in.active) {
+        // movement: left stick -> W/S forward/back, Z/C strafe (KotOR keymap.2da)
+        if (in.ly > 0.5f) keys[DIK_W] = 0x80;
+        if (in.ly < -0.5f) keys[DIK_S] = 0x80;
+        if (in.lx < -0.5f) keys[DIK_Z] = 0x80;
+        if (in.lx > 0.5f) keys[DIK_C] = 0x80;
+        // camera rotate: right stick X -> A/D
+        if (in.rx < -0.6f) keys[DIK_A] = 0x80;
+        if (in.rx > 0.6f) keys[DIK_D] = 0x80;
+        if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause
+        if (in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) keys[DIK_ESCAPE] = 0x80;   // menu / back
+        if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
+        if (in.gripR > 0.7f) keys[DIK_R] = 0x80;                                // default action
+        mouse[0] = in.trigR > 0.6f;
+        mouse[1] = in.trigL > 0.6f;
+
+        // cursor steering toward the pointer target
+        float tx, ty;
+        bool haveTarget = false;
+        if (in.pointerMode == KVR_POINTER_PANEL) {
+            int w, h;
+            VR_ClientSize(&w, &h);
+            tx = in.panelU * w;
+            ty = in.panelV * h;
+            haveTarget = w > 0;
+        } else if (in.pointerMode == KVR_POINTER_WORLD) {
+            haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
+        }
+        g_targetValid = false;
+        if (haveTarget && wnd) {
+            POINT t = {(LONG)lroundf(tx), (LONG)lroundf(ty)};
+            ClientToScreen(wnd, &t);
+            g_targetScreen = t;
+            g_targetValid = true;
+        }
+        // The game takes the mouse from window messages (its DirectInput mouse is never read), so place the real
+        // cursor and post the matching messages. Buttons go out as messages too, on press/release edges.
+        if (g_targetValid) {
+            POINT client = {(LONG)lroundf(tx), (LONG)lroundf(ty)};
+            static POINT lastClient = {-1, -1};
+            WPARAM held = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
+            if (client.x != lastClient.x || client.y != lastClient.y) {
+                SetCursorPos(g_targetScreen.x, g_targetScreen.y);
+                PostMessageA(wnd, WM_MOUSEMOVE, held, MAKELPARAM(client.x, client.y));
+                lastClient = client;
+            }
+            // in-world the game polls the DirectInput mouse for buttons; menus use window messages
+            static LONG lastStateReads;
+            bool diActive = g_nMouseState != lastStateReads;
+            lastStateReads = g_nMouseState;
+            useDiButtons = diActive;
+            for (int b = 0; b < 2 && !diActive; b++) {
+                if (mouse[b] != g_msgButtons[b]) {
+                    g_msgButtons[b] = mouse[b];
+                    WPARAM nowHeld = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
+                    UINT msg = b == 0 ? (mouse[b] ? WM_LBUTTONDOWN : WM_LBUTTONUP) : (mouse[b] ? WM_RBUTTONDOWN : WM_RBUTTONUP);
+                    PostMessageA(wnd, msg, nowHeld, MAKELPARAM(client.x, client.y));
+                }
+            }
+        }
+        bool absolutePath = true;  // message path above; the DirectInput delta path stays off
+        if (haveTarget && g_haveCursor && wnd && !absolutePath) {
+            POINT c = g_cursorScreen;
+            ScreenToClient(wnd, &c);
+            // learn the gain from how far the game moved its cursor after the last injection
+            if (g_lastInjectTick && g_cursorStamp > g_lastInjectTick) {
+                LONG ox = g_cursorScreen.x - g_lastCursorAtInject.x, oy = g_cursorScreen.y - g_lastCursorAtInject.y;
+                LONG ix = g_lastInjX, iy = g_lastInjY;
+                if (labs(ix) + labs(iy) >= 6 && labs(ox) + labs(oy) > 0) {
+                    float r = (float)(labs(ox) + labs(oy)) / (float)(labs(ix) + labs(iy));
+                    if (r > 0.05f && r < 20.0f) g_gain = 0.8f * g_gain + 0.2f * r;
+                }
+                g_lastInjectTick = 0;
+            }
+            float ex = tx - c.x, ey = ty - c.y;
+            // don't keep pushing if the game stopped reporting its cursor (it would run away)
+            bool fresh = GetTickCount() - g_cursorStamp < 500 || g_lastInjectTick == 0;
+            if (fresh && (fabsf(ex) > 1.5f || fabsf(ey) > 1.5f)) {
+                dx = (LONG)lroundf(ex / g_gain);
+                dy = (LONG)lroundf(ey / g_gain);
+                dx = dx > 300 ? 300 : dx < -300 ? -300 : dx;
+                dy = dy > 300 ? 300 : dy < -300 ? -300 : dy;
+                g_lastInjX = dx;
+                g_lastInjY = dy;
+                g_lastCursorAtInject = g_cursorScreen;
+                g_lastInjectTick = GetTickCount();
+            }
+        }
+    }
+    static DWORD lastDbg;
+    if (GetTickCount() - lastDbg > 1000) {
+        lastDbg = GetTickCount();
+        Log("input: ptr mode %u target %s (%ld,%ld) | game cursor %s (%ld,%ld) | GetCursorInfo %ld SetCursorPos %ld mouseState %ld mouseData %ld | gain %.2f inj (%ld,%ld)",
+            in.active ? in.pointerMode : 0, g_targetValid ? "yes" : "no", g_targetScreen.x, g_targetScreen.y,
+            g_haveCursor ? "seen" : "never", g_cursorScreen.x, g_cursorScreen.y, g_nCursorInfo, g_nSetCursor, g_nMouseState,
+            g_nMouseData, g_gain, dx, dy);
+    }
+    Lock();
+    memcpy(g_wantKeys, keys, sizeof keys);
+    g_wantMouse[0] = useDiButtons && mouse[0];
+    g_wantMouse[1] = useDiButtons && mouse[1];
+    if (useDiButtons) { g_msgButtons[0] = mouse[0]; g_msgButtons[1] = mouse[1]; }  // keep edges in sync across paths
+    g_pendDx = dx;  // replace, not accumulate: recomputed from fresh feedback every frame
+    g_pendDy = dy;
+    Unlock();
+}
+
+// ---------------------------------------------------------------- device wrapper
+enum DevKind { DEV_KEYBOARD, DEV_MOUSE };
+
+class WrapDevice : public IDirectInputDevice8A {
+public:
+    WrapDevice(IDirectInputDevice8A* real, DevKind kind) : m_real(real), m_kind(kind) {}
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        HRESULT hr = m_real->QueryInterface(riid, out);
+        if (SUCCEEDED(hr) && *out == m_real) { *out = this; }
+        return hr;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return m_real->AddRef(); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG n = m_real->Release();
+        if (n == 0) delete this;
+        return n;
+    }
+
+    // the two reads we augment
+    HRESULT STDMETHODCALLTYPE GetDeviceState(DWORD cb, LPVOID data) override {
+        HRESULT hr = m_real->GetDeviceState(cb, data);
+        if (FAILED(hr) || !data) return hr;
+        Lock();
+        if (m_kind == DEV_KEYBOARD && cb >= 256) {
+            BYTE* k = (BYTE*)data;
+            for (int i = 0; i < 256; i++) k[i] |= g_wantKeys[i];
+        } else if (m_kind == DEV_MOUSE && cb >= sizeof(DIMOUSESTATE)) {
+            InterlockedIncrement(&g_nMouseState);
+            DIMOUSESTATE* m = (DIMOUSESTATE*)data;
+            m->lX += g_pendDx;
+            m->lY += g_pendDy;
+            g_pendDx = g_pendDy = 0;
+            if (g_wantMouse[0]) m->rgbButtons[0] |= 0x80;
+            if (g_wantMouse[1]) m->rgbButtons[1] |= 0x80;
+        }
+        Unlock();
+        return hr;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetDeviceData(DWORD cbObj, LPDIDEVICEOBJECTDATA rgdod, LPDWORD inOut, DWORD flags) override {
+        DWORD capacity = inOut ? *inOut : 0;
+        HRESULT hr = m_real->GetDeviceData(cbObj, rgdod, inOut, flags);
+        if (FAILED(hr) || !rgdod || !inOut || (flags & DIGDD_PEEK) || cbObj < sizeof(DIDEVICEOBJECTDATA)) return hr;
+        DWORD n = *inOut;
+        auto push = [&](DWORD ofs, DWORD value) {
+            if (n >= capacity) return;
+            DIDEVICEOBJECTDATA* e = (DIDEVICEOBJECTDATA*)((BYTE*)rgdod + n * cbObj);
+            memset(e, 0, cbObj);
+            e->dwOfs = ofs;
+            e->dwData = value;
+            e->dwTimeStamp = GetTickCount();
+            e->dwSequence = ++m_seq;
+            n++;
+        };
+        Lock();
+        if (m_kind == DEV_KEYBOARD) {
+            for (int i = 0; i < 256; i++) {
+                if (g_wantKeys[i] != m_sentKeys[i]) {
+                    push((DWORD)i, g_wantKeys[i]);
+                    m_sentKeys[i] = g_wantKeys[i];
+                }
+            }
+        } else {
+            InterlockedIncrement(&g_nMouseData);
+            if (g_pendDx) { push(DIMOFS_X, (DWORD)g_pendDx); g_pendDx = 0; }
+            if (g_pendDy) { push(DIMOFS_Y, (DWORD)g_pendDy); g_pendDy = 0; }
+            for (int b = 0; b < 2; b++) {
+                if (g_wantMouse[b] != m_sentMouse[b]) {
+                    push(DIMOFS_BUTTON0 + b, g_wantMouse[b] ? 0x80 : 0);
+                    m_sentMouse[b] = g_wantMouse[b];
+                }
+            }
+        }
+        Unlock();
+        *inOut = n;
+        return hr;
+    }
+
+    // pass-throughs
+    HRESULT STDMETHODCALLTYPE GetCapabilities(LPDIDEVCAPS a) override { return m_real->GetCapabilities(a); }
+    HRESULT STDMETHODCALLTYPE EnumObjects(LPDIENUMDEVICEOBJECTSCALLBACKA a, LPVOID b, DWORD c) override { return m_real->EnumObjects(a, b, c); }
+    HRESULT STDMETHODCALLTYPE GetProperty(REFGUID a, LPDIPROPHEADER b) override { return m_real->GetProperty(a, b); }
+    HRESULT STDMETHODCALLTYPE SetProperty(REFGUID a, LPCDIPROPHEADER b) override { return m_real->SetProperty(a, b); }
+    HRESULT STDMETHODCALLTYPE Acquire() override { return m_real->Acquire(); }
+    HRESULT STDMETHODCALLTYPE Unacquire() override { return m_real->Unacquire(); }
+    HRESULT STDMETHODCALLTYPE SetDataFormat(LPCDIDATAFORMAT a) override { return m_real->SetDataFormat(a); }
+    HRESULT STDMETHODCALLTYPE SetEventNotification(HANDLE a) override { return m_real->SetEventNotification(a); }
+    HRESULT STDMETHODCALLTYPE SetCooperativeLevel(HWND a, DWORD b) override { return m_real->SetCooperativeLevel(a, b); }
+    HRESULT STDMETHODCALLTYPE GetObjectInfo(LPDIDEVICEOBJECTINSTANCEA a, DWORD b, DWORD c) override { return m_real->GetObjectInfo(a, b, c); }
+    HRESULT STDMETHODCALLTYPE GetDeviceInfo(LPDIDEVICEINSTANCEA a) override { return m_real->GetDeviceInfo(a); }
+    HRESULT STDMETHODCALLTYPE RunControlPanel(HWND a, DWORD b) override { return m_real->RunControlPanel(a, b); }
+    HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE a, DWORD b, REFGUID c) override { return m_real->Initialize(a, b, c); }
+    HRESULT STDMETHODCALLTYPE CreateEffect(REFGUID a, LPCDIEFFECT b, LPDIRECTINPUTEFFECT* c, LPUNKNOWN d) override { return m_real->CreateEffect(a, b, c, d); }
+    HRESULT STDMETHODCALLTYPE EnumEffects(LPDIENUMEFFECTSCALLBACKA a, LPVOID b, DWORD c) override { return m_real->EnumEffects(a, b, c); }
+    HRESULT STDMETHODCALLTYPE GetEffectInfo(LPDIEFFECTINFOA a, REFGUID b) override { return m_real->GetEffectInfo(a, b); }
+    HRESULT STDMETHODCALLTYPE GetForceFeedbackState(LPDWORD a) override { return m_real->GetForceFeedbackState(a); }
+    HRESULT STDMETHODCALLTYPE SendForceFeedbackCommand(DWORD a) override { return m_real->SendForceFeedbackCommand(a); }
+    HRESULT STDMETHODCALLTYPE EnumCreatedEffectObjects(LPDIENUMCREATEDEFFECTOBJECTSCALLBACK a, LPVOID b, DWORD c) override { return m_real->EnumCreatedEffectObjects(a, b, c); }
+    HRESULT STDMETHODCALLTYPE Escape(LPDIEFFESCAPE a) override { return m_real->Escape(a); }
+    HRESULT STDMETHODCALLTYPE Poll() override { return m_real->Poll(); }
+    HRESULT STDMETHODCALLTYPE SendDeviceData(DWORD a, LPCDIDEVICEOBJECTDATA b, LPDWORD c, DWORD d) override { return m_real->SendDeviceData(a, b, c, d); }
+    HRESULT STDMETHODCALLTYPE EnumEffectsInFile(LPCSTR a, LPDIENUMEFFECTSINFILECALLBACK b, LPVOID c, DWORD d) override { return m_real->EnumEffectsInFile(a, b, c, d); }
+    HRESULT STDMETHODCALLTYPE WriteEffectToFile(LPCSTR a, DWORD b, LPDIFILEEFFECT c, DWORD d) override { return m_real->WriteEffectToFile(a, b, c, d); }
+    HRESULT STDMETHODCALLTYPE BuildActionMap(LPDIACTIONFORMATA a, LPCSTR b, DWORD c) override { return m_real->BuildActionMap(a, b, c); }
+    HRESULT STDMETHODCALLTYPE SetActionMap(LPDIACTIONFORMATA a, LPCSTR b, DWORD c) override { return m_real->SetActionMap(a, b, c); }
+    HRESULT STDMETHODCALLTYPE GetImageInfo(LPDIDEVICEIMAGEINFOHEADERA a) override { return m_real->GetImageInfo(a); }
+
+private:
+    IDirectInputDevice8A* m_real;
+    DevKind m_kind;
+    BYTE m_sentKeys[256] = {};
+    bool m_sentMouse[2] = {false, false};
+    DWORD m_seq = 0x40000000;
+};
+
+class WrapDI8 : public IDirectInput8A {
+public:
+    explicit WrapDI8(IDirectInput8A* real) : m_real(real) {}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        HRESULT hr = m_real->QueryInterface(riid, out);
+        if (SUCCEEDED(hr) && *out == m_real) { *out = this; }
+        return hr;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return m_real->AddRef(); }
+    ULONG STDMETHODCALLTYPE Release() override {
+        ULONG n = m_real->Release();
+        if (n == 0) delete this;
+        return n;
+    }
+    HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID guid, LPDIRECTINPUTDEVICE8A* out, LPUNKNOWN outer) override {
+        HRESULT hr = m_real->CreateDevice(guid, out, outer);
+        if (SUCCEEDED(hr) && out && *out) {
+            if (IsEqualGUID(guid, GUID_SysKeyboard)) { *out = new WrapDevice(*out, DEV_KEYBOARD); Log("input: keyboard device wrapped"); }
+            else if (IsEqualGUID(guid, GUID_SysMouse)) { *out = new WrapDevice(*out, DEV_MOUSE); Log("input: mouse device wrapped"); }
+        }
+        return hr;
+    }
+    HRESULT STDMETHODCALLTYPE EnumDevices(DWORD a, LPDIENUMDEVICESCALLBACKA b, LPVOID c, DWORD d) override { return m_real->EnumDevices(a, b, c, d); }
+    HRESULT STDMETHODCALLTYPE GetDeviceStatus(REFGUID a) override { return m_real->GetDeviceStatus(a); }
+    HRESULT STDMETHODCALLTYPE RunControlPanel(HWND a, DWORD b) override { return m_real->RunControlPanel(a, b); }
+    HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE a, DWORD b) override { return m_real->Initialize(a, b); }
+    HRESULT STDMETHODCALLTYPE FindDevice(REFGUID a, LPCSTR b, LPGUID c) override { return m_real->FindDevice(a, b, c); }
+    HRESULT STDMETHODCALLTYPE EnumDevicesBySemantics(LPCSTR a, LPDIACTIONFORMATA b, LPDIENUMDEVICESBYSEMANTICSCBA c, LPVOID d, DWORD e) override { return m_real->EnumDevicesBySemantics(a, b, c, d, e); }
+    HRESULT STDMETHODCALLTYPE ConfigureDevices(LPDICONFIGUREDEVICESCALLBACK a, LPDICONFIGUREDEVICESPARAMSA b, DWORD c, LPVOID d) override { return m_real->ConfigureDevices(a, b, c, d); }
+
+private:
+    IDirectInput8A* m_real;
+};
+
+void* Input_WrapDirectInput(void* realDI8A) {
+    return realDI8A ? static_cast<IDirectInput8A*>(new WrapDI8((IDirectInput8A*)realDI8A)) : nullptr;
+}
