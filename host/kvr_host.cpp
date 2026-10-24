@@ -58,6 +58,12 @@ static XrPosef PoseInv(const XrPosef& a) {
     Vec3 t = qrot(qi, {-a.position.x, -a.position.y, -a.position.z});
     return {{qi.x, qi.y, qi.z, qi.w}, {t.x, t.y, t.z}};
 }
+// Heading of an orientation around +Y (0 = facing -Z), radians, counter-clockwise seen from above.
+static float YawOf(const XrQuaternionf& q) {
+    float fx = -2 * (q.x * q.z + q.w * q.y), fz = -(1 - 2 * (q.x * q.x + q.y * q.y));  // forward = q * (0,0,-1)
+    return atan2f(-fx, -fz);
+}
+
 static XrPosef YawOnly(const XrPosef& p) {
     // keep heading, drop pitch/roll so the recenter origin stays level
     const XrQuaternionf& q = p.orientation;
@@ -223,7 +229,7 @@ static Swapchain g_eyeSc[2], g_panelSc;
 static XrViewConfigurationView g_viewCfg[2];
 static DXGI_FORMAT g_scFormat;
 static bool g_scSrgb;
-static bool g_sessionRunning, g_quit;
+static bool g_sessionRunning, g_quit, g_lost;  // g_quit: user asked to exit; g_lost: runtime session/instance lost
 static XrPosef g_origin{{0, 0, 0, 1}, {0, 0, 0}};
 static bool g_haveOrigin;
 
@@ -576,10 +582,10 @@ static void PollEvents() {
                 xrEndSession(g_session);
                 g_sessionRunning = false;
             } else if (s->state == XR_SESSION_STATE_EXITING || s->state == XR_SESSION_STATE_LOSS_PENDING) {
-                g_quit = true;
+                g_lost = true;  // e.g. Air Link dropped: tear down and reconnect
             }
         } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
-            g_quit = true;
+            g_lost = true;
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
@@ -703,11 +709,17 @@ static XrPosef ToXr(const KvrPose& p) {
 // Is there visible GUI under the laser? Samples an 8x8 block of the HUD texture; the readback is one frame behind.
 static bool HudSolidAt(float u, float v) {
     static ID3D11Texture2D* st[2];
+    static ID3D11Device1* stDev;
     static int cur;
     static bool pending[2];
     static bool lastSolid;
     SharedTex& p = g_shared[2];
     if (!p.local || !g_sharedW) return false;
+    if (stDev != g_dev) {  // device recreated after a reconnect
+        st[0] = st[1] = nullptr;
+        pending[0] = pending[1] = false;
+        stDev = g_dev;
+    }
     if (!st[0]) {
         D3D11_TEXTURE2D_DESC d{};
         d.Width = d.Height = 8;
@@ -809,7 +821,23 @@ static void Frame() {
             printf("hud: world=%d hud=%d panelVisible=%d panelFlags=0x%x panelHave=%d hidden(showPanel)=%u cinematic=%u\n", world, hud,
                    panelVisible, g_shared[2].meta.flags, g_shared[2].have, g_shm->showPanel, g_shm->cinematic);
         }
-        XrPosef panelLocal = world ? XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}} : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
+        // HUD lazily follows head yaw: once you have looked more than 35 deg away for 0.6 s it swings round to face you
+        static float hudYaw;
+        static DWORD awaySince;
+        if (tracked) {
+            XrPosef headRel = PoseMul(PoseInv(g_origin), views[0].pose);
+            float headYaw = YawOf(headRel.orientation);
+            float diff = remainderf(headYaw - hudYaw, 6.2831853f);
+            if (fabsf(diff) > 0.61f) {
+                if (!awaySince) awaySince = GetTickCount();
+            } else {
+                awaySince = 0;
+            }
+            if (awaySince && GetTickCount() - awaySince > 600) hudYaw += diff * 0.15f;  // ease toward the head
+            if (awaySince && fabsf(diff) < 0.05f) awaySince = 0;
+        }
+        XrPosef hudYawPose{{0, sinf(hudYaw / 2), 0, cosf(hudYaw / 2)}, {0, 0, 0}};
+        XrPosef panelLocal = world ? PoseMul(hudYawPose, XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}}) : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
         XrPosef panelPose = PoseMul(g_origin, panelLocal);
         float panelW = world ? 2.0f : 2.4f, panelH = panelW * 0.75f;
         if (panelVisible) {
@@ -873,6 +901,72 @@ static void Frame() {
     xrEndFrame(g_session, &fei);
 }
 
+template <class T> static void SafeRelease(T*& p) {
+    if (p) p->Release();
+    p = nullptr;
+}
+
+static void ResetSwapchain(Swapchain& sc) {
+    for (auto* r : sc.rtvs) r->Release();
+    if (sc.handle) xrDestroySwapchain(sc.handle);
+    sc = Swapchain{};
+}
+
+// If the runtime wedges during teardown (seen after Air Link drops), start a fresh host and kill this one.
+static volatile LONG g_teardownDone;
+static DWORD WINAPI TeardownWatchdog(LPVOID) {
+    for (int i = 0; i < 80 && !g_teardownDone; i++) Sleep(100);
+    if (g_teardownDone) return 0;
+    printf("teardown stuck in the runtime - restarting the host process\n");
+    char exe[MAX_PATH];
+    GetModuleFileNameA(nullptr, exe, MAX_PATH);
+    STARTUPINFOA si{sizeof si};
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessA(exe, nullptr, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    TerminateProcess(GetCurrentProcess(), 3);
+    return 0;
+}
+
+// Drop everything tied to the OpenXR instance and D3D device so InitXR can start over.
+static void Teardown() {
+    g_shm->host.running = 0;
+    g_teardownDone = 0;
+    CloseHandle(CreateThread(nullptr, 0, TeardownWatchdog, nullptr, 0, nullptr));
+    ReleaseShared();
+    g_sharedGen = 0;
+    for (auto& sc : g_eyeSc) ResetSwapchain(sc);
+    ResetSwapchain(g_panelSc);
+    ResetSwapchain(g_beamSc);
+    ResetSwapchain(g_dotSc);
+    // children before parents: destroying a live session through its instance deadlocks the Meta runtime
+    for (auto& sp : g_aimSpace) {
+        if (sp) xrDestroySpace(sp);
+        sp = XR_NULL_HANDLE;
+    }
+    if (g_local) xrDestroySpace(g_local);
+    if (g_view) xrDestroySpace(g_view);
+    g_local = g_view = XR_NULL_HANDLE;
+    if (g_actSet) xrDestroyActionSet(g_actSet);
+    g_actSet = XR_NULL_HANDLE;
+    if (g_session) xrDestroySession(g_session);
+    if (g_inst) xrDestroyInstance(g_inst);
+    g_inst = XR_NULL_HANDLE;
+    g_session = XR_NULL_HANDLE;
+    g_sessionRunning = false;
+    g_haveOrigin = false;
+    g_prevButtons = 0;
+    SafeRelease(g_vs);
+    SafeRelease(g_ps);
+    SafeRelease(g_samp);
+    SafeRelease(g_cb);
+    SafeRelease(g_ctx);
+    SafeRelease(g_dev);
+    g_teardownDone = 1;
+}
+
 static BOOL WINAPI OnConsoleClose(DWORD) {
     // Ctrl+C or the terminal tab closing: tell the game the host is gone so it stops exporting
     if (g_shm) g_shm->host.running = 0;
@@ -885,11 +979,18 @@ int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     SetConsoleCtrlHandler(OnConsoleClose, TRUE);
     if (!OpenShared()) { printf("shared memory failed\n"); return 1; }
-    if (!InitXR()) { printf("OpenXR init failed\n"); return 1; }
+    while (!g_quit) {
+    if (!InitXR()) {
+        printf("OpenXR init failed; retrying in 3 s\n");
+        Teardown();
+        Sleep(3000);
+        continue;
+    }
     printf("kvr_host running. In game: F8 recenter, F9 toggle panel. Ctrl+C to quit.\n");
+    g_lost = false;
     DWORD lastReport = GetTickCount();
     uint32_t lastAlive = 0, lastE0 = 0, lastE1 = 0, xrFrames = 0;
-    while (!g_quit) {
+    while (!g_quit && !g_lost) {
         PollEvents();
         if (!g_sessionRunning) { Sleep(10); continue; }
         Frame();
@@ -904,6 +1005,12 @@ int main() {
             xrFrames = 0;
             lastReport = now;
         }
+    }
+    if (g_lost && !g_quit) {
+        printf("OpenXR session lost (Air Link dropped?) - reconnecting\n");
+        Teardown();
+        Sleep(2000);
+    }
     }
     g_shm->host.running = 0;
     return 0;

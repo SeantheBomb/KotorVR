@@ -83,11 +83,21 @@ void Input_Update(HWND wnd) {
     bool mouse[2] = {false, false};
     LONG dx = 0, dy = 0;
     if (ReadInput(in) && in.active) {
-        // movement: left stick -> W/S forward/back, Z/C strafe (KotOR keymap.2da)
-        if (in.ly > 0.5f) keys[DIK_W] = 0x80;
-        if (in.ly < -0.5f) keys[DIK_S] = 0x80;
-        if (in.lx < -0.5f) keys[DIK_Z] = 0x80;
-        if (in.lx > 0.5f) keys[DIK_C] = 0x80;
+        // movement: left stick in head space -> rotate into the game camera's frame -> W/S forward/back, Z/C strafe
+        // (KotOR keymap.2da). KotOR moves relative to its camera, which only turns with the right stick, so without
+        // this the stick would steer like tank controls whenever you look around.
+        float psi = VR_HeadYaw();
+        float c = cosf(psi), sn = sinf(psi);
+        float mr = in.lx * c - in.ly * sn;  // right component in the game camera frame
+        float mf = in.lx * sn + in.ly * c;  // forward component
+        float mag = sqrtf(mr * mr + mf * mf);
+        if (mag > 0.5f) {
+            // 8-way: a component counts once it is at least ~38% of the push (22.5 deg sectors)
+            if (mf > 0.38f * mag) keys[DIK_W] = 0x80;
+            if (mf < -0.38f * mag) keys[DIK_S] = 0x80;
+            if (mr < -0.38f * mag) keys[DIK_Z] = 0x80;
+            if (mr > 0.38f * mag) keys[DIK_C] = 0x80;
+        }
         // camera rotate: right stick X -> A/D
         if (in.rx < -0.6f) keys[DIK_A] = 0x80;
         if (in.rx > 0.6f) keys[DIK_D] = 0x80;

@@ -28,6 +28,13 @@ void VR_BeforeShareLists();
 bool VR_InCapture();
 
 struct KvrShared;
+struct KvrPose;
+bool VR_IsActive();
+// Head yaw relative to the game camera (radians, + = turned left); 0 when VR is inactive.
+float VR_HeadYaw();
+bool VR_ChooseEye(KvrPose* out);
+void VR_EngineCamApplied(const float basePos[3]);
+void VR_SetCinematic(bool on);
 const KvrShared* VR_Shared();
 void VR_ClientSize(int* w, int* h);
 // Project a controller aim ray (relative to the recenter origin == game camera frame) into the game's own

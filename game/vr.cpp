@@ -12,6 +12,8 @@
 // -> kvr_host. (NV_DX_interop crashed the driver alongside the game's pbuffer contexts.)
 
 #include "vr.h"
+#include "scan.h"
+#include "enginecam.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -191,7 +193,7 @@ static bool CreateSlots(int w, int h) {
     DestroySlots();
     g_texW = w;
     g_texH = h;
-    g_texGen++;
+    g_texGen = g_texGen ? g_texGen + 1 : ((GetCurrentProcessId() & 0xFFFFF) << 8) + 1;  // unique per launch: the host may still hold a dead game's textures
     const wchar_t* bases[SLOT_COUNT] = {KVR_TEX_NAME_EYE0, KVR_TEX_NAME_EYE1, KVR_TEX_NAME_PANEL};
     for (int i = 0; i < SLOT_COUNT; i++) {
         Slot& s = g_slots[i];
@@ -347,6 +349,28 @@ static void QuatToRows(const float q[4], float m[9]) {
     m[6] = 2 * (x * z - y * w);     m[7] = 2 * (y * z + x * w);     m[8] = 1 - 2 * (x * x + y * y);
 }
 
+// ---------------------------------------------------------------- per-frame eye choice
+static bool g_eyeChosen;
+
+bool VR_IsActive() { return g_vrActive; }
+
+// Pick this frame's eye (alternate-eye rendering) and its pose; idempotent within a frame.
+bool VR_ChooseEye(KvrPose* out) {
+    if (!g_vrActive) return false;
+    if (!g_eyeChosen) {
+        KvrHostState hs;
+        if (!ReadHost(hs) || !hs.running) return false;
+        g_curEye = g_worldFrames & 1;
+        g_curPose = hs.eye[g_curEye];
+        g_curFov = hs.fov[g_curEye];
+        QuatToRows(g_curPose.quat, g_Q);
+        memcpy(g_t, g_curPose.pos, sizeof g_t);
+        g_eyeChosen = true;
+    }
+    *out = g_curPose;
+    return true;
+}
+
 // ---------------------------------------------------------------- hooks
 void VR_Init(const VrGl& gl, void (*log)(const char*, ...)) {
     g_gl = gl;
@@ -362,14 +386,8 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
     g_gameFovy = fovy;
     g_gameAspect = aspect;
 
-    KvrHostState hs;
-    if (!ReadHost(hs) || !hs.running) return false;
-
-    g_curEye = g_worldFrames & 1;
-    g_curPose = hs.eye[g_curEye];
-    g_curFov = hs.fov[g_curEye];
-    QuatToRows(g_curPose.quat, g_Q);
-    memcpy(g_t, g_curPose.pos, sizeof g_t);
+    KvrPose unused;
+    if (!VR_ChooseEye(&unused)) return false;
 
     g_gl.Frustum(zn * tan(g_curFov.angleLeft), zn * tan(g_curFov.angleRight),
                  zn * tan(g_curFov.angleDown), zn * tan(g_curFov.angleUp), zn, zf);
@@ -382,6 +400,10 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
 // swapped for the last gameplay camera during dialogue (see below).
 bool VR_OnMultMatrixf(GLenum mode, const GLfloat* m) {
     if (g_camState != 1 || mode != GL_MODELVIEW) return false;
+    if (EngineCam_Applied()) {  // the engine is already rendering from the eye pose (and culling with it)
+        g_camState = 0;
+        return false;
+    }
     memcpy(g_R, m, sizeof g_R);
     g_camState = 2;
     return true;
@@ -402,6 +424,7 @@ bool VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
     float p[3] = {-x, -y, -z};
     bool gameplay = fabs(g_gameFovy - kGameplayFov) < 0.5;
     if (gameplay) {
+        EngineCam_OnView(g_R, p);
         memcpy(g_playR, g_R, sizeof g_playR);
         memcpy(g_playP, p, sizeof g_playP);
         g_havePlayCam = true;
@@ -504,6 +527,7 @@ void VR_OnSwap(HDC dc) {
         g_vrActive = g_exportReady && g_shm->host.running;
     }
     g_worldThisFrame = false;
+    g_eyeChosen = false;
     g_camPosValid = false;
     g_eyeCaptured = false;
     g_guiOnlyThisFrame = false;
@@ -532,8 +556,7 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     double t = tan(g_gameFovy * 3.14159265358979 / 360.0);
     double nx = (a[0] / -a[2]) / (t * g_gameAspect);
     double ny = (a[1] / -a[2]) / t;
-    nx = nx < -1 ? -1 : nx > 1 ? 1 : nx;
-    ny = ny < -1 ? -1 : ny > 1 ? 1 : ny;
+    if (nx < -1 || nx > 1 || ny < -1 || ny > 1) return false;  // outside the game's view: leave the cursor alone
     *x = (float)((nx * 0.5 + 0.5) * g_texW);
     *y = (float)((0.5 - ny * 0.5) * g_texH);
     return true;
@@ -543,5 +566,27 @@ bool VR_IsOwnBody(const float t[3]) {
     if (!g_camPosValid || !g_vrActive) return false;
     float dx = t[0] - g_camPos[0], dy = t[1] - g_camPos[1], dz = t[2] - g_camPos[2];
     // KotOR world is Z-up; the camera sits at the character's camera hook, the body is a column below it
-    return dx * dx + dy * dy < 0.45f * 0.45f && dz > -2.2f && dz < 0.6f;
+    // 0.7 m: covers the head/hair and held items swinging forward in the walk cycle
+    return dx * dx + dy * dy < 0.7f * 0.7f && dz > -2.2f && dz < 0.8f;
+}
+
+void VR_EngineCamApplied(const float basePos[3]) {
+    memcpy(g_camPos, basePos, sizeof g_camPos);
+    g_camPosValid = true;
+}
+
+void VR_SetCinematic(bool on) {
+    if (g_shm) g_shm->cinematic = on ? 1 : 0;
+}
+
+float VR_HeadYaw() {
+    if (!g_vrActive || !g_shm) return 0.0f;
+    KvrHostState hs;
+    if (!ReadHost(hs)) return 0.0f;
+    // average the two eyes' orientation; forward = q * (0,0,-1) in GL camera space (x right, -z forward)
+    const float* q = hs.eye[0].quat;
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    float fwdRight = -2 * (x * z + w * y);
+    float fwdForward = 1 - 2 * (x * x + y * y);
+    return atan2f(-fwdRight, fwdForward);
 }

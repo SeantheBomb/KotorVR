@@ -16,6 +16,7 @@
 
 #include "vr.h"
 #include "input.h"
+#include "enginecam.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -468,6 +469,7 @@ static void Install() {
     gl.Frustum = (void(APIENTRY*)(GLdouble, GLdouble, GLdouble, GLdouble, GLdouble, GLdouble))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glFrustum");
     gl.GetProcAddress = r_wglGetProcAddress;
     VR_Init(gl, Log);
+    EngineCam_Install();
 }
 
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE inst, DWORD ver, REFIID riid, LPVOID* out, LPUNKNOWN outer) {
