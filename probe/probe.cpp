@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <share.h>
+#include <cmath>
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -80,15 +81,28 @@ static void(APIENTRY* r_glProgramParameter4fvNV)(GLenum, GLuint, const GLfloat*)
 
 // ---- hooks ----
 static void APIENTRY h_gluPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) { FIRST("gluPerspective");
-    static GLdouble lf, la, ln, lz;
-    if (fovy != lf || aspect != la || zn != ln || zf != lz) {
+    static double seen[64][2]; static int nseen;
+    bool known = false;
+    for (int i = 0; i < nseen; i++) known |= (seen[i][0] == fovy && fabs(seen[i][1] - aspect) < 0.01);
+    if (!known && nseen < 64) {
+        seen[nseen][0] = fovy; seen[nseen][1] = aspect; nseen++;
         Log("[f%ld] gluPerspective fovy=%.3f aspect=%.4f near=%.4f far=%.2f", g_frame, fovy, aspect, zn, zf);
-        lf = fovy; la = aspect; ln = zn; lz = zf;
     }
     T("gluPerspective %.3f %.4f %.4f %.2f", fovy, aspect, zn, zf);
     r_gluPerspective(fovy, aspect, zn, zf);
 }
 static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
+    if (g_mode == GL_PROJECTION) {
+        static float seen[32][2]; static int nseen;
+        bool known = false;
+        for (int i = 0; i < nseen; i++) known |= (fabsf(seen[i][0] - m[0]) < 1e-3f && fabsf(seen[i][1] - m[5]) < 1e-3f);
+        if (!known && nseen < 32) {
+            seen[nseen][0] = m[0]; seen[nseen][1] = m[5]; nseen++;
+            Log("[f%ld] PROJECTION glMultMatrixf %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f  (vfov=%.2f deg)",
+                g_frame, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15],
+                m[5] != 0 ? 2.0 * atan(1.0 / m[5]) * 57.29578 : 0.0);
+        }
+    }
     T("glMultMatrixf [%s] %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f",
       ModeName(g_mode), m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     r_glMultMatrixf(m);
@@ -195,7 +209,6 @@ static IatHook g_iatHooks[] = {
     {"OPENGL32.dll", "glBegin", (void**)&r_glBegin, (void*)h_glBegin},
     {"OPENGL32.dll", "glCallLists", (void**)&r_glCallLists, (void*)h_glCallLists},
     {"OPENGL32.dll", "wglGetProcAddress", (void**)&r_wglGetProcAddress, (void*)h_wglGetProcAddress},
-    {"OPENGL32.dll", "wglSwapBuffers", (void**)&r_SwapBuffers, (void*)h_SwapBuffers},
 };
 
 static void PatchIat(HMODULE mod) {
@@ -245,11 +258,33 @@ static bool HotPatch(void* target, void* hook, void** tramp) {
     return true;
 }
 
+// GDI32!SwapBuffers is `jmp dword ptr [p]` into gdi32full. Swap *p: sits below any overlay detour
+// on opengl32!wglSwapBuffers and catches every caller.
+static bool HookGdiSwapBuffers() {
+    BYTE* p = (BYTE*)GetProcAddress(GetModuleHandleA("GDI32.dll"), "SwapBuffers");
+    if (!p) return false;
+    if (p[0] != 0xFF || p[1] != 0x25) {
+        Log("GDI32!SwapBuffers prologue %02X %02X %02X %02X %02X %02X - not a jmp [ptr] stub", p[0], p[1], p[2], p[3], p[4], p[5]);
+        return false;
+    }
+    void** slot = *(void***)(p + 2);
+    DWORD old;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return false;
+    r_SwapBuffers = (BOOL(WINAPI*)(HDC))*slot;
+    *slot = (void*)h_SwapBuffers;
+    VirtualProtect(slot, sizeof(void*), old, &old);
+    Log("GDI32!SwapBuffers pointer hooked (real %p)", r_SwapBuffers);
+    return true;
+}
+
 static void InstallHooks(HMODULE exe) {
+    Log("GameOverlayRenderer loaded: %s", GetModuleHandleA("GameOverlayRenderer.dll") ? "yes" : "no");
+    HookGdiSwapBuffers();
     for (auto& h : g_iatHooks) {
         HMODULE m = GetModuleHandleA(h.dll);
         void* fn = m ? (void*)GetProcAddress(m, h.func) : nullptr;
         if (fn && HotPatch(fn, h.hook, h.real)) { Log("hotpatch %s!%s ok", h.dll, h.func); h.hook = nullptr; }
+        else if (fn) { BYTE* b = (BYTE*)fn; Log("no hotpatch %s!%s: %02X %02X %02X %02X %02X", h.dll, h.func, b[0], b[1], b[2], b[3], b[4]); }
     }
     PatchIat(exe);  // whatever could not be hot-patched (h.hook still set)
 }
