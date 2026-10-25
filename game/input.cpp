@@ -107,10 +107,19 @@ void Input_Update(HWND wnd) {
                       fabsf(in.lx) > 0.3f || fabsf(in.ly) > 0.3f || fabsf(in.rx) > 0.3f;
         HWND root = wnd ? GetAncestor(wnd, GA_ROOT) : nullptr;
         static DWORD lastActivate;
-        if (using_ && root && GetForegroundWindow() != root && GetTickCount() - lastActivate > 1000) {
+        if (using_ && root && GetForegroundWindow() != root && GetTickCount() - lastActivate > 2000) {
             // Don't steal real focus (attaching to another app's input queue can block for many seconds); just
             // tell the game it is active so its GUI accepts our posted input.
             lastActivate = GetTickCount();
+            // Windows lets the process that produced the last input event take the foreground: tap Alt (no
+            // effect on its own) and bring the game forward. Also tell the game it is active, in case Windows
+            // still refuses (the GUI then at least accepts our posted input).
+            INPUT alt[2] = {};
+            alt[0].type = alt[1].type = INPUT_KEYBOARD;
+            alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+            alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(2, alt, sizeof(INPUT));
+            SetForegroundWindow(root);
             PostMessageA(root, WM_ACTIVATEAPP, TRUE, 0);
             PostMessageA(root, WM_ACTIVATE, WA_ACTIVE, 0);
             static int told;

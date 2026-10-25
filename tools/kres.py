@@ -98,3 +98,19 @@ if __name__ == "__main__":
         print("\t".join(["#"] + cols))
         for l, r in zip(labels, rows):
             print("\t".join([l] + r))
+
+
+def read_erf(path):
+    """ERF/MOD/SAV container -> {(resref, restype): (offset, size)} plus the raw bytes."""
+    d = open(path, "rb").read()
+    assert d[:4] in (b"ERF ", b"MOD ", b"SAV "), d[:8]
+    (lang_cnt, lang_size, entry_cnt, off_lang, off_keys, off_res) = struct.unpack_from("<6I", d, 8)
+    out = {}
+    for i in range(entry_cnt):
+        ko = off_keys + i * 24
+        resref = d[ko:ko + 16].rstrip(b"\0").decode("latin1").lower()
+        resid, rtype = struct.unpack_from("<IH", d, ko + 16)
+        ro = off_res + resid * 8
+        off, size = struct.unpack_from("<II", d, ro)
+        out[(resref, rtype)] = (off, size)
+    return out, d

@@ -1,0 +1,44 @@
+# Minimal: auto-load Game1 and idle in the world for a few seconds (quick diagnostics).
+wait_menu 90
+wait 8
+click u=0.559 v=0.521      # Load Game
+wait 3
+click u=0.410 v=0.431      # Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+hand R x=0.18 y=-0.25 z=-0.45 yaw=-25 pitch=15
+hand L x=-0.10 y=-0.30 z=-0.35 yaw=10 pitch=15
+wait 2.9
+shot g01
+wait 2.9
+shot g02
+wait 2.9
+shot g03
+wait 2.9
+shot g04
+wait 2.9
+shot g05
+wait 2.9
+shot g06
+wait 2.9
+shot g07
+wait 2.9
+shot g08
+wait 2.9
+shot g09
+wait 2.9
+shot g10
+wait 2.9
+shot g11
+wait 2.9
+shot g12
+wait 2.9
+shot g13
+wait 2.9
+shot g14
+wait 2.9
+shot g15
+expect_world

@@ -42,6 +42,11 @@ Start a fight by gripping on an enemy.
 4. Force thrust / yank: do they fire when meant to, and not by accident?
 5. Ranged: does a steady aim feel rewarded?
 
+## Weapons in your hands
+
+The equipped item's real model and textures (its variation, so your saber is your saber: hilt, blade colour).
+`[Debug] WeaponGallery=1` in kvr.ini cycles through one weapon of every class every 3 s (for screenshots).
+
 ## If something misbehaves
 
 Edit `<game>\kvr\kvr.ini` (written on first launch) and restart the game:

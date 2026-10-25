@@ -7,6 +7,7 @@ struct FeatureFlags {
     bool weaponProxies;  // draw the equipped weapons in the hands
     bool gestures;       // melee swings / shots / Force gestures trigger actions
     bool combat;         // timing bonus and block / dodge on the d20 roll
+    bool weaponGallery;  // [Debug] WeaponGallery=1: cycle the in-hand model through every class (screenshots)
 };
 
 const FeatureFlags& Features();

@@ -16,6 +16,8 @@
 
 #include "../common/kvr_shared.h"
 #include "vr.h"
+#include "weaponmodels.h"
+#include "features.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -65,13 +67,15 @@ const ListGetAt_t ListGetAt = (ListGetAt_t)0x5E9B60;  // CExoLinkedList::GetAtPo
 void* g_player;
 WeaponClass g_right = WC_NONE, g_left = WC_NONE;
 int g_rightRow = -1, g_leftRow = -1;
+int g_rightVar = 1, g_leftVar = 1;  // item model variation (w_<class>_<NNN>)
 
-int RowInSlot(void* creature, DWORD slot) {
+int RowInSlot(void* creature, DWORD slot, int* variation = nullptr) {
     __try {
         void* inv = *(void**)((BYTE*)creature + 0xA2C);
         if (!inv) return -1;
         void* item = GetItemInSlot(inv, slot);
         if (!item) return -1;
+        if (variation) *variation = *((BYTE*)item + 0x264);  // ModelVariation (item save code at 0x55CDCC)
         return (int)*(DWORD*)((BYTE*)item + 0x0C);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return -1;
@@ -345,14 +349,29 @@ void Weapons_Update() {
     if (now - last < 250) return;
     last = now;
     void* p = FindPlayer();
-    int r = p ? RowInSlot(p, 0x10) : -1, l = p ? RowInSlot(p, 0x20) : -1;
-    if (p != g_player || r != g_rightRow || l != g_leftRow) {
+    int rv = 1, lv = 1;
+    int r = p ? RowInSlot(p, 0x10, &rv) : -1, l = p ? RowInSlot(p, 0x20, &lv) : -1;
+    if (Features().weaponGallery && p) {
+        // debug: one weapon of every class, 3 s each (row, variation): saber, short saber, double saber, sword,
+        // vibroblade, double blade, baton, staff, pistol, heavy pistol, rifle, bowcaster, repeater, heavy repeater
+        static const int gallery[][2] = {{8, 1}, {10, 1}, {9, 1}, {2, 1}, {5, 1}, {6, 1}, {1, 1}, {0, 1},
+                                         {12, 1}, {13, 1}, {77, 1}, {19, 1}, {23, 1}, {24, 1}};
+        int n = (int)(sizeof gallery / sizeof gallery[0]);
+        int i = (int)((GetTickCount() / 3000) % n);
+        r = gallery[i][0];
+        rv = gallery[i][1];
+        l = -1;
+    }
+    if (p != g_player || r != g_rightRow || l != g_leftRow || rv != g_rightVar || lv != g_leftVar) {
         g_player = p;
         g_rightRow = r;
         g_leftRow = l;
+        g_rightVar = rv;
+        g_leftVar = lv;
         g_right = r >= 0 ? ClassOfBaseItem(r) : WC_NONE;
         g_left = l >= 0 ? ClassOfBaseItem(l) : WC_NONE;
-        Log("weapons: player %p right row %d (%s) left row %d (%s)", p, r, kProfiles[g_right].name, l, kProfiles[g_left].name);
+        Log("weapons: player %p right row %d var %d (%s) left row %d var %d (%s)", p, r, rv, kProfiles[g_right].name, l, lv,
+            kProfiles[g_left].name);
     }
 }
 
@@ -399,7 +418,8 @@ void Weapons_Draw(const float invEye[16]) {
         }
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);
-        DrawClass(c);
+        int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
+        if (!WeaponModels_Draw(row, var)) DrawClass(c);  // the game's own mesh; procedural proxy as fallback
         if (kProfiles[c].twoHanded) break;  // a two-handed weapon occupies both hands
     }
 
