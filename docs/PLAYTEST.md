@@ -2,6 +2,10 @@
 
 Start: quit Discord fully, connect Air Link, run `host\build\kvr_host.exe`, launch KotOR from Steam.
 
+One-time (already done on this PC): export the weapon models the hands use, from your own game files:
+`python tools\weapon_export.py "<game dir>" "<game dir>\kvr"` (writes `kvr\models` and `kvr\textures`).
+Without it the hands fall back to simple stand-in shapes.
+
 ## Controls
 
 | Input | Action |
