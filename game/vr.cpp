@@ -392,6 +392,8 @@ static void DrawHandItems() {
         invE[12 + r] = -(g_Q[0 * 3 + r] * g_t[0] + g_Q[1 * 3 + r] * g_t[1] + g_Q[2 * 3 + r] * g_t[2]);
     invE[15] = 1;
     Weapons_Draw(invE);
+    float worldView[16];
+    if (EngineCam_WorldView(worldView)) Weapons_DrawWarnings(worldView);
     p_glMatrixMode(GL_PROJECTION);
     p_glPopMatrix();
     p_glMatrixMode(mode);
@@ -632,6 +634,16 @@ void VR_EngineCamApplied(const float basePos[3]) {
 
 void VR_SetCinematic(bool on) {
     if (g_shm) g_shm->cinematic = on ? 1 : 0;
+}
+
+void VR_Haptic(int hand, float amplitude, float duration, float frequency) {
+    if (!g_shm || hand < 0 || hand > 1) return;
+    KvrHaptic& h = g_shm->haptic[hand];
+    h.amplitude = amplitude;
+    h.duration = duration;
+    h.frequency = frequency;
+    MemoryBarrier();
+    h.serial = h.serial + 1;
 }
 
 float VR_HeadYaw() {

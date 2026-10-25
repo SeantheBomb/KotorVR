@@ -401,10 +401,25 @@ static bool SavePng(SharedTex& s, const std::string& path) {
 }
 
 // ---------------------------------------------------------------- main loop helpers
+// the game's haptic requests, logged as "haptic L/R ..." (scripts check them with wait_out)
+static void LogHaptics() {
+    static uint32_t seen[2];
+    static bool primed;
+    for (int h = 0; h < 2; h++) {
+        uint32_t serial = g_shm->haptic[h].serial;
+        if (primed && serial != seen[h])
+            printf("[%.1f]   haptic %c amp %.2f dur %.3f freq %.0f\n", Now(), h ? 'R' : 'L', g_shm->haptic[h].amplitude,
+                   g_shm->haptic[h].duration, g_shm->haptic[h].frequency);
+        seen[h] = serial;
+    }
+    primed = true;
+}
+
 static void Tick() {
     PublishHead();
     PublishInput();
     PullAll();
+    LogHaptics();
     static double lastCsv;
     double now = Now();
     if (g_csv && now - lastCsv >= 0.1) {

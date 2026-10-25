@@ -62,12 +62,22 @@ void QuatMul(const float a[4], const float b[4], float out[4]) {
     out[3] = a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0];
 }
 
+float g_view[16];
+bool g_viewFrame;
+
 }  // namespace
+
+bool EngineCam_WorldView(float out[16]) {
+    if (!g_viewFrame) return false;
+    memcpy(out, g_view, sizeof g_view);
+    return true;
+}
 
 extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     g_applied = false;
     float fov = *(float*)(cam + 0x1D0);
     if (fov < 25.0f || !VR_IsActive()) return;  // GUI scenes (portraits, menu model) use ~22.7
+    g_viewFrame = false;
     float* pos = (float*)(cam + 0x7C);
     float* q = (float*)(cam + 0x88);
     if (!g_verified) {
@@ -120,6 +130,18 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     for (int r = 0; r < 3; r++)
         pos[r] = basePos[r] + M[r * 3 + 0] * eye.pos[0] + M[r * 3 + 1] * eye.pos[1] + M[r * 3 + 2] * eye.pos[2];
     memcpy(q, nq, sizeof nq);
+    // the engine's modelview for this eye: R * T(-p) with R = M(q)^T (verified convention), column-major
+    {
+        float E[9];
+        QuatWxyzToRows(nq, E);
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) g_view[c * 4 + r] = E[c * 3 + r];
+            g_view[r * 4 + 3] = 0;
+            g_view[12 + r] = -(E[0 * 3 + r] * pos[0] + E[1 * 3 + r] * pos[1] + E[2 * 3 + r] * pos[2]);
+        }
+        g_view[15] = 1;
+        g_viewFrame = true;
+    }
     g_cam = cam;
     g_applied = true;
     VR_EngineCamApplied(basePos);

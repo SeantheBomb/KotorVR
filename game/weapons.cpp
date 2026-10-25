@@ -19,6 +19,7 @@
 #include "weaponmodels.h"
 #include "features.h"
 #include "combat.h"
+#include "cues.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -378,6 +379,86 @@ void Weapons_Update() {
     }
 }
 
+void* Weapon_CreatureById(DWORD id) {
+    __try {
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        return server ? GetCreature(server, id) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
+// A downward chevron (two triangles) over the attacker's head, drawn in eye space so it always faces the player.
+// Amber while the attack winds up, white-gold and larger in the parry window (last 0.4 s), fading after impact.
+void Weapons_DrawWarnings(const float worldView[16]) {
+    if (!Features().cues || !LoadGl()) return;
+    CombatWarning w[8];
+    int n = Combat_IncomingWarnings(w, 8);
+    if (n == 0) return;
+    p_glPushAttrib(GL_ALL_ATTRIB_BITS);
+    p_glMatrixMode(GL_MODELVIEW);
+    p_glPushMatrix();
+    float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    p_glLoadMatrixf(identity);
+    p_glDisable(GL_LIGHTING);
+    p_glDisable(GL_FOG);
+    p_glDisable(GL_ALPHA_TEST);
+    p_glDisable(GL_STENCIL_TEST);
+    p_glDisable(GL_CULL_FACE);
+    p_glDisable(GL_DEPTH_TEST);  // seen through anything, like Arkham's counter icons
+    p_glDisable(0x8620 /* GL_VERTEX_PROGRAM_ARB */);
+    p_glDisable(0x8804 /* GL_FRAGMENT_PROGRAM_ARB */);
+    p_glDisable(0x8870 /* GL_REGISTER_COMBINERS_NV */);
+    if (p_glActiveTextureARB) {
+        for (int u = 3; u >= 0; u--) {
+            p_glActiveTextureARB(0x84C0 + u);
+            p_glDisable(GL_TEXTURE_2D);
+        }
+    } else {
+        p_glDisable(GL_TEXTURE_2D);
+    }
+    p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    p_glEnable(GL_BLEND);
+    p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    p_glDepthMask(GL_FALSE);
+    for (int i = 0; i < n; i++) {
+        float wp[3];
+        __try {
+            BYTE* c = (BYTE*)Weapon_CreatureById(w[i].attacker);
+            if (!c) continue;
+            wp[0] = *(float*)(c + 0x90);
+            wp[1] = *(float*)(c + 0x94);
+            wp[2] = *(float*)(c + 0x98) + 2.1f;  // above the head (creature origin is at its feet)
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            continue;
+        }
+        float e[3];
+        for (int r = 0; r < 3; r++)
+            e[r] = worldView[0 * 4 + r] * wp[0] + worldView[1 * 4 + r] * wp[1] + worldView[2 * 4 + r] * wp[2] + worldView[12 + r];
+        if (e[2] > -0.3f) continue;  // behind / at the eye
+        float left = w[i].secondsLeft;
+        bool parry = left <= 0.4f;
+        float fade = left < 0 ? 1.0f + left / 0.15f : 1.0f;  // gone 0.15 s after the impact
+        float s = parry ? 0.22f : 0.15f;
+        float rgb[3] = {1.0f, parry ? 0.92f : 0.55f, parry ? 0.6f : 0.1f};
+        for (int pass = 0; pass < 2; pass++) {  // soft halo, then the core
+            float k = pass ? 1.0f : 1.8f, a = (pass ? 0.95f : 0.25f) * fade;
+            p_glColor4f(rgb[0], rgb[1], rgb[2], a);
+            p_glBegin(GL_TRIANGLES);
+            // chevron: outer down-pointing triangle minus a notch, as two triangles
+            p_glVertex3f(e[0] - s * k, e[1] + s * 0.6f * k, e[2]);
+            p_glVertex3f(e[0], e[1] - s * 0.6f * k, e[2]);
+            p_glVertex3f(e[0], e[1] - s * 0.1f * k, e[2]);
+            p_glVertex3f(e[0] + s * k, e[1] + s * 0.6f * k, e[2]);
+            p_glVertex3f(e[0], e[1] - s * 0.1f * k, e[2]);
+            p_glVertex3f(e[0], e[1] - s * 0.6f * k, e[2]);
+            p_glEnd();
+        }
+    }
+    p_glPopMatrix();
+    p_glPopAttrib();
+}
+
 void Weapons_Draw(const float invEye[16]) {
     const KvrShared* shm = VR_Shared();
     if (!shm || !LoadGl()) return;
@@ -422,7 +503,7 @@ void Weapons_Draw(const float invEye[16]) {
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
-        if (!WeaponModels_Draw(row, var)) DrawClass(c);  // the game's own mesh; procedural proxy as fallback
+        if (!WeaponModels_Draw(row, var, Cues_Glow(h))) DrawClass(c);  // the game's own mesh; procedural proxy as fallback
         if (kProfiles[c].twoHanded) break;  // a two-handed weapon occupies both hands
     }
 

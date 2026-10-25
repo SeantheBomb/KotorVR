@@ -39,3 +39,8 @@ void Weapons_Update();
 // Draw the proxies for both hands into the world, before the eye image is captured. `invEye` is the inverse eye
 // pose in the recenter-origin frame (column-major), `zn` the near plane; the projection must already be the eye's.
 void Weapons_Draw(const float invEye[16]);
+// Arkham-style warning glyphs over enemies whose attack on the player is about to land (combat.cpp timeline).
+// `worldView` is the eye's world modelview (KotOR meters); the projection must already be the eye's.
+void Weapons_DrawWarnings(const float worldView[16]);
+// Server creature for an object id, or null.
+void* Weapon_CreatureById(DWORD id);

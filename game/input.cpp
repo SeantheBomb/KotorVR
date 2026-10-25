@@ -18,6 +18,8 @@
 #include "gestures.h"
 #include "weapons.h"
 #include "features.h"
+#include "combat.h"
+#include "cues.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -148,6 +150,8 @@ void Input_Update(HWND wnd) {
         float headPos[3] = {0, 0, 0};
         VR_HeadPos(headPos);
         Gestures_Update(in, headPos);
+        Combat_Update();
+        Cues_Update();
         double now = Gestures_Now();
         float swingQ;
         // Attacks go through KotOR's Default Action (R) on the current target: clicking would make the character
@@ -158,6 +162,7 @@ void Input_Update(HWND wnd) {
             g_gestureKey = DIK_R;
             g_gestureKeyAt = now;
             Log("input: swing -> attack current target");
+            if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         static bool trigWas;
         bool trigNow = in.trigR > 0.6f;
@@ -165,6 +170,7 @@ void Input_Update(HWND wnd) {
             if (!Weapon_Profile(Weapon_Right()).melee) Gestures_OnShot();
             g_gestureKey = DIK_R;
             g_gestureKeyAt = now;
+            if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         trigWas = trigNow;
         if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyAt = now; }  // target slot 2: Force powers

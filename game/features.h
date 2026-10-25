@@ -8,6 +8,7 @@ struct FeatureFlags {
     bool gestures;       // melee swings / shots / Force gestures trigger actions
     bool combat;         // timing bonus and block / dodge on the d20 roll
     bool weaponGallery;  // [Debug] WeaponGallery=1: cycle the in-hand model through every class (screenshots)
+    bool cues;           // combat feedback: haptics, weapon glow, KotOR sounds for blocks / timing / warnings
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };
 

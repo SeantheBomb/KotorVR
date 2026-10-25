@@ -160,7 +160,7 @@ void WeaponModels_Init(const char* gameDir) {
     Log("weaponmodels: %zu base item model prefixes", g_prefix.size());
 }
 
-bool WeaponModels_Draw(int row, int variation) {
+bool WeaponModels_Draw(int row, int variation, float glow) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end() || !LoadGl()) return false;
     char resref[64];
@@ -202,6 +202,24 @@ bool WeaponModels_Draw(int row, int variation) {
             }
             p_glEnd();
         }
+    }
+    if (glow > 0.01f) {  // cue glow: the same meshes again, additive, brighter on the blade than on the hilt / body
+        p_glEnable(GL_BLEND);
+        p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        p_glDepthMask(GL_FALSE);
+        for (const WMesh& me : m->meshes) {
+            bool blade = (me.flags & 1) != 0;
+            p_glBindTexture(GL_TEXTURE_2D, GetTexture(me.texture));
+            p_glColor4f(1, 1, 1, glow * (blade ? 1.0f : 0.5f));
+            p_glBegin(GL_TRIANGLES);
+            for (unsigned short i : me.idx) {
+                if ((size_t)i * 3 + 2 >= me.pos.size()) continue;
+                p_glTexCoord2fv(&me.uv[(size_t)i * 2]);
+                p_glVertex3fv(&me.pos[(size_t)i * 3]);
+            }
+            p_glEnd();
+        }
+        p_glDepthMask(GL_TRUE);
     }
     p_glDisable(GL_TEXTURE_2D);
     p_glDisable(GL_ALPHA_TEST);

@@ -31,12 +31,22 @@ Start a fight by gripping on an enemy.
 
 ## Combat skill layer (d20 untouched otherwise)
 
-- A swing (melee) or trigger pull (ranged) within 2 s before your attack resolves gives +2..+4 to a fresh d20
-  (harder swing / steadier aim = more). A natural 1 still misses. Log line: `combat: player attack ...`.
-- When an enemy attacks you: holding a melee weapon raised across your body (block / deflect) gives a 60% chance
-  to turn the hit into a miss; a sharp dodge (head sideways or ducking ≥ 18 cm) gives 50%. Log: `combat: incoming`.
+- **Your attacks are on a beat.** Once a fight is going, KotOR attacks once per round. Swing (or pull the trigger) in
+  the last 0.6 s before your attack rolls: +4 to the d20. Within 2 s: +2. The weapon pulses gently and the hand ticks
+  when that window opens; a swing inside it flares the blade with a heavy thump and the weapon's own swing whoosh.
+  A natural 1 still misses. Log: `combat: player_attack, gesture X s before the roll`.
+- **Blocks happen when the blow lands** (`[Combat] ImpactBlock=1`, default). An amber chevron appears over an enemy
+  about to hit you; it turns white-gold in the last 0.4 s. Hold your melee weapon across your body:
+  - raised into the blow (guard up for 0.4 s or less at impact): **parry**, 95%: bright flash, sharp buzz, saber clash
+    (or the weapon's parry sound)
+  - guard held longer: block, 60%; head dodge (sideways / duck 18 cm): 50%, both hands buzz
+  - failed: dull double pulse, you take the hit. Log: `combat: impact ...`
+  A stopped hit still plays KotOR's hit animation on the enemy side; you just take no damage.
 - Weapons in hand are detected from your equipped items (all KotOR classes: sabers single/short/double, swords,
   vibroblades, double blades, batons, staffs, pistols, rifles, repeaters); two-handed melee spans both hands.
+- Sounds are KotOR's own (`python tools\sound_export.py "<game dir>"`, already done here), at your Sound Effects
+  volume. Swap any in `kvr.ini [Sounds]` (e.g. `BlockSaber=cb_ls_clash2`, empty = silent).
+- KotOR's own "Enemy sighted" auto-pause is on in your options: press A to unpause.
 
 ## What to judge (feel — the harness covers the mechanics)
 
@@ -61,6 +71,10 @@ EngineCamera=1    ; 0 = old GL-level head tracking (culling follows the game cam
 WeaponProxies=1   ; 0 = no weapons drawn in the hands
 Gestures=1        ; 0 = swings / shots / Force gestures do nothing
 Combat=1          ; 0 = no timing bonus or block / dodge on the d20
+Cues=1            ; 0 = no haptics / weapon glow / cue sounds / warning chevrons
+
+[Combat]
+ImpactBlock=1     ; 0 = old behavior: block / dodge decided at the roll (no parry window, warnings only cosmetic)
 ```
 
 Logs: `<game>\kvr\probe.log` (game layer), the host's terminal window.

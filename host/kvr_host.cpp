@@ -330,7 +330,7 @@ static bool InitXR() {
 
 // ---------------------------------------------------------------- controllers
 static XrActionSet g_actSet;
-static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_gripPose, a_btnA, a_btnB, a_btnX, a_btnY, a_menu, a_stickClick;
+static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_gripPose, a_btnA, a_btnB, a_btnX, a_btnY, a_menu, a_stickClick, a_haptic;
 static XrPath g_handPath[2];
 static XrSpace g_aimSpace[2], g_gripSpace[2];
 static Swapchain g_beamSc, g_dotSc;
@@ -374,7 +374,8 @@ static bool InitControls() {
               MakeAction(a_btnX, "button_x", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
               MakeAction(a_btnY, "button_y", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
               MakeAction(a_menu, "menu", XR_ACTION_TYPE_BOOLEAN_INPUT, false) &&
-              MakeAction(a_stickClick, "stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, true);
+              MakeAction(a_stickClick, "stick_click", XR_ACTION_TYPE_BOOLEAN_INPUT, true) &&
+              MakeAction(a_haptic, "haptic", XR_ACTION_TYPE_VIBRATION_OUTPUT, true);
     if (!ok) return false;
 
     XrActionSuggestedBinding b[] = {
@@ -395,6 +396,8 @@ static bool InitControls() {
         {a_menu, MakePath("/user/hand/left/input/menu/click")},
         {a_stickClick, MakePath("/user/hand/left/input/thumbstick/click")},
         {a_stickClick, MakePath("/user/hand/right/input/thumbstick/click")},
+        {a_haptic, MakePath("/user/hand/left/output/haptic")},
+        {a_haptic, MakePath("/user/hand/right/output/haptic")},
     };
     XrInteractionProfileSuggestedBinding sb{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
     sb.interactionProfile = MakePath("/interaction_profiles/oculus/touch_controller");
@@ -495,6 +498,29 @@ struct PointerResult {
 // panelPose/panelW/panelH describe the panel quad in LOCAL space when it is visible.
 static bool HudSolidAt(float u, float v);
 
+// Game -> controller rumble: one pulse per KvrHaptic serial change (combat feedback cues).
+static void PlayHaptics() {
+    static uint32_t seen[2];
+    static bool primed;
+    for (int h = 0; h < 2; h++) {
+        uint32_t serial = g_shm->haptic[h].serial;
+        if (!primed || serial == seen[h]) {
+            seen[h] = serial;
+            continue;
+        }
+        seen[h] = serial;
+        XrHapticVibration v{XR_TYPE_HAPTIC_VIBRATION};
+        v.amplitude = g_shm->haptic[h].amplitude;
+        v.duration = (XrDuration)(g_shm->haptic[h].duration * 1e9);
+        v.frequency = g_shm->haptic[h].frequency > 0 ? g_shm->haptic[h].frequency : XR_FREQUENCY_UNSPECIFIED;
+        XrHapticActionInfo hi{XR_TYPE_HAPTIC_ACTION_INFO};
+        hi.action = a_haptic;
+        hi.subactionPath = g_handPath[h];
+        xrApplyHapticFeedback(g_session, &hi, (const XrHapticBaseHeader*)&v);
+    }
+    primed = true;
+}
+
 static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& panelPose, float panelW, float panelH, bool world, bool hud) {
     PointerResult pr;
     XrActiveActionSet aas{g_actSet, XR_NULL_PATH};
@@ -502,6 +528,7 @@ static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& 
     syn.countActiveActionSets = 1;
     syn.activeActionSets = &aas;
     bool synced = XR_SUCCEEDED(xrSyncActions(g_session, &syn));
+    if (synced) PlayHaptics();
 
     XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
     if (synced && XR_SUCCEEDED(xrLocateSpace(g_aimSpace[1], g_local, t, &loc)) &&

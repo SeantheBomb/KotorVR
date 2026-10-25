@@ -38,7 +38,7 @@ struct Track {
 Track g_right, g_left, g_head, g_aimDir;
 double g_now;
 
-double g_lastSwingAt = -10, g_lastShotAt = -10, g_lastGuardAt = -10, g_lastDodgeAt = -10;
+double g_lastSwingAt = -10, g_lastShotAt = -10, g_lastGuardAt = -10, g_lastDodgeAt = -10, g_guardOnAt = -10;
 float g_lastAttackQuality;
 double g_lastAttackAt = -10;
 bool g_swingPending, g_pushPending, g_pullPending;
@@ -124,6 +124,7 @@ void Gestures_Update(const KvrInput& in, const float headPos[3]) {
         static bool wasGuard;
         if ((raised && across) != wasGuard) {
             wasGuard = raised && across;
+            if (wasGuard) g_guardOnAt = g_now;
             Log("gesture: guard %s (lateral %.2f up %.2f toward %.2f)", wasGuard ? "on" : "off", lateral, f[1], toward);
         }
     }
@@ -183,6 +184,8 @@ float Gestures_ConsumeRecentAttack(double seconds) {
 
 bool Gestures_Guarding(double seconds) { return g_now - g_lastGuardAt <= seconds; }
 bool Gestures_Dodged(double seconds) { return g_now - g_lastDodgeAt <= seconds; }
+double Gestures_GuardHeldFor() { return g_now - g_lastGuardAt <= 0.05 ? g_now - g_guardOnAt : -1; }
+double Gestures_LastAttackAgo() { return g_now - g_lastAttackAt; }
 
 bool Gestures_TakeForcePush() {
     bool r = g_pushPending;

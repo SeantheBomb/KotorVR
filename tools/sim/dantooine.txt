@@ -32,8 +32,8 @@ shot walked
 shot fight
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 1.5
-hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # saber across the body: guard
-wait 3
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # saber across the body: guard (blocks decided at impact)
+wait 8
 hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 1.5
@@ -45,4 +45,4 @@ head yaw=0 x=0 over=0.3
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 3
 shot after
-wait_log player_attack 30
+wait_log impact 30

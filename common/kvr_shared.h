@@ -8,7 +8,7 @@
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 6
+#define KVR_VERSION 7
 
 #pragma pack(push, 8)
 
@@ -72,6 +72,15 @@ struct KvrInput {
     double time;                  // host clock (s) when these poses were sampled, for velocities
 };
 
+// Game -> host haptic pulse request for one hand. The game fills the fields, then bumps serial; the host plays one
+// pulse per serial change (a newer request replaces one still playing).
+struct KvrHaptic {
+    volatile uint32_t serial;
+    float amplitude;    // 0..1
+    float duration;     // seconds
+    float frequency;    // Hz, 0 = runtime default
+};
+
 struct KvrShared {
     uint32_t magic;
     uint32_t version;
@@ -87,6 +96,7 @@ struct KvrShared {
     volatile uint32_t lastWorldFrame;  // gameAlive value of the last frame that rendered the 3D world
     KvrInput input;                    // host -> game controller state
     volatile uint32_t cinematic;       // game is on a dialogue/cutscene camera (world FOV != gameplay FOV)
+    KvrHaptic haptic[2];               // game -> host, left / right hand
 };
 
 #pragma pack(pop)

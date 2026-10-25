@@ -39,6 +39,8 @@ struct KvrPose;
 bool VR_IsActive();
 // Head yaw relative to the game camera (radians, + = turned left); 0 when VR is inactive.
 float VR_HeadYaw();
+// Ask the host for one controller rumble pulse (hand 0 left, 1 right); amplitude 0..1, seconds, Hz (0 = default).
+void VR_Haptic(int hand, float amplitude, float duration, float frequency);
 // Head (eye 0) position in the recenter-origin frame.
 void VR_HeadPos(float out[3]);
 bool VR_ChooseEye(KvrPose* out);
