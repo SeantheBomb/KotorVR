@@ -31,6 +31,7 @@ const BYTE kResolverOrig[6] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00};  // mov eax,
 volatile DWORD* const kForcedRoll = (volatile DWORD*)0x832874;
 
 BYTE* g_tramp;
+volatile DWORD g_lastAttack;  // GetTickCount of the last attack roll by anyone (0 = none)
 
 unsigned D20() {
     unsigned v = 0;
@@ -50,6 +51,7 @@ void* AsCreature(void* obj) {
 
 extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     *kForcedRoll = 0;
+    g_lastAttack = GetTickCount() | 1;
     void* player = Weapon_PlayerCreature();
     if (!player) return;
     void* target = targetObj ? AsCreature(targetObj) : nullptr;
@@ -61,7 +63,7 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         int bonus = (int)(2.0f + 2.0f * (q - 1.0f) + 0.5f);  // quality 1..2 -> +2..+4
         unsigned forced = nat == 1 ? 1 : (nat + bonus > 20 ? 20 : nat + bonus);
         *kForcedRoll = forced;
-        Log("combat: player attack, quality %.2f: d20 %u +%d -> %u", q, nat, bonus, forced);
+        Log("combat: player_attack, quality %.2f: d20 %u +%d -> %u", q, nat, bonus, forced);
         return;
     }
     if (target == player) {
@@ -78,6 +80,11 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
             Log("combat: incoming attack, %s failed (d20 %u > %u)", guard ? "block" : "dodge", roll, chance);
         }
     }
+}
+
+bool Combat_AttackWithin(unsigned long ms) {
+    DWORD t = g_lastAttack;
+    return t && GetTickCount() - t < ms;
 }
 
 __declspec(naked) static void ResolverStub() {

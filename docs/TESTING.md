@@ -25,7 +25,8 @@ What still needs a person in the headset: comfort, scale, locomotion feel, reada
 
 ## Combat test (tools/sim/dantooine.txt)
 
-Needs `EnableCheats=1` under `[Game Options]` in swkotor.ini (remove it afterwards). Loads Game1, opens the console
+Needs `EnableCheats=1` under `[Game Options]` and `[Autopause Options]` with `Enemy Sighted=0` and `Party Killed=0`
+in swkotor.ini (remove them afterwards). It also turns on `invulnerability`: the kinrath swarm kills a Dantooine-level party. Loads Game1, opens the console
 (`key grave`, `type warp kas_m22ab`, `key enter`) and warps to the Kashyyyk Upper Shadowlands, which Game1 has never
 loaded, so the kinrath ~14 m from the entry are still alive (Game1 already cleared the Dantooine wilderness).
 `[Debug] TracePosition=1` in kvr.ini logs `pos:` lines every 2 s for route-finding. Extra simhost commands:

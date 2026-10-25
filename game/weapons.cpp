@@ -18,6 +18,7 @@
 #include "vr.h"
 #include "weaponmodels.h"
 #include "features.h"
+#include "combat.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -338,7 +339,9 @@ bool Weapon_PlayerInCombat() {
             logged = true;
             Log("weapons: combat round active, RoundLength %ld, Timer %ld", *(long*)(round + 0x94C), *(long*)(round + 0x944));
         }
-        return started;
+        // RoundStarted only goes up once the player attacks; until then, any attack roll in the last 6 s (enemies on
+        // the party) counts as combat too, otherwise the first swing could never be sent
+        return started || Combat_AttackWithin(6000);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return false;
 }

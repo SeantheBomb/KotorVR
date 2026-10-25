@@ -61,7 +61,8 @@ static int g_targetHead;
 static int g_autoClickFrames;  // frames remaining (press during the middle of the run)
 static float g_autoTx, g_autoTy;
 // keys pressed by gestures for a few frames
-static int g_gestureKeyFrames;
+// gesture key press: held for a fixed time (a few frames is only ~16 ms at 250 fps), then released
+static double g_gestureKeyAt = -1;
 static BYTE g_gestureKey;
 static POINT g_targetScreen;
 static DWORD g_lastCursorInfoTick;
@@ -155,7 +156,7 @@ void Input_Update(HWND wnd) {
         bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
         if (Gestures_TakeSwing(&swingQ) && fighting) {
             g_gestureKey = DIK_R;
-            g_gestureKeyFrames = 6;
+            g_gestureKeyAt = now;
             Log("input: swing -> attack current target");
         }
         static bool trigWas;
@@ -163,14 +164,14 @@ void Input_Update(HWND wnd) {
         if (trigNow && !trigWas && fighting) {
             if (!Weapon_Profile(Weapon_Right()).melee) Gestures_OnShot();
             g_gestureKey = DIK_R;
-            g_gestureKeyFrames = 6;
+            g_gestureKeyAt = now;
         }
         trigWas = trigNow;
-        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyFrames = 6; }  // target slot 2: Force powers
-        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyFrames = 6; }  // personal power slot
-        if (g_gestureKeyFrames > 0) {
-            g_gestureKeyFrames--;
-            if (g_gestureKeyFrames >= 2) keys[g_gestureKey] = 0x80;  // press, then release for two frames
+        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyAt = now; }  // target slot 2: Force powers
+        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; }  // personal power slot
+        if (g_gestureKeyAt >= 0) {
+            if (now - g_gestureKeyAt < 0.1) keys[g_gestureKey] = 0x80;
+            else g_gestureKeyAt = -1;
         }
 
         if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause

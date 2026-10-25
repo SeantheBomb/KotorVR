@@ -2,7 +2,7 @@
 # start a fight, then swing, block and shoot. Requires EnableCheats=1 in swkotor.ini
 # (run_sim does not change it; the dantooine wrapper does). Nothing is saved.
 wait_menu 90
-wait 35                    # wait_menu can return during the intro; the real menu loads after a ~10 s stall
+wait 12
 click u=0.559 v=0.521      # Load Game
 wait 3
 click u=0.410 v=0.431      # Game 1
@@ -17,15 +17,18 @@ key enter
 wait 6
 wait_world 120
 wait 3
+key grave                  # the kinrath swarm kills a Dantooine-level party: player invulnerable (damage only, rolls unchanged)
+type invulnerability
+key enter
 shot arrived
 pointer world
 hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
 # Game1 has already cleared the Dantooine wilderness (Matale Grounds hounds, Crystal Caves kinrath), so warp to a
 # module the save has never loaded: Kashyyyk Upper Shadowlands, kinrath ~14 m from the entry (faces (0.2,0.98)).
 # TracePosition=1 in kvr.ini logs "pos:" lines for route checks.
-stick ly=1 for=2
+# also needs [Autopause Options] Enemy Sighted=0 in swkotor.ini, or the game pauses on arrival
+wait 8                     # let it close in and attack (opens the swing gate)
 shot walked
-wait_log RoundLength 60
 shot fight
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 1.5
@@ -42,4 +45,4 @@ head yaw=0 x=0 over=0.3
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 3
 shot after
-wait_log combat: 30
+wait_log player_attack 30
