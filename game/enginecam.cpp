@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "../common/kvr_shared.h"
+#include "features.h"
 #include "vr.h"
 
 extern void Log(const char* fmt, ...);
@@ -89,6 +90,17 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         memcpy(g_playPos, g_origPos, sizeof g_playPos);
         memcpy(g_playQ, g_origQ, sizeof g_playQ);
         g_havePlay = true;
+        if (Features().tracePosition) {
+            static DWORD last;
+            DWORD t = GetTickCount();
+            if (t - last > 2000) {
+                last = t;
+                // camera forward is local -Z: third column of M(q), negated
+                float M0[9];
+                QuatWxyzToRows(g_origQ, M0);
+                Log("pos: %.1f %.1f %.1f fwd %.2f %.2f", g_playPos[0], g_playPos[1], g_playPos[2], -M0[2], -M0[5]);
+            }
+        }
     } else if (g_havePlay) {
         // dialogue / cutscene camera nearby: stay in the player's head instead of cutting away
         float dx = g_origPos[0] - g_playPos[0], dy = g_origPos[1] - g_playPos[1], dz = g_origPos[2] - g_playPos[2];

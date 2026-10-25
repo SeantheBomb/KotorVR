@@ -19,6 +19,9 @@
 //   hand <L|R> [x= y= z=] [yaw= pitch= roll=]      place a hand (grip pose, relative to the recenter origin, deg)
 //   swing [dx= dy= dz=] [over=<s>]    sweep the right hand by (dx,dy,dz) m over <s> (default 0.6,0.3,0 in 0.18 s)
 //   trigger [for=<s>]                 pull the right trigger without pointing at the panel
+//   key <name>                        tap a key in the game window: grave (console), enter, escape, space, f1..f12
+//   type <text...>                    type text into the game window (the rest of the line, spaces included)
+//   wait_log <substring> <timeout>    until <game>\kvr\probe.log contains the substring (e.g. "combat round active")
 //   pointer none|world                stop pointing / point into the world along the head direction
 //   shot <name>                       save <name>_eye0.png, <name>_eye1.png, <name>_panel.png
 //   expect_world                      fail the run unless the world is rendering
@@ -34,6 +37,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <share.h>
+#include <tlhelp32.h>
 #include <string>
 #include <vector>
 
@@ -43,6 +48,7 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "user32.lib")
 
 enum { KEY_GAME = 0, KEY_HOST = 1 };  // must match game/vr.cpp and host/kvr_host.cpp
 
@@ -141,6 +147,91 @@ struct Controls {
     float u = 0, v = 0;
 };
 static Controls g_ctl;
+
+// ---------------------------------------------------------------- keyboard into the game (console commands)
+static HWND GameWindow() {
+    // the visible top-level window of swkotor.exe (titles are not unique enough)
+    static DWORD pid;
+    static double pidAt = -10;
+    if (Now() - pidAt > 5) {
+        pidAt = Now();
+        pid = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        PROCESSENTRY32 pe = {sizeof pe};
+        for (BOOL ok = Process32First(snap, &pe); ok; ok = Process32Next(snap, &pe))
+            if (!_stricmp(pe.szExeFile, "swkotor.exe")) pid = pe.th32ProcessID;
+        CloseHandle(snap);
+    }
+    if (!pid) return nullptr;
+    struct Find { DWORD pid; HWND w; } f = {pid, nullptr};
+    EnumWindows([](HWND w, LPARAM p) -> BOOL {
+        Find* f = (Find*)p;
+        DWORD wp = 0;
+        GetWindowThreadProcessId(w, &wp);
+        if (wp == f->pid && IsWindowVisible(w) && !GetWindow(w, GW_OWNER)) { f->w = w; return FALSE; }
+        return TRUE;
+    }, (LPARAM)&f);
+    return f.w;
+}
+
+static void FocusGame() {
+    HWND w = GameWindow();
+    if (!w || GetForegroundWindow() == w) return;
+    printf("[%.1f]   (refocusing the game; foreground was %p)\n", Now(), (void*)GetForegroundWindow());
+    INPUT alt[2] = {};
+    alt[0].type = alt[1].type = INPUT_KEYBOARD;
+    alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+    alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, alt, sizeof(INPUT));
+    SetForegroundWindow(w);
+    Sleep(150);
+}
+
+static void TapKey(WORD vk) {
+    INPUT in[2] = {};
+    in[0].type = in[1].type = INPUT_KEYBOARD;
+    in[0].ki.wVk = in[1].ki.wVk = vk;
+    in[0].ki.wScan = in[1].ki.wScan = (WORD)MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
+    in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(2, in, sizeof(INPUT));
+}
+
+static void TypeChar(char c) {
+    SHORT v = VkKeyScanA(c);
+    if (v == -1) return;
+    bool shift = (v >> 8) & 1;
+    INPUT in[4] = {};
+    int n = 0;
+    auto key = [&](WORD vk, bool up) {
+        in[n].type = INPUT_KEYBOARD;
+        in[n].ki.wVk = vk;
+        in[n].ki.wScan = (WORD)MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
+        in[n].ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+        n++;
+    };
+    if (shift) key(VK_SHIFT, false);
+    key((WORD)(v & 0xFF), false);
+    key((WORD)(v & 0xFF), true);
+    if (shift) key(VK_SHIFT, true);
+    SendInput(n, in, sizeof(INPUT));
+}
+
+static bool LogContains(const std::string& needle) {
+    FILE* f = _fsopen("C:\\Program Files (x86)\\Steam\\steamapps\\common\\swkotor\\kvr\\probe.log", "rb", _SH_DENYNO);
+    if (!f) return false;
+    static std::string buf;
+    buf.assign(1 << 20, '\0');
+    bool hit = false;
+    size_t n;
+    std::string carry;
+    while ((n = fread(&buf[0], 1, buf.size(), f)) > 0) {
+        std::string chunk = carry + buf.substr(0, n);
+        if (chunk.find(needle) != std::string::npos) { hit = true; break; }
+        carry = chunk.size() > needle.size() ? chunk.substr(chunk.size() - needle.size()) : chunk;
+    }
+    fclose(f);
+    return hit;
+}
 
 // grip poses: resting low in front of the body, weapons pointing forward and slightly up
 struct HandPose {
@@ -326,7 +417,9 @@ static void Tick() {
 
 static void RunFor(double seconds) {
     double end = Now() + seconds;
-    while (!g_quit && Now() < end) Tick();
+    while (!g_quit && Now() < end) {
+        Tick();
+    }
 }
 
 template <class F> static bool RunUntil(double timeout, F cond) {
@@ -467,6 +560,7 @@ int main(int argc, char** argv) {
             Arg(args, "u", u);
             Arg(args, "v", vv);
             Arg(args, "hold", hold);
+            FocusGame();  // a window that stole the foreground swallows the click otherwise
             g_ctl.pointer = KVR_POINTER_PANEL;
             g_ctl.u = (float)u;
             g_ctl.v = (float)vv;
@@ -497,6 +591,34 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.1);
+        } else if (cmd == "key") {
+            std::string k = args.empty() ? "" : args[0];
+            WORD vk = k == "grave" ? VK_OEM_3 : k == "enter" ? VK_RETURN : k == "escape" ? VK_ESCAPE : k == "space" ? VK_SPACE : 0;
+            if (!vk && k.size() >= 2 && (k[0] == 'f' || k[0] == 'F')) vk = (WORD)(VK_F1 + atoi(k.c_str() + 1) - 1);
+            if (!vk) { printf("line %d: unknown key\n", lineNo); result = 2; break; }
+            FocusGame();
+            TapKey(vk);
+            RunFor(0.3);
+        } else if (cmd == "type") {
+            std::string text;  // the arguments re-joined with single spaces
+            for (size_t i = 0; i < args.size(); i++) text += (i ? " " : "") + args[i];
+            FocusGame();
+            for (char c : text) {
+                TypeChar(c);
+                RunFor(0.04);
+            }
+            RunFor(0.2);
+        } else if (cmd == "wait_log") {
+            std::string needle = args.empty() ? "" : args[0];
+            double timeout = args.size() > 1 ? atof(args[1].c_str()) : 60;
+            bool ok = RunUntil(timeout, [&] { return LogContains(needle); });
+            printf("[%.1f]   %s\n", Now(), ok ? "found" : "NOT FOUND");
+            if (!ok) {
+                const char* suffix[3] = {"eye0", "eye1", "panel"};
+                for (int i = 0; i < 3; i++) SavePng(g_shared[i], g_out + "\\timeout_" + suffix[i] + ".png");
+                result = 1;
+                break;
+            }
         } else if (cmd == "grip") {
             double hold = 0.2;
             Arg(args, "for", hold);
