@@ -1,0 +1,22 @@
+wait_menu 90
+wait 12
+click u=0.559 v=0.521      # Load Game
+wait 3
+click u=0.410 v=0.431      # Game 1
+wait 1.5
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+pointer world
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40      # ready stance, saber angled up: must NOT guard
+wait 2
+hand R x=0.25 y=-0.05 z=-0.30 yaw=0 pitch=80      # saber straight up: not a block
+wait 2
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # saber across the body: guard
+wait 2
+head yaw=60 over=0.5                              # turned left in the room, same pose relative to the head
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-10 pitch=10
+wait 2
+hand R x=0.30 y=-0.10 z=-0.30 yaw=60 pitch=40     # ready stance relative to the turned head
+wait 2

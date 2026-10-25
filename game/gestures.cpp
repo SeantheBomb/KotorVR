@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "../common/kvr_shared.h"
+#include "vr.h"
 #include "weapons.h"
 
 extern void Log(const char* fmt, ...);
@@ -112,8 +113,19 @@ void Gestures_Update(const KvrInput& in, const float headPos[3]) {
         float f[3];
         Forward(in.grip[1].quat, f);
         bool raised = h[1] > headPos[1] - 0.55f && h[2] < headPos[2] - 0.15f;
-        bool across = fabsf(f[1]) > 0.35f || fabsf(f[0]) > 0.6f;  // blade up/down or across, not pointing at the foe
+        // blade held across the body: mostly sideways relative to where the head faces, not tilted far up / down and
+        // not pointing at the foe (a ready stance with the saber angled up is not a block)
+        float yaw = VR_HeadYaw();
+        float right[3] = {cosf(yaw), 0, -sinf(yaw)}, fwd[3] = {-sinf(yaw), 0, -cosf(yaw)};
+        float lateral = fabsf(f[0] * right[0] + f[2] * right[2]);
+        float toward = fabsf(f[0] * fwd[0] + f[2] * fwd[2]);
+        bool across = lateral > 0.7f && fabsf(f[1]) < 0.7f && toward < 0.6f;
         if (raised && across) g_lastGuardAt = g_now;
+        static bool wasGuard;
+        if ((raised && across) != wasGuard) {
+            wasGuard = raised && across;
+            Log("gesture: guard %s (lateral %.2f up %.2f toward %.2f)", wasGuard ? "on" : "off", lateral, f[1], toward);
+        }
     }
 
     // --- dodge: head moves sharply sideways or down (>18 cm within 0.35 s)
