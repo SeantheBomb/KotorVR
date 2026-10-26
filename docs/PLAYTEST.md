@@ -2,9 +2,10 @@
 
 Start: quit Discord fully, connect Air Link, run `host\build\kvr_host.exe`, launch KotOR from Steam.
 
-One-time (already done on this PC): export the weapon models the hands use, from your own game files:
-`python tools\weapon_export.py "<game dir>" "<game dir>\kvr"` (writes `kvr\models` and `kvr\textures`).
-Without it the hands fall back to simple stand-in shapes.
+One-time (already done on this PC), from your own game files:
+- `python tools\weapon_export.py "<game dir>" "<game dir>\kvr"`: weapon models (else simple stand-in shapes)
+- `python tools\hand_export.py "<game dir>" "<game dir>\kvr"`: your character's hands, per body model and outfit
+- `python tools\sound_export.py "<game dir>"`: the combat cue and lightsaber sounds
 
 ## Controls
 
@@ -15,10 +16,12 @@ Without it the hands fall back to simple stand-in shapes.
 | Right stick X | turn (smooth, game camera) |
 | Right stick click | recenter |
 | Right hand pointing | KotOR's own hover highlight (no beam in the world) |
-| Right grip | select / use / talk to what your hand points at |
+| Right grip | use / talk to / open / attack what your hand points at (no mouse click: never fires a HUD slot) |
 | Right trigger on the HUD / menus | click (laser + white dot) |
-| **In combat** — melee swing | attack the current target |
+| **In combat** — melee swing | attack the current target (once attacking, swings only count for timing) |
+| **In combat** — overhead chop / forward thrust / 2 quick swings | Power Attack / Critical Strike / Flurry (best rank you have) |
 | **In combat** — right trigger | attack the current target (ranged: steady aim = better shot) |
+| **In combat** — shot after 1.2 s steady aim / 2 quick shots | Power Blast / Rapid Shot (best rank you have) |
 | **In combat** — left hand thrust forward | target action slot 2 (Force powers) |
 | **In combat** — left hand yank back | personal power slot (heal, speed, …) |
 | A | pause (Space) |
@@ -48,6 +51,17 @@ Start a fight by gripping on an enemy.
   volume. Swap any in `kvr.ini [Sounds]` (e.g. `BlockSaber=cb_ls_clash2`, empty = silent).
 - KotOR's own "Enemy sighted" auto-pause is on in your options: press A to unpause.
 
+## Lightsaber, hands, your body
+
+- The blade is off outside combat (hilt only), ignites when a fight starts and shuts off 4 s after it ends, with
+  KotOR's own ignite / shut-down sounds. While lit it hums; the hum rises with blade speed and fast strokes whoosh.
+- Your hands are your character's own (cut from their body model), so gloves / skin follow the outfit and the
+  character you control (Tab). Grip curls the fingers, trigger the index finger; a held weapon closes the fist.
+  A Force gesture makes the off hand surge blue with a low rumble.
+- Only your own model is hidden (exactly, not by distance): NPCs next to you, floors and walls stay.
+- Cutscenes keep you in your character's head and follow them if the scene walks them somewhere.
+- Hits you land: a thump and a spark burst when the blow connects (heavier on an on-beat attack).
+
 ## What to judge (feel — the harness covers the mechanics)
 
 1. Swing threshold: too easy / too hard to trigger? (`gesture: swing` lines show peak speed and travel)
@@ -55,6 +69,9 @@ Start a fight by gripping on an enemy.
 3. Block/dodge: readable? too strong / too weak?
 4. Force thrust / yank: do they fire when meant to, and not by accident?
 5. Ranged: does a steady aim feel rewarded?
+6. Hands: placement on the controllers, size, finger curl.
+7. Special moves: do the chop / thrust / quick swings fire when meant to, and not by accident?
+8. Picture: distant faces and textures (16x anisotropic + 4x MSAA now on in swkotor.ini).
 
 ## Weapons in your hands
 
@@ -72,6 +89,8 @@ WeaponProxies=1   ; 0 = no weapons drawn in the hands
 Gestures=1        ; 0 = swings / shots / Force gestures do nothing
 Combat=1          ; 0 = no timing bonus or block / dodge on the d20
 Cues=1            ; 0 = no haptics / weapon glow / cue sounds / warning chevrons
+Hands=1           ; 0 = no hands
+ModelCull=1       ; 0 = old distance-based hiding of your body
 
 [Combat]
 ImpactBlock=1     ; 0 = old behavior: block / dodge decided at the roll (no parry window, warnings only cosmetic)
