@@ -21,6 +21,7 @@
 #include "enginecam.h"
 #include "combat.h"
 #include "cues.h"
+#include "tutorial.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -172,6 +173,7 @@ void Input_Update(HWND wnd) {
         Gestures_Update(in, headPos);
         Combat_Update();
         Cues_Update();
+        Tutorial_Update();
         double now = Gestures_Now();
         float swingQ;
         // Attacks go through KotOR's Default Action (R) on the current target: clicking would make the character

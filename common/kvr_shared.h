@@ -3,12 +3,13 @@
 #pragma once
 #include <stdint.h>
 
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared"
+// the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v9"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 8
+#define KVR_VERSION 9
 
 #pragma pack(push, 8)
 
@@ -92,6 +93,24 @@ struct KvrHands {
     KvrPose joint[2][KVR_HAND_JOINTS];
 };
 
+// Game -> host text panels (VR instructions, notices, dialogue options): the host draws the text with DirectWrite
+// onto its own quad layer. The game fills the fields, then bumps serial.
+enum : uint32_t {
+    KVR_ANCHOR_HIDDEN = 0,
+    KVR_ANCHOR_HEAD = 1,   // pose relative to the head (follows your view)
+    KVR_ANCHOR_WORLD = 2,  // pose relative to the recenter origin (stays put)
+    KVR_ANCHOR_LWRIST = 3, // pose relative to the left controller grip
+};
+#define KVR_TEXT_PANELS 4
+struct KvrTextPanel {
+    volatile uint32_t serial;
+    uint32_t anchor;       // KVR_ANCHOR_*
+    KvrPose pose;          // quad center + orientation in the anchor's frame (quad faces +Z)
+    float width;           // meters (height follows the text's aspect: 2:1)
+    int32_t highlight;     // line index drawn highlighted (-1 none), for pickable option lists
+    char text[504];        // UTF-8; lines separated by \n; a line starting with '#' is a title
+};
+
 struct KvrShared {
     uint32_t magic;
     uint32_t version;
@@ -109,6 +128,7 @@ struct KvrShared {
     volatile uint32_t cinematic;       // game is on a dialogue/cutscene camera (world FOV != gameplay FOV)
     KvrHaptic haptic[2];               // game -> host, left / right hand
     KvrHands hands;                    // host -> game
+    KvrTextPanel text[KVR_TEXT_PANELS];  // game -> host
 };
 
 #pragma pack(pop)

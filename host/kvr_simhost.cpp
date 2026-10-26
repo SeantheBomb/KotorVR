@@ -444,12 +444,28 @@ static void TrackCalm() {
     }
 }
 
+// the game's text panels, logged as "text <slot> ..." when they change (the simulator has no headset to draw them)
+static void LogText() {
+    static uint32_t seen[KVR_TEXT_PANELS];
+    for (int i = 0; i < KVR_TEXT_PANELS; i++) {
+        uint32_t s = g_shm->text[i].serial;
+        if (s == seen[i]) continue;
+        seen[i] = s;
+        char first[96];
+        strncpy_s(first, g_shm->text[i].text, _TRUNCATE);
+        if (char* nl = strchr(first, '\n')) *nl = 0;
+        printf("[%.1f]   text %d anchor %u width %.2f: %s\n", Now(), i, g_shm->text[i].anchor, g_shm->text[i].width,
+               g_shm->text[i].anchor ? first : "(hidden)");
+    }
+}
+
 static void Tick() {
     PublishHead();
     PublishInput();
     PullAll();
     TrackCalm();
     LogHaptics();
+    LogText();
     static double lastCsv;
     double now = Now();
     if (g_csv && now - lastCsv >= 0.1) {

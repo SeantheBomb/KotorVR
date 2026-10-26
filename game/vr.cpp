@@ -767,6 +767,27 @@ bool VR_AimPick(KvrPose* out) {
     return true;
 }
 
+void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat[4], float width, const char* text,
+                 int highlight) {
+    if (!g_shm || slot < 0 || slot >= KVR_TEXT_PANELS) return;
+    KvrTextPanel& t = g_shm->text[slot];
+    t.anchor = anchor;
+    memcpy(t.pose.pos, pos, sizeof t.pose.pos);
+    memcpy(t.pose.quat, quat, sizeof t.pose.quat);
+    t.width = width;
+    t.highlight = highlight;
+    strncpy_s(t.text, text, _TRUNCATE);
+    MemoryBarrier();
+    t.serial = t.serial + 1;
+}
+
+void VR_HideText(int slot) {
+    if (!g_shm || slot < 0 || slot >= KVR_TEXT_PANELS) return;
+    g_shm->text[slot].anchor = KVR_ANCHOR_HIDDEN;
+    MemoryBarrier();
+    g_shm->text[slot].serial = g_shm->text[slot].serial + 1;
+}
+
 void VR_Haptic(int hand, float amplitude, float duration, float frequency) {
     if (!g_shm || hand < 0 || hand > 1) return;
     KvrHaptic& h = g_shm->haptic[hand];

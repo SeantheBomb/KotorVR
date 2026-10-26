@@ -8,6 +8,8 @@
 #include <windows.h>
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
+#include <d2d1.h>
+#include <dwrite.h>
 #include <d3dcompiler.h>
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -22,6 +24,8 @@
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "openxr_loader.lib")
 
@@ -152,7 +156,9 @@ static bool InitD3D(LUID luid) {
     if (!adapter) { printf("no adapter matching OpenXR LUID\n"); return false; }
     ID3D11Device* dev;
     D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
-    HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, 0, &fl, 1, D3D11_SDK_VERSION, &dev, nullptr, &g_ctx);
+    // BGRA support: Direct2D draws the text panels into textures of this device
+    HRESULT hr = D3D11CreateDevice(adapter, D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, &fl, 1,
+                                   D3D11_SDK_VERSION, &dev, nullptr, &g_ctx);
     adapter->Release();
     if (FAILED(hr)) return false;
     dev->QueryInterface(IID_PPV_ARGS(&g_dev));
@@ -262,6 +268,7 @@ static bool CreateSwapchain(Swapchain& sc, int32_t w, int32_t h) {
 }
 
 static bool InitControls();
+static bool InitText();
 
 // ---------------------------------------------------------------- hand tracking (XR_EXT_hand_tracking)
 static bool g_extHands, g_extHandSource;
@@ -507,6 +514,7 @@ static bool InitControls() {
     CHECK_XR(xrAttachSessionActionSets(g_session, &ai));
 
     if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16)) return false;
+    if (!InitText()) printf("text panels unavailable (DirectWrite / Direct2D init failed)\n");
     printf("controls ready\n");
     return true;
 }
@@ -560,6 +568,150 @@ static Vec3 Cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a
 static Vec3 Norm(Vec3 a) {
     float l = sqrtf(Dot(a, a));
     return l > 1e-6f ? Mul(a, 1.0f / l) : Vec3{0, 0, 1};
+}
+
+// ---------------------------------------------------------------- text panels (game -> DirectWrite -> quad layers)
+static ID2D1Factory* g_d2d;
+static IDWriteFactory* g_dw;
+static IDWriteTextFormat* g_fmtBody;
+static IDWriteTextFormat* g_fmtTitle;
+struct TextPanel {
+    Swapchain sc;
+    ID3D11Texture2D* tex = nullptr;   // D2D target (UNORM twin of the swapchain format), copied in on change
+    ID2D1RenderTarget* rt = nullptr;
+    uint32_t serial = 0xFFFFFFFF;
+    XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+};
+static TextPanel g_text[KVR_TEXT_PANELS];
+static const int kTextW = 1024, kTextH = 512;
+
+static bool InitText() {
+    if (!g_d2d && FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &g_d2d))) return false;
+    if (!g_dw && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)&g_dw))) return false;
+    if (!g_fmtBody) g_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                           DWRITE_FONT_STRETCH_NORMAL, 34.0f, L"en-us", &g_fmtBody);
+    if (!g_fmtTitle) g_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                                            DWRITE_FONT_STRETCH_NORMAL, 40.0f, L"en-us", &g_fmtTitle);
+    DXGI_FORMAT unorm = g_scFormat == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ? DXGI_FORMAT_B8G8R8A8_UNORM
+                      : g_scFormat == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ? DXGI_FORMAT_R8G8B8A8_UNORM : g_scFormat;
+    for (auto& p : g_text) {
+        if (p.sc.handle == XR_NULL_HANDLE && !CreateSwapchain(p.sc, kTextW, kTextH)) return false;
+        if (!p.tex) {
+            D3D11_TEXTURE2D_DESC d{};
+            d.Width = kTextW;
+            d.Height = kTextH;
+            d.MipLevels = d.ArraySize = 1;
+            d.Format = unorm;
+            d.SampleDesc.Count = 1;
+            d.BindFlags = D3D11_BIND_RENDER_TARGET;
+            if (FAILED(g_dev->CreateTexture2D(&d, nullptr, &p.tex))) return false;
+            IDXGISurface* surf = nullptr;
+            p.tex->QueryInterface(IID_PPV_ARGS(&surf));
+            D2D1_RENDER_TARGET_PROPERTIES rp = D2D1::RenderTargetProperties(
+                D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(unorm, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            HRESULT hr = g_d2d->CreateDxgiSurfaceRenderTarget(surf, &rp, &p.rt);
+            surf->Release();
+            if (FAILED(hr)) { printf("text panel: D2D target failed %08lx\n", (unsigned long)hr); return false; }
+        }
+        p.serial = 0xFFFFFFFF;
+    }
+    return true;
+}
+
+static void ReleaseText() {
+    for (auto& p : g_text) {
+        if (p.rt) { p.rt->Release(); p.rt = nullptr; }
+        if (p.tex) { p.tex->Release(); p.tex = nullptr; }
+        p.serial = 0xFFFFFFFF;
+    }
+}
+
+// redraw a panel's texture from the game's text: dark rounded card, an optional '#' title line, the rest wrapped;
+// the highlighted line (pickable options) gets a gold bar
+static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src) {
+    wchar_t wide[1024];
+    char text[sizeof src.text + 1];
+    memcpy(text, src.text, sizeof src.text);
+    text[sizeof src.text] = 0;
+    ID2D1SolidColorBrush *bg = nullptr, *fg = nullptr, *gold = nullptr, *hl = nullptr;
+    p.rt->BeginDraw();
+    p.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+    p.rt->CreateSolidColorBrush(D2D1::ColorF(0.04f, 0.06f, 0.10f, 0.82f), &bg);
+    p.rt->CreateSolidColorBrush(D2D1::ColorF(0.92f, 0.95f, 1.0f, 1.0f), &fg);
+    p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 1.0f), &gold);
+    p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 0.25f), &hl);
+    p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(4, 4, kTextW - 4.0f, kTextH - 4.0f), 24, 24), bg);
+    float y = 24;
+    int line = 0;
+    for (char* s = text; s && *s && y < kTextH - 30; line++) {
+        char* nl = strchr(s, '\n');
+        if (nl) *nl = 0;
+        bool title = s[0] == '#';
+        int n = MultiByteToWideChar(CP_UTF8, 0, title ? s + 1 : s, -1, wide, 1024);
+        IDWriteTextLayout* lay = nullptr;
+        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? g_fmtTitle : g_fmtBody, kTextW - 72.0f, (float)kTextH, &lay);
+        DWRITE_TEXT_METRICS m{};
+        if (lay) lay->GetMetrics(&m);
+        if (line == src.highlight)
+            p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(20, y - 4, kTextW - 20.0f, y + m.height + 4), 12, 12), hl);
+        if (lay) {
+            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, title || line == src.highlight ? gold : fg);
+            lay->Release();
+        }
+        y += m.height + (title ? 14 : 8);
+        s = nl ? nl + 1 : nullptr;
+    }
+    p.rt->EndDraw();
+    if (bg) bg->Release();
+    if (fg) fg->Release();
+    if (gold) gold->Release();
+    if (hl) hl->Release();
+    // into the swapchain
+    uint32_t idx = 0;
+    XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+    xrAcquireSwapchainImage(p.sc.handle, &ai, &idx);
+    XrSwapchainImageWaitInfo wi{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+    wi.timeout = XR_INFINITE_DURATION;
+    xrWaitSwapchainImage(p.sc.handle, &wi);
+    g_ctx->CopyResource(p.sc.images[idx].texture, p.tex);
+    XrSwapchainImageReleaseInfo ri{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+    xrReleaseSwapchainImage(p.sc.handle, &ri);
+}
+
+// the game's text panels as quad layers (anchor frame -> LOCAL)
+static void AddTextLayers(std::vector<XrCompositionLayerBaseHeader*>& layers, const XrPosef& head) {
+    for (int i = 0; i < KVR_TEXT_PANELS; i++) {
+        TextPanel& p = g_text[i];
+        if (!p.rt || p.sc.handle == XR_NULL_HANDLE) continue;
+        KvrTextPanel src;
+        memcpy(&src, (const void*)&g_shm->text[i], sizeof src);
+        if (src.anchor == KVR_ANCHOR_HIDDEN || src.width <= 0) continue;
+        if (src.serial != p.serial) {
+            DrawTextPanel(p, src);
+            p.serial = src.serial;
+        }
+        XrPosef local, rel;
+        memcpy(&rel.position, src.pose.pos, 12);
+        memcpy(&rel.orientation, src.pose.quat, 16);
+        if (src.anchor == KVR_ANCHOR_HEAD) {
+            local = PoseMul(head, rel);
+        } else if (src.anchor == KVR_ANCHOR_LWRIST) {
+            if (!(g_shm->input.gripValid & 1)) continue;
+            XrPosef g;
+            memcpy(&g.position, g_shm->input.grip[0].pos, 12);
+            memcpy(&g.orientation, g_shm->input.grip[0].quat, 16);
+            local = PoseMul(g_origin, PoseMul(g, rel));
+        } else {
+            local = PoseMul(g_origin, rel);
+        }
+        p.quad.space = g_local;
+        p.quad.pose = local;
+        p.quad.size = {src.width, src.width * kTextH / kTextW};
+        p.quad.subImage.swapchain = p.sc.handle;
+        p.quad.subImage.imageRect = {{0, 0}, {kTextW, kTextH}};
+        p.quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        layers.push_back((XrCompositionLayerBaseHeader*)&p.quad);
+    }
 }
 
 static void FillSwapchain(Swapchain& sc, const float rgba[4]) {
@@ -1029,6 +1181,8 @@ static void Frame() {
         }
     }
 
+    if (tracked) AddTextLayers(layers, views[0].pose);
+
     XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
     fei.displayTime = fs.predictedDisplayTime;
     fei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
@@ -1077,6 +1231,8 @@ static void Teardown() {
     ResetSwapchain(g_panelSc);
     ResetSwapchain(g_beamSc);
     ResetSwapchain(g_dotSc);
+    ReleaseText();
+    for (auto& p : g_text) ResetSwapchain(p.sc);
     // children before parents: destroying a live session through its instance deadlocks the Meta runtime
     DestroyHandTrackers();
     for (auto& sp : g_aimSpace) {

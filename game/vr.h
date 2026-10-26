@@ -50,6 +50,11 @@ void VR_RequestLosProbe(float distance);
 int VR_LosProbeResult();
 // Ask the host for one controller rumble pulse (hand 0 left, 1 right); amplitude 0..1, seconds, Hz (0 = default).
 void VR_Haptic(int hand, float amplitude, float duration, float frequency);
+// Host text panels (KvrTextPanel): slot 0..3, anchor KVR_ANCHOR_*, pose in the anchor frame, width in meters,
+// lines separated by newlines ('#' starts a title line), highlight = line index or -1.
+void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat[4], float width, const char* text,
+                 int highlight);
+void VR_HideText(int slot);
 // Head (eye 0) position in the recenter-origin frame.
 void VR_HeadPos(float out[3]);
 bool VR_ChooseEye(KvrPose* out);

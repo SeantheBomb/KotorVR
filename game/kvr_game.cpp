@@ -21,6 +21,7 @@
 #include "features.h"
 #include "weaponmodels.h"
 #include "cues.h"
+#include "tutorial.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -520,6 +521,7 @@ static void Install() {
     Features_Load(g_dir);
     WeaponModels_Init(g_dir);
     Cues_Init(g_dir);
+    Tutorial_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
     if (Features().combat) Combat_Install();
 }
