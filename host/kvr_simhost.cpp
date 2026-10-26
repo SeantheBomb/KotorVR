@@ -16,6 +16,7 @@
 //   button <A|B|X|Y|MENU|LSTICK|RSTICK> [for=<s>]  press and release a button (default 0.15 s)
 //   click u=<0..1> v=<0..1> [hold=<s>]             point at the panel (top-left origin) and pull the trigger
 //   grip [for=<s>]                    squeeze the right grip (default action) and release
+//   squeeze <L|R> [grip=<0..1>] [trig=<0..1>]   hold analog grip / trigger on a hand (finger curl)
 //   hand <L|R> [x= y= z=] [yaw= pitch= roll=]      place a hand (grip pose, relative to the recenter origin, deg)
 //   swing [dx= dy= dz=] [over=<s>]    sweep the right hand by (dx,dy,dz) m over <s> (default 0.6,0.3,0 in 0.18 s)
 //   trigger [for=<s>]                 pull the right trigger without pointing at the panel
@@ -143,7 +144,7 @@ static void PublishHead() {
 
 // ---------------------------------------------------------------- simulated controllers
 struct Controls {
-    float lx = 0, ly = 0, rx = 0, ry = 0, trigR = 0, gripR = 0;
+    float lx = 0, ly = 0, rx = 0, ry = 0, trigR = 0, gripR = 0, trigL = 0, gripL = 0;
     uint32_t buttons = 0;
     uint32_t pointer = KVR_POINTER_NONE;
     float u = 0, v = 0;
@@ -281,7 +282,7 @@ static void PublishInput() {
     MemoryBarrier();
     in.active = 1;
     in.lx = g_ctl.lx; in.ly = g_ctl.ly; in.rx = g_ctl.rx; in.ry = g_ctl.ry;
-    in.trigL = 0; in.trigR = g_ctl.trigR; in.gripL = 0; in.gripR = g_ctl.gripR;
+    in.trigL = g_ctl.trigL; in.trigR = g_ctl.trigR; in.gripL = g_ctl.gripL; in.gripR = g_ctl.gripR;
     in.buttons = g_ctl.buttons;
     in.pointerMode = g_ctl.pointer;
     in.panelU = g_ctl.u;
@@ -688,6 +689,14 @@ int main(int argc, char** argv) {
                 result = 1;
                 break;
             }
+        } else if (cmd == "squeeze") {
+            // hold analog grip / trigger on one hand until changed (finger curl checks); no click is implied
+            bool left = !args.empty() && (args[0] == "L" || args[0] == "l");
+            double g = left ? g_ctl.gripL : g_ctl.gripR, t = left ? g_ctl.trigL : g_ctl.trigR;
+            Arg(args, "grip", g);
+            Arg(args, "trig", t);
+            (left ? g_ctl.gripL : g_ctl.gripR) = (float)g;
+            (left ? g_ctl.trigL : g_ctl.trigR) = (float)t;
         } else if (cmd == "grip") {
             double hold = 0.2;
             Arg(args, "for", hold);

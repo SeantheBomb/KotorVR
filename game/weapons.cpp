@@ -72,6 +72,9 @@ void* g_player;
 WeaponClass g_right = WC_NONE, g_left = WC_NONE;
 int g_rightRow = -1, g_leftRow = -1;
 int g_rightVar = 1, g_leftVar = 1;  // item model variation (w_<class>_<NNN>)
+// the controlled character's body (for the hands): appearance.2da row, armor body letter (0 = a .. 9 = j), texture var
+int g_appearance = -1, g_bodyLetter = 0, g_bodyTexVar = 1;
+std::string g_handModel, g_handTexture;
 
 int RowInSlot(void* creature, DWORD slot, int* variation = nullptr) {
     __try {
@@ -83,6 +86,25 @@ int RowInSlot(void* creature, DWORD slot, int* variation = nullptr) {
         return (int)*(DWORD*)((BYTE*)item + 0x0C);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return -1;
+}
+
+// appearance = [[creature + 0xA74] (stats) + 0x186] (stats save code 0x5B21D9); body armor = inventory slot 0x2,
+// BodyVariation [item + 0x265] (1 = a), TextureVar [item + 0x266] (item save code 0x55CDFB)
+void ReadBody(void* creature, int* appearance, int* letter, int* texVar) {
+    *appearance = -1;
+    *letter = 0;  // no armor: underwear body 'a'
+    *texVar = 1;
+    __try {
+        BYTE* stats = *(BYTE**)((BYTE*)creature + 0xA74);
+        if (stats) *appearance = *(WORD*)(stats + 0x186);
+        void* inv = *(void**)((BYTE*)creature + 0xA2C);
+        void* armor = inv ? GetItemInSlot(inv, 0x2) : nullptr;
+        if (armor) {
+            int bv = *((BYTE*)armor + 0x265);
+            *letter = bv >= 1 && bv <= 10 ? bv - 1 : 0;
+            *texVar = *((BYTE*)armor + 0x266);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 void* FindPlayer() {
@@ -377,6 +399,21 @@ void Weapons_Update() {
         Log("weapons: player %p right row %d var %d (%s) left row %d var %d (%s)", p, r, rv, kProfiles[g_right].name, l, lv,
             kProfiles[g_left].name);
     }
+    // body for the hands (changes with the controlled character and their armor)
+    if (p) {
+        int app, letter, tv;
+        ReadBody(p, &app, &letter, &tv);
+        if (app != g_appearance || letter != g_bodyLetter || tv != g_bodyTexVar) {
+            g_appearance = app;
+            g_bodyLetter = letter;
+            g_bodyTexVar = tv;
+            g_handModel.clear();
+            g_handTexture.clear();
+            WeaponModels_BodyFor(app, letter, tv, &g_handModel, &g_handTexture);
+            Log("weapons: body appearance %d letter %c texvar %d -> hands %s / %s", app, 'a' + letter, tv,
+                g_handModel.c_str(), g_handTexture.c_str());
+        }
+    }
 }
 
 void* Weapon_CreatureById(DWORD id) {
@@ -539,7 +576,8 @@ void Weapons_Draw(const float invEye[16]) {
     memcpy(&in, (const void*)&shm->input, sizeof in);  // a torn read only costs one frame of pose
     if (!in.active || !(in.gripValid & 3)) return;
     UpdateSaber(in);
-    if (g_right == WC_NONE && g_left == WC_NONE) return;
+    bool drawHands = Features().hands && !g_handModel.empty();
+    if (g_right == WC_NONE && g_left == WC_NONE && !drawHands) return;
 
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
@@ -566,6 +604,22 @@ void Weapons_Draw(const float invEye[16]) {
     p_glDepthFunc(GL_LEQUAL);
 
     float hand[16], mv[16];
+    if (drawHands) {
+        // the character's own hands at the controllers: palm center on the grip (the hand frame's origin is the wrist,
+        // ~7 cm behind it), fingers curling with grip (index with trigger); a held weapon closes the fist around it
+        for (int h = 0; h < 2; h++) {
+            if (!(in.gripValid & (1u << h))) continue;
+            PoseMatrix(in.grip[h].pos, in.grip[h].quat, hand);
+            for (int r = 0; r < 3; r++) hand[12 + r] += hand[8 + r] * 0.07f;  // + local Z: back toward the wrist
+            MulMat(invEye, hand, mv);
+            p_glLoadMatrixf(mv);
+            WeaponClass held = h ? g_right : g_left;
+            bool holding = held != WC_NONE || (h == 0 && kProfiles[g_right].twoHanded);
+            float grip = h ? in.gripR : in.gripL, trig = h ? in.trigR : in.trigL;
+            float curl = holding ? max(grip, 0.85f) : grip, idx = holding ? max(trig, 0.8f) : trig;
+            WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, curl, idx);
+        }
+    }
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
         if (c == WC_NONE || !(in.gripValid & (1u << h))) continue;

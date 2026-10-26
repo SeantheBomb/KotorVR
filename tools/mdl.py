@@ -29,6 +29,8 @@ class Mesh:
         self.render = True
         self.diffuse = (1, 1, 1)
         self.transparency = 0
+        self.weights = []    # skin meshes: per vertex 4 bone weights
+        self.bones = []      # ... and 4 bone node numbers (-1 = unused), already mapped through the bone map
 
 
 class Node:
@@ -39,6 +41,7 @@ class Node:
         self.orientation = (1.0, 0.0, 0.0, 0.0)  # w, x, y, z
         self.children = []
         self.mesh = None
+        self.number = 0      # node number (index into the model's node list / bone map)
 
 
 class Model:
@@ -63,7 +66,8 @@ class Model:
     def _node(self, off):
         d = self.d
         n = Node()
-        n.type, _idx, name_idx = struct.unpack_from("<HHH", d, off)
+        n.type, n.number, name_idx = struct.unpack_from("<HHH", d, off)
+        n.name_index = name_idx
         n.name = self.names[name_idx] if name_idx < len(self.names) else "?"
         n.position = struct.unpack_from("<3f", d, off + 16)
         n.orientation = struct.unpack_from("<4f", d, off + 28)
@@ -111,7 +115,25 @@ class Model:
             a, b, c = struct.unpack_from("<3H", d, f_off + i * 32 + 26)
             if a < vcount and b < vcount and c < vcount:
                 me.faces.append((a, b, c))
+        if ntype & NODE_SKIN:
+            # K1 skin header right after the 332-byte trimesh header (KotorBlender / xoreos layout)
+            s0 = m + 332
+            o_w, o_i, bm_off, bm_cnt = struct.unpack_from("<4I", d, s0 + 12)
+            bonemap = struct.unpack_from("<%df" % bm_cnt, d, bm_off) if bm_cnt else ()
+            slot_to_node = {int(v): n for n, v in enumerate(bonemap) if v >= 0}
+            for i in range(vcount):
+                base = mdx_off + i * stride
+                w = struct.unpack_from("<4f", self.mdx, base + o_w)
+                bi = struct.unpack_from("<4f", self.mdx, base + o_i)
+                me.weights.append(w)
+                me.bones.append(tuple(slot_to_node.get(int(b), -1) if b >= 0 else -1 for b in bi))
         return me
+
+    def by_number(self):
+        return {n.number: n for n, _ in self.walk()}
+
+    def by_name_index(self):
+        return {n.name_index: n for n, _ in self.walk()}
 
     def walk(self, node=None, depth=0):
         node = node or self.root
