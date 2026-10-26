@@ -179,8 +179,8 @@ void Input_Update(HWND wnd) {
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         trigWas = trigNow;
-        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyAt = now; }  // target slot 2: Force powers
-        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; }  // personal power slot
+        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // target slot 2: Force powers
+        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // personal power slot
         if (g_gestureKeyAt >= 0) {
             if (now - g_gestureKeyAt < 0.1) keys[g_gestureKey] = 0x80;
             else g_gestureKeyAt = -1;

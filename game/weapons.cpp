@@ -617,7 +617,7 @@ void Weapons_Draw(const float invEye[16]) {
             bool holding = held != WC_NONE || (h == 0 && kProfiles[g_right].twoHanded);
             float grip = h ? in.gripR : in.gripL, trig = h ? in.trigR : in.trigL;
             float curl = holding ? max(grip, 0.85f) : grip, idx = holding ? max(trig, 0.8f) : trig;
-            WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, curl, idx);
+            WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, curl, idx, Cues_ForceGlow(h));
         }
     }
     for (int h = 1; h >= 0; h--) {  // right, then left

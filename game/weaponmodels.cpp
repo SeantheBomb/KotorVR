@@ -195,7 +195,7 @@ GLuint GetTexture(const std::string& name) {
 
 }  // namespace
 
-bool WeaponModels_DrawHand(const char* model, const char* texture, int side, float curl, float indexCurl) {
+bool WeaponModels_DrawHand(const char* model, const char* texture, int side, float curl, float indexCurl, float forceGlow) {
     if (!model || !*model || !LoadGl()) return false;
     const HModel& h = GetHand(std::string(model) + (side ? "_r" : "_l"));
     if (!h.ok) return false;
@@ -227,7 +227,15 @@ bool WeaponModels_DrawHand(const char* model, const char* texture, int side, flo
     p_glDisable(GL_BLEND);
     p_glDisable(GL_ALPHA_TEST);
     p_glDepthMask(GL_TRUE);
-    p_glColor4f(0.72f, 0.72f, 0.75f, 1);
+    for (int pass = 0; pass < (forceGlow > 0.01f ? 2 : 1); pass++) {
+    if (pass == 1) {  // Force surge: the same hand again, additive blue
+        p_glEnable(GL_BLEND);
+        p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        p_glDepthMask(GL_FALSE);
+        p_glColor4f(0.45f, 0.65f, 1.0f, forceGlow);
+    } else {
+        p_glColor4f(0.72f, 0.72f, 0.75f, 1);
+    }
     p_glBegin(GL_TRIANGLES);
     for (size_t i = 0; i < h.segs.size(); i++) {
         const HSeg& s = h.segs[i];
@@ -241,6 +249,9 @@ bool WeaponModels_DrawHand(const char* model, const char* texture, int side, flo
         }
     }
     p_glEnd();
+    }
+    p_glDisable(GL_BLEND);
+    p_glDepthMask(GL_TRUE);
     p_glDisable(GL_TEXTURE_2D);
     return true;
 }

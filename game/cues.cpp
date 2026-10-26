@@ -64,6 +64,7 @@ const CueSound kSounds[CUE_COUNT] = {
     {"Incoming", false, {"gui_prompt"}, 0.8f},
     {"HitLanded", false, {""}, 1.0f},  // KotOR plays its own impact sound
     {"PerfectLanded", true, {"cb_ls_hithard1,cb_ls_hithard2", "", "", "", ""}, 1.0f},
+    {"Force", false, {""}, 1.0f},  // KotOR plays the power's own sound
 };
 
 struct Wav {
@@ -239,6 +240,7 @@ float g_flash[2];
 double g_flashAt[2] = {-10, -10};
 bool g_window;
 
+double g_forceAt = -10;
 float g_spark;
 double g_sparkAt = -10;
 void Spark(float v) {
@@ -265,7 +267,7 @@ void Cues_Init(const char* gameDir) {
 void Cues_Fire(CueEvent e) {
     if (!Features().cues) return;
     static const char* names[CUE_COUNT] = {"block", "perfect block", "dodge", "block failed", "perfect hit",
-                                           "window open", "incoming_warning", "hit landed", "perfect landed"};
+                                           "window open", "incoming_warning", "hit landed", "perfect landed", "force"};
     if (e != CUE_WINDOW_OPEN) Log("cue: %s", names[e]);
     PlaySoundFor(e);
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands
@@ -279,6 +281,8 @@ void Cues_Fire(CueEvent e) {
         case CUE_INCOMING: Haptic(0, 2, 0.5f, 0.06f, 160); break;
         case CUE_HIT_LANDED: Haptic(0, 1, 0.8f, 0.12f, 90); Flash(0.5f); Spark(0.6f); break;
         case CUE_PERFECT_LANDED: Haptic(0, 1, 1.0f, 0.22f, 70); Flash(1.0f); Spark(1.0f); break;
+        case CUE_FORCE:  // a low surge in the casting (left) hand
+            Haptic(0, 0, 0.7f, 0.25f, 50); g_forceAt = Now(); break;
         default: break;
     }
 }
@@ -313,6 +317,12 @@ float Cues_Glow(int hand) {
 }
 
 void Cues_SetWindow(bool open) { g_window = open; }
+
+float Cues_ForceGlow(int hand) {
+    if (!Features().cues || hand != 0) return 0;
+    double age = Now() - g_forceAt;
+    return age < 0.5 ? (float)(1.0 - age / 0.5) : 0;
+}
 
 float Cues_Sparks(double* age) {
     *age = Now() - g_sparkAt;
