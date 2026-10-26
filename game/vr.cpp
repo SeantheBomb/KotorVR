@@ -12,6 +12,7 @@
 // -> kvr_host. (NV_DX_interop crashed the driver alongside the game's pbuffer contexts.)
 
 #include "vr.h"
+#include <vector>
 #include "scan.h"
 #include "enginecam.h"
 #include "weapons.h"
@@ -785,6 +786,43 @@ void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat
 void VR_SetTextPickable(int slot, bool on) {
     if (!g_shm || slot < 0 || slot >= KVR_TEXT_PANELS) return;
     g_shm->text[slot].pickable = on ? 1 : 0;
+}
+
+void VR_MovieFrame(const unsigned char* bgrx, int w, int h) {
+    Slot& s = g_slots[SLOT_PANEL];
+    if (!g_exportReady || !s.shared || !g_shm) return;
+    // fit into the panel texture (movies are smaller than the window; scale down by whole steps if not)
+    int step = 1;
+    while (w / step > g_texW || h / step > g_texH) step++;
+    int ow = w / step, oh = h / step;
+    static std::vector<unsigned char> rgba;
+    rgba.resize((size_t)ow * oh * 4);
+    for (int y = 0; y < oh; y++) {
+        const unsigned char* src = bgrx + (size_t)(y * step) * w * 4;
+        unsigned char* dst = &rgba[(size_t)(oh - 1 - y) * ow * 4];  // bottom-up, like the GL frames
+        for (int x = 0; x < ow; x++, dst += 4) {
+            const unsigned char* p = src + (size_t)x * step * 4;
+            dst[0] = p[2];
+            dst[1] = p[1];
+            dst[2] = p[0];
+            dst[3] = 255;
+        }
+    }
+    if (s.mutex->AcquireSync(KEY_GAME, 0) != S_OK) return;  // host still holds the last one; drop this frame
+    D3D11_BOX box = {0, 0, 0, (UINT)ow, (UINT)oh, 1};
+    g_ctx->UpdateSubresource(s.shared, 0, &box, rgba.data(), ow * 4, 0);
+    g_shm->panel.width = ow;
+    g_shm->panel.height = oh;
+    g_shm->panel.flags = KVR_SLOT_MOVIE;
+    g_shm->panel.frameId++;
+    s.mutex->ReleaseSync(KEY_HOST);
+    g_ctx->Flush();
+    // the readbacks queued before the movie belong to the old scene
+    s.pending[0] = s.pending[1] = false;
+}
+
+void VR_MovieEnded() {
+    if (g_shm) g_shm->panel.flags &= ~KVR_SLOT_MOVIE;
 }
 
 void VR_HideText(int slot) {

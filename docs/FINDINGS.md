@@ -49,6 +49,21 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 - Round length constant (no 3000/6000 immediates in the round functions; likely data-driven).
 - Scene render entry point in the exe (needed for synchronized two-pass stereo instead of alternate-eye).
 
+## Cutscene movies (found 2026-10-26)
+- Bink through binkw32.dll imports: a persistent movie worker thread (proc `0x405B30`, created in `0x405D50`) waits
+  on an event, then per movie `0x4053E0` creates the "SW Movie Player Window" (class SWMovieWindow, popup over the
+  game window), opens BinkBuffer, waits `while ([0x7A3C9C] == 1) Sleep(1)`, shows the window and runs the decode loop
+  `0x404C80` (DoFrame, CopyToBuffer, BufferBlit, NextFrame, `while (BinkWait) Sleep(1)`). The main thread stops
+  rendering while it plays.
+- `[0x7A3C9C]` is 1 only around the game's SwapBuffers call (`0x4048AE` .. `0x4048D5`). Our SwapBuffers hook runs
+  inside that window, so in the world the flag read 1 almost always and the worker never showed its window (the
+  new-game hang, 2026-10-26). Fixed by clearing it during our work (kvr_game.cpp h_SwapBuffers).
+- Movie window proc `0x405190`: WM_ACTIVATEAPP 0 (app deactivated) or Alt+Enter = interrupted (replayed later from
+  the start); Escape, or a click per setting = skipped. We subclass it to drop WM_ACTIVATEAPP 0.
+- Queued script movies (k_pend_area01: PlayMovie "01A") play at module start via `0x602650` (client internal +0x1F8
+  must be 0), or later when replayed; immediate ones via `0x602AF0`.
+- Opening: character creation -> the crawl + dream (640x272, 3605 frames) -> Endar Spire -> Trask (m01aa_c01).
+
 ## Target action menu (found 2026-10-26)
 - In-game interface: `[[[[0x7A39FC]+4]+4]+0x40]+0x90` (client app -> ... -> GUI -> main interface); action block at +0xBC.
 - Per target column c (0..2): list at block+c*0xC (entries pointer, count); entries 0x38 bytes: +0x04 kind, +0x08 id

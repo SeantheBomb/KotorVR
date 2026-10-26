@@ -1,6 +1,8 @@
 # Playtest guide
 
 Start: quit Discord fully, connect Air Link, run `host\build\kvr_host.exe`, launch KotOR from Steam.
+The host opens a desktop window ("KotOR VR - headset view") mirroring the left eye with the HUD, or the menus /
+movie on their own; close it if you don't want it. The game's own window stays black.
 
 One-time (already done on this PC), from your own game files:
 - `python tools\weapon_export.py "<game dir>" "<game dir>\kvr"`: weapon models (else simple stand-in shapes)
@@ -27,6 +29,7 @@ One-time (already done on this PC), from your own game files:
 | **In combat** — left hand thrust forward | target action slot 2 (Force powers) |
 | **In combat** — left hand yank back | personal power slot (heal, speed, …) |
 | A | pause (Space) |
+| A / B during a cutscene movie | skip it (movies play on a cinema screen 3 m ahead, where you were looking) |
 | B / Menu | Escape |
 | X | switch character (Tab) |
 | Y | hide / show the HUD |

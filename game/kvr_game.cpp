@@ -24,6 +24,7 @@
 #include "tutorial.h"
 #include "dialogue.h"
 #include "actionring.h"
+#include "movie.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -345,7 +346,15 @@ static PROC WINAPI h_wglGetProcAddress(LPCSTR name) {
     return p;
 }
 
+// The game sets this flag around its own SwapBuffers call (0x4048AE / 0x4048D5); the movie player thread waits for
+// it to read 0 before it shows its window (0x405875). Our VR work below runs inside that window, so left alone the
+// flag reads 1 nearly all the time: queued cutscene movies (the opening crawl) start minutes late and can stall
+// unshown. Keep it clear during our work and set it again only around the real swap.
+static volatile LONG* const kInSwapFlag = (volatile LONG*)0x7A3C9C;
+
 static BOOL WINAPI h_SwapBuffers(HDC dc) {
+    LONG inSwap = *kInSwapFlag;
+    *kInSwapFlag = 0;
     FIRST("wglSwapBuffers");
     if (g_frame % 1800 == 0) Log("heartbeat frame %ld", g_frame);
     if (g_tracing) {
@@ -370,9 +379,10 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
     static DWORD lastChurn;
     if (GetTickCount() - lastChurn > 1000) {
         lastChurn = GetTickCount();
-        Log("[f%ld] churn: ctx +%ld -%ld, pbuf +%ld -%ld lost %ld, threads %d", g_frame, g_nCtxCreate, g_nCtxDelete,
+        Log("[f%ld t=%lu] churn: ctx +%ld -%ld, pbuf +%ld -%ld lost %ld, threads %d", g_frame, GetTickCount(), g_nCtxCreate, g_nCtxDelete,
             g_nPbCreate, g_nPbDestroy, g_nPbLost, CountThreads());
     }
+    *kInSwapFlag = inSwap;
     return r_SwapBuffers(dc);
 }
 
@@ -526,6 +536,7 @@ static void Install() {
     Tutorial_Init(g_dir);
     Dialogue_Install();
     ActionRing_Init(g_dir);
+    Movie_Install();
     if (Features().engineCamera) EngineCam_Install();
     if (Features().combat) Combat_Install();
 }

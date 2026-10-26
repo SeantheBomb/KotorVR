@@ -57,6 +57,9 @@ void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat
 // the right hand can point at the panel's lines (reported back in KvrTextPanel::hover); ShowText clears it
 void VR_SetTextPickable(int slot, bool on);
 void VR_HideText(int slot);
+// A decoded cutscene movie frame (32-bit B, G, R, x rows, top-down) for the headset's cinema screen.
+void VR_MovieFrame(const unsigned char* bgrx, int w, int h);
+void VR_MovieEnded();
 // Head (eye 0) position in the recenter-origin frame.
 void VR_HeadPos(float out[3]);
 bool VR_ChooseEye(KvrPose* out);

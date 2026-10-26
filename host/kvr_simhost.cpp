@@ -479,6 +479,7 @@ static void Tick() {
 // KotOR freezes when it loses the foreground. Once the game world is up (never in menus, where a refocus can
 // eat clicks), take the foreground back every 2 s if something else grabbed it.
 static bool g_keepFocus;
+static bool g_keepFocusOff;  // "keepfocus off": behave like the real host (it never takes the foreground)
 static void KeepFocus() {
     static double last;
     if (!g_keepFocus || Now() - last < 2.0) return;
@@ -532,17 +533,19 @@ static BOOL WINAPI OnConsoleClose(DWORD) {
 
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IONBF, 0);
-    if (argc < 3) { printf("usage: kvr_simhost <script.txt> <out_dir>\n"); return 2; }
+    if (argc < 3) { printf("usage: kvr_simhost <script.txt> <out_dir>\n       kvr_simhost --peek <out_dir>\n"); return 2; }
+    // --peek: save what the game is sending right now (eyes + panel) next to a running real host, touching nothing else
+    bool peek = strcmp(argv[1], "--peek") == 0;
     QueryPerformanceFrequency(&g_qpf);
     QueryPerformanceCounter(&g_t0);
     SetConsoleCtrlHandler(OnConsoleClose, TRUE);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-    FILE* sf;
-    if (fopen_s(&sf, argv[1], "r")) { printf("cannot open script %s\n", argv[1]); return 2; }
+    FILE* sf = nullptr;
+    if (!peek && fopen_s(&sf, argv[1], "r")) { printf("cannot open script %s\n", argv[1]); return 2; }
     g_out = argv[2];
     CreateDirectoryA(g_out.c_str(), nullptr);
-    fopen_s(&g_csv, (g_out + "\\stats.csv").c_str(), "w");
+    if (!peek) fopen_s(&g_csv, (g_out + "\\stats.csv").c_str(), "w");
     if (g_csv) fprintf(g_csv, "t,gameAlive,eye0,eye1,panel,world,cinematic,headYaw,headPitch\n");
 
     if (!OpenShared()) { printf("shared memory failed\n"); return 2; }
@@ -568,6 +571,19 @@ int main(int argc, char** argv) {
     if (chosen) chosen->Release();
     dev->QueryInterface(IID_PPV_ARGS(&g_dev));
     dev->Release();
+    if (peek) {
+        if (!g_shm->texWidth) { printf("peek: the game has no shared textures yet\n"); return 1; }
+        for (int i = 0; i < 200 && !(g_shared[0].have && g_shared[1].have && g_shared[2].have); i++) {
+            PullAll();
+            Sleep(10);
+        }
+        const char* names[3] = {"eye0", "eye1", "panel"};
+        for (int i = 0; i < 3; i++)
+            printf("peek: %s %s\n", names[i], SavePng(g_shared[i], g_out + "\\" + names[i] + ".png") ? "saved" : "missing");
+        printf("peek: gameAlive %u lastWorldFrame %u cinematic %u showPanel %u\n", g_shm->gameAlive, g_shm->lastWorldFrame,
+               g_shm->cinematic, g_shm->showPanel);
+        return 0;
+    }
     printf("kvr_simhost: simulated headset up, running %s -> %s\n", argv[1], argv[2]);
 
     int result = 0;
@@ -594,7 +610,7 @@ int main(int argc, char** argv) {
             bool world = cmd == "wait_world";
             bool ok = RunUntil(timeout, [&] { return world ? InWorld() : (g_shared[2].have && g_pulls[2] > 30); });
             printf("[%.1f]   %s\n", Now(), ok ? "ok" : "TIMED OUT");
-            if (ok && world) g_keepFocus = true;
+            if (ok && world && !g_keepFocusOff) g_keepFocus = true;
             if (!ok) {  // leave evidence of where it got stuck
                 const char* suffix[3] = {"eye0", "eye1", "panel"};
                 for (int i = 0; i < 3; i++) SavePng(g_shared[i], g_out + "\\timeout_" + suffix[i] + ".png");
@@ -665,6 +681,12 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.1);
+        } else if (cmd == "keepfocus") {
+            g_keepFocusOff = !args.empty() && args[0] == "off";
+            g_keepFocus = g_keepFocus && !g_keepFocusOff;
+        } else if (cmd == "focus") {  // bring the game to the front (it stops rendering in the background)
+            FocusGame();
+            RunFor(0.5);
         } else if (cmd == "hover") {  // stand-in for the real host's ray hit-test: hover <panel> <line>
             if (args.size() >= 2) g_shm->text[atoi(args[0].c_str()) % KVR_TEXT_PANELS].hover = atoi(args[1].c_str());
             RunFor(0.1);

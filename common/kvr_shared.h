@@ -43,6 +43,7 @@ struct KvrEyeSlot {
 
 enum : uint32_t {
     KVR_SLOT_GUI_ONLY = 1u << 0,  // panel holds only the GUI drawn over black (world frames): key out black
+    KVR_SLOT_MOVIE = 1u << 1,     // panel holds a cutscene movie frame (width x height): cinema screen
 };
 
 // Controller buttons (KvrInput::buttons)

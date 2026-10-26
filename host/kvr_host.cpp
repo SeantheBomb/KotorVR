@@ -22,6 +22,7 @@
 
 #include "../common/kvr_shared.h"
 
+#pragma comment(lib, "user32.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d2d1.lib")
@@ -972,19 +973,24 @@ static void Pull(SharedTex& s, const volatile KvrEyeSlot& slot) {
     s.mutex->ReleaseSync(KEY_GAME);
 }
 
-// Draw a pulled texture into the acquired swapchain image.
-static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t validW, uint32_t validH, bool guiKey = false) {
+template <class T> static void SafeRelease(T*& p) {
+    if (p) p->Release();
+    p = nullptr;
+}
+
+// Draw the valid region of a pulled texture into a render target viewport.
+static void DrawTex(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, SharedTex& src, uint32_t validW, uint32_t validH,
+                    bool guiKey, bool decodeSrgb) {
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(g_ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         float* p = (float*)m.pData;
         p[0] = (float)validW / g_sharedW;
         p[1] = (float)validH / g_sharedH;
-        p[2] = g_scSrgb ? 1.0f : 0.0f;
+        p[2] = decodeSrgb ? 1.0f : 0.0f;
         p[3] = guiKey ? 1.0f : 0.0f;
         g_ctx->Unmap(g_cb, 0);
     }
-    D3D11_VIEWPORT vp{0, 0, (float)sc.w, (float)sc.h, 0, 1};
-    g_ctx->OMSetRenderTargets(1, &sc.rtvs[imageIndex], nullptr);
+    g_ctx->OMSetRenderTargets(1, &rtv, nullptr);
     g_ctx->RSSetViewports(1, &vp);
     g_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g_ctx->IASetInputLayout(nullptr);
@@ -998,6 +1004,129 @@ static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t va
     ID3D11ShaderResourceView* nullSrv = nullptr;
     g_ctx->PSSetShaderResources(0, 1, &nullSrv);
     g_ctx->Flush();
+}
+
+// Draw a pulled texture into the acquired swapchain image.
+static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t validW, uint32_t validH, bool guiKey = false) {
+    D3D11_VIEWPORT vp{0, 0, (float)sc.w, (float)sc.h, 0, 1};
+    DrawTex(sc.rtvs[imageIndex], vp, src, validW, validH, guiKey, g_scSrgb);
+}
+
+// ---------------------------------------------------------------- desktop mirror
+// A plain window showing what the headset shows: the left eye with the HUD keyed over it in the world, or the
+// panel (menus, cutscene movies) on its own. It never takes the foreground; closing it just stops the mirror.
+static HWND g_mirrorWnd;
+static bool g_mirrorTried, g_mirrorResize;
+static IDXGISwapChain1* g_mirrorSc;
+static ID3D11Device1* g_mirrorDev;  // the device the swapchain belongs to (the host recreates its device on reconnect)
+static ID3D11BlendState* g_blendAlpha;
+
+static LRESULT CALLBACK MirrorProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_SIZE) g_mirrorResize = true;
+    if (msg == WM_MOUSEACTIVATE) return MA_NOACTIVATE;
+    if (msg == WM_DESTROY) g_mirrorWnd = nullptr;
+    return DefWindowProcW(w, msg, wp, lp);
+}
+
+static void MirrorPump() {
+    MSG m;
+    while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+}
+
+static void MirrorRelease() {
+    SafeRelease(g_mirrorSc);
+    SafeRelease(g_blendAlpha);
+    g_mirrorDev = nullptr;
+}
+
+static void MirrorFrame(bool world, bool hud, bool panelShown, float panelAspect) {
+    if (!g_mirrorTried) {
+        g_mirrorTried = true;
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = MirrorProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        wc.lpszClassName = L"KotorVRMirror";
+        RegisterClassW(&wc);
+        RECT rc{0, 0, 960, 720};
+        AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+        g_mirrorWnd = CreateWindowExW(WS_EX_NOACTIVATE, L"KotorVRMirror", L"KotOR VR - headset view", WS_OVERLAPPEDWINDOW,
+                                      CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr,
+                                      nullptr, wc.hInstance, nullptr);
+        if (g_mirrorWnd) ShowWindow(g_mirrorWnd, SW_SHOWNOACTIVATE);
+        printf("mirror window %s\n", g_mirrorWnd ? "open" : "failed");
+    }
+    if (!g_mirrorWnd || !g_dev) return;
+    if (g_mirrorDev != g_dev) {
+        MirrorRelease();
+        IDXGIDevice* dd = nullptr;
+        IDXGIAdapter* ad = nullptr;
+        IDXGIFactory2* fac = nullptr;
+        g_dev->QueryInterface(IID_PPV_ARGS(&dd));
+        if (dd) dd->GetAdapter(&ad);
+        if (ad) ad->GetParent(IID_PPV_ARGS(&fac));
+        DXGI_SWAP_CHAIN_DESC1 d{};
+        d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        d.BufferCount = 2;
+        d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        if (fac) fac->CreateSwapChainForHwnd(g_dev, g_mirrorWnd, &d, nullptr, nullptr, &g_mirrorSc);
+        if (fac) fac->MakeWindowAssociation(g_mirrorWnd, DXGI_MWA_NO_ALT_ENTER);
+        SafeRelease(fac);
+        SafeRelease(ad);
+        SafeRelease(dd);
+        D3D11_BLEND_DESC bd{};
+        bd.RenderTarget[0].BlendEnable = TRUE;
+        bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+        bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+        bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+        bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+        bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        g_dev->CreateBlendState(&bd, &g_blendAlpha);
+        g_mirrorDev = g_dev;
+        g_mirrorResize = false;
+        if (!g_mirrorSc) return;
+    }
+    if (!g_mirrorSc) return;
+    if (g_mirrorResize) {
+        g_mirrorResize = false;
+        g_mirrorSc->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+    }
+    ID3D11Texture2D* bb = nullptr;
+    if (FAILED(g_mirrorSc->GetBuffer(0, IID_PPV_ARGS(&bb)))) return;
+    D3D11_TEXTURE2D_DESC bd;
+    bb->GetDesc(&bd);
+    ID3D11RenderTargetView* rtv = nullptr;
+    g_dev->CreateRenderTargetView(bb, nullptr, &rtv);
+    bb->Release();
+    if (!rtv) return;
+    const float black[4] = {0, 0, 0, 1};
+    g_ctx->ClearRenderTargetView(rtv, black);
+    // letterbox the image's aspect into the window
+    float aspect = world ? (float)g_shared[0].meta.width / std::max(1u, g_shared[0].meta.height) : panelAspect;
+    float w = (float)bd.Width, h = (float)bd.Height;
+    float vw = w, vh = w / aspect;
+    if (vh > h) { vh = h; vw = h * aspect; }
+    D3D11_VIEWPORT vp{(w - vw) / 2, (h - vh) / 2, vw, vh, 0, 1};
+    if (world && g_shared[0].have) {
+        DrawTex(rtv, vp, g_shared[0], g_shared[0].meta.width, g_shared[0].meta.height, false, false);
+        if (hud && panelShown && g_shared[2].have) {
+            const float f[4] = {0, 0, 0, 0};
+            g_ctx->OMSetBlendState(g_blendAlpha, f, 0xFFFFFFFF);
+            DrawTex(rtv, vp, g_shared[2], g_shared[2].meta.width, g_shared[2].meta.height, true, false);
+            g_ctx->OMSetBlendState(nullptr, f, 0xFFFFFFFF);
+        }
+    } else if (panelShown && g_shared[2].have) {
+        DrawTex(rtv, vp, g_shared[2], g_shared[2].meta.width, g_shared[2].meta.height, false, false);
+    }
+    rtv->Release();
+    g_mirrorSc->Present(0, 0);
 }
 
 // Debug: write a texture to a 24-bit BMP (RGBA8 / BGRA8 assumed; top-down rows as stored).
@@ -1150,7 +1279,9 @@ static void Frame() {
         Pull(g_shared[1], g_shm->eyes[1]);
         Pull(g_shared[2], g_shm->panel);
         uint32_t alive = g_shm->gameAlive;
-        bool world = g_shared[0].have && g_shared[1].have && (alive - g_shm->lastWorldFrame) < 30;
+        // a cutscene movie: the panel carries its frames (the world frames are stale while it plays)
+        bool movie = g_shared[2].have && (g_shared[2].meta.flags & KVR_SLOT_MOVIE);
+        bool world = !movie && g_shared[0].have && g_shared[1].have && (alive - g_shm->lastWorldFrame) < 30;
         if (world) {
             for (int e = 0; e < 2; e++) {
                 const KvrEyeSlot& slot = g_shared[e].meta;
@@ -1170,7 +1301,7 @@ static void Frame() {
         // Menus (no world): opaque theater screen 2.4 m ahead. In the world the panel carries only the GUI, keyed
         // over the stereo view as a HUD 1.6 m ahead covering ~64 deg; Y (or F9) hides it.
         bool hud = world && (g_shared[2].meta.flags & KVR_SLOT_GUI_ONLY);
-        bool panelVisible = !world || (hud && !g_shm->showPanel);
+        bool panelVisible = movie || !world || (hud && !g_shm->showPanel);
         static DWORD lastHudLog;
         if (GetTickCount() - lastHudLog > 3000) {
             lastHudLog = GetTickCount();
@@ -1194,8 +1325,20 @@ static void Frame() {
         }
         XrPosef hudYawPose{{0, sinf(hudYaw / 2), 0, cosf(hudYaw / 2)}, {0, 0, 0}};
         XrPosef panelLocal = world ? PoseMul(hudYawPose, XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}}) : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
-        XrPosef panelPose = PoseMul(g_origin, panelLocal);
         float panelW = world ? 2.0f : 2.4f, panelH = panelW * 0.75f;
+        // movies: a cinema screen 3.6 m wide, 3 m out where you were looking when it started, at the movie's aspect
+        static bool wasMovie;
+        static float movieYaw;
+        if (movie && !wasMovie && tracked) movieYaw = YawOf(PoseMul(PoseInv(g_origin), views[0].pose).orientation);
+        wasMovie = movie;
+        float panelAspect = g_shared[2].meta.height ? (float)g_shared[2].meta.width / g_shared[2].meta.height : 4.0f / 3.0f;
+        if (movie) {
+            XrPosef yawPose{{0, sinf(movieYaw / 2), 0, cosf(movieYaw / 2)}, {0, 0, 0}};
+            panelLocal = PoseMul(yawPose, XrPosef{{0, 0, 0, 1}, {0, 0.1f, -3.0f}});
+            panelW = 3.6f;
+            panelH = panelW / panelAspect;
+        }
+        XrPosef panelPose = PoseMul(g_origin, panelLocal);
         if (panelVisible) {
             const KvrEyeSlot& slot = g_shared[2].meta;
             uint32_t idx = AcquireImage(g_panelSc);
@@ -1210,6 +1353,8 @@ static void Frame() {
             quad.layerFlags = hud ? (XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT) : 0;
             layers.push_back((XrCompositionLayerBaseHeader*)&quad);
         }
+
+        MirrorFrame(world, hud, panelVisible, panelAspect);
 
         // controllers: publish state, then draw the right-hand laser and the panel cursor
         PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
@@ -1262,10 +1407,6 @@ static void Frame() {
     xrEndFrame(g_session, &fei);
 }
 
-template <class T> static void SafeRelease(T*& p) {
-    if (p) p->Release();
-    p = nullptr;
-}
 
 static void ResetSwapchain(Swapchain& sc) {
     for (auto* r : sc.rtvs) r->Release();
@@ -1330,6 +1471,7 @@ static void Teardown() {
     SafeRelease(g_ps);
     SafeRelease(g_samp);
     SafeRelease(g_cb);
+    MirrorRelease();
     SafeRelease(g_ctx);
     SafeRelease(g_dev);
     g_teardownDone = 1;
@@ -1359,6 +1501,7 @@ int main() {
     DWORD lastReport = GetTickCount();
     uint32_t lastAlive = 0, lastE0 = 0, lastE1 = 0, xrFrames = 0;
     while (!g_quit && !g_lost) {
+        MirrorPump();
         PollEvents();
         if (!g_sessionRunning) { Sleep(10); continue; }
         Frame();

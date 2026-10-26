@@ -1,0 +1,44 @@
+# New game, then skip the opening movie with B (Escape to the movie window).
+# keepfocus off              # like the real host: nothing takes the foreground back
+wait_menu 90
+wait_calm 8 120
+shot m0
+click u=0.572 v=0.499
+wait 1
+wait_calm 1.5 60
+shot m1
+click u=0.466 v=0.498
+wait 1
+wait_calm 1.5 60
+shot m2
+click u=0.597 v=0.391
+wait 1
+wait_calm 1.5 60
+shot m3
+click u=0.613 v=0.437
+wait 1
+wait_calm 1.5 60
+shot m4
+click u=0.391 v=0.676
+wait 1
+wait_calm 1.5 60
+shot m5
+click u=0.597 v=0.455
+wait 1
+wait_calm 1.5 60
+shot m6
+click u=0.418 v=0.675
+wait 1
+wait_calm 1.5 60
+shot m7
+click u=0.601 v=0.486
+wait 1
+wait_calm 1.5 60
+wait 12                    # the opening crawl is playing
+shot crawl
+button B                   # skip it
+wait 4
+shot skipped
+wait_world 180
+wait 8
+shot room
