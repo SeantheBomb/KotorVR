@@ -49,6 +49,16 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 - Round length constant (no 3000/6000 immediates in the round functions; likely data-driven).
 - Scene render entry point in the exe (needed for synchronized two-pass stereo instead of alternate-eye).
 
+## Target action menu (found 2026-10-26)
+- In-game interface: `[[[[0x7A39FC]+4]+4]+0x40]+0x90` (client app -> ... -> GUI -> main interface); action block at +0xBC.
+- Per target column c (0..2): list at block+c*0xC (entries pointer, count); entries 0x38 bytes: +0x04 kind, +0x08 id
+  (0x1000xxxx feat, 0x2000xxxx Force power, 0x3EB plain attack), +0x0C handler, +0x20 icon resref (16 chars).
+- Selected entry id of column c: block+(c + (byte[block+0x1AEA] + 3) * 3)*4; -1 = the first entry.
+- Cycle next / previous: `0x6865B0` / `0x686680` (thiscall block, column) only rewrite that id. Keys 1..3 perform the
+  column's selected entry on the target (seen: Critical Strike queued against a kinrath).
+- Slot widgets: `0x68B9D0` ("BTN_TARGET%d" / UP / DOWN, or ACTION for the personal slots).
+- Names: icon resref -> feat.2da / spells.2da / skills.2da name (tools/action_names.py -> kvr/actions.txt).
+
 ## Conversation panels (found 2026-10-26; NPC dialog and computer terminal share this code)
 - Reset `0x6A7160` thiscall (): first call for every node.
 - SetMessage `0x6A7010` thiscall (CExoString*), ret 4 — vtable slot 0x1D4; the computer overrides it (`0x6A9520`) and

@@ -23,6 +23,7 @@
 #include "cues.h"
 #include "tutorial.h"
 #include "dialogue.h"
+#include "actionring.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -176,6 +177,11 @@ void Input_Update(HWND wnd) {
         Cues_Update();
         Tutorial_Update();
         double now = Gestures_Now();
+        bool ringWasOpen = ActionRing_Active();
+        if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key
+            g_gestureKey = k;
+            g_gestureKeyAt = now;
+        }
         if (BYTE k = Dialogue_Update(in)) {  // trigger on a reply in the conversation panel: its number key
             g_gestureKey = k;
             g_gestureKeyAt = now;
@@ -199,7 +205,7 @@ void Input_Update(HWND wnd) {
         bool trigNow = in.trigR > 0.6f;
         static bool rangedPickWanted;
         static double lastRangedPick = -10;
-        if (trigNow && !trigWas && fighting) {
+        if (trigNow && !trigWas && fighting && !ringWasOpen) {
             bool ranged = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
             if (ranged) {
                 Gestures_OnShot();
@@ -224,7 +230,10 @@ void Input_Update(HWND wnd) {
         }
 
         if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause
-        if (in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) keys[DIK_ESCAPE] = 0x80;   // menu / back
+        static bool eatB;  // B that closed the action ring is not also Escape
+        if (ringWasOpen && (in.buttons & KVR_BTN_B)) eatB = true;
+        if (!(in.buttons & KVR_BTN_B)) eatB = false;
+        if ((in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) && !eatB) keys[DIK_ESCAPE] = 0x80;   // menu / back
         if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
         // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
         // object your right hand points at (the game highlights it through its own hover feedback)
@@ -234,10 +243,18 @@ void Input_Update(HWND wnd) {
         // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
         // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes
         // the target, and KotOR's Default Action key (R) uses / talks to / opens / attacks it.
+        // Held on (>= 0.4 s) instead: the target's other actions open in the action ring (security, bash, Force powers,
+        // feats, ...) and no default action is taken (none when the target has no others: then R as usual).
         static bool gripWas;
-        bool gripNow = world && in.gripR > 0.7f;
+        static bool gripPick;        // the running pick came from the grip (not a shot)
+        static double gripDownMs;
+        static bool deferR;          // grip still held when the pick settled: R on a short release, ring on a hold
+        bool gripNow = world && in.gripR > 0.7f && !ringWasOpen;
         double tick = (double)GetTickCount();
         if (((gripNow && !gripWas) || rangedPickWanted) && g_pickStartMs < 0) {
+            gripPick = !rangedPickWanted;
+            gripDownMs = tick;
+            deferR = false;
             rangedPickWanted = false;
             int w, h;
             VR_ClientSize(&w, &h);
@@ -247,6 +264,21 @@ void Input_Update(HWND wnd) {
                 g_autoTy = h * 0.5f;
                 g_pickStartMs = tick;
                 Log("input: world grip -> aim pick + default action");
+            }
+        }
+        if (deferR) {
+            if (!gripNow) {  // short squeeze: the default action, as always
+                deferR = false;
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+            } else if (tick - gripDownMs >= 400) {
+                deferR = false;
+                if (!ActionRing_Open(in)) {
+                    g_gestureKey = DIK_R;
+                    g_gestureKeyAt = now;
+                } else {
+                    Log("input: grip held -> action ring");
+                }
             }
         }
         gripWas = gripNow;
@@ -266,9 +298,13 @@ void Input_Update(HWND wnd) {
         }
         if (g_pickStartMs >= 0) {
             double t = tick - g_pickStartMs;
-            if (t >= 120 && g_gestureKeyAt < 0 && t < 200) {  // hover has settled on the aimed object
-                g_gestureKey = DIK_R;
-                g_gestureKeyAt = now;
+            if (t >= 120 && g_gestureKeyAt < 0 && t < 200 && !deferR) {  // hover has settled on the aimed object
+                if (gripPick && gripNow) {
+                    deferR = true;
+                } else {
+                    g_gestureKey = DIK_R;
+                    g_gestureKeyAt = now;
+                }
             }
             if (t > 330) g_pickStartMs = -1;
             tx = g_autoTx;

@@ -17,6 +17,7 @@ One-time (already done on this PC), from your own game files:
 | Right stick click | recenter |
 | Right hand pointing | KotOR's own hover highlight (no beam in the world) |
 | Right grip | use / talk to / open / attack what your hand points at (no mouse click: never fires a HUD slot) |
+| Right grip **held** (0.4 s) | action ring for what you point at: its other actions by name (Security, Bash, Critical Strike, Force Push, grenades, …); point + trigger to do one; grip again / B / 10 s closes it |
 | Right trigger on the HUD / menus | click (laser + white dot) |
 | **Conversations** — point at a reply + right trigger | pick it (panel floats in front of you: the speaker's line on top, replies below; the laser shows while you point at it) |
 | **In combat** — melee swing | attack the current target (once attacking, swings only count for timing) |

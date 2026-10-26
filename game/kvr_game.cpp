@@ -23,6 +23,7 @@
 #include "cues.h"
 #include "tutorial.h"
 #include "dialogue.h"
+#include "actionring.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -524,6 +525,7 @@ static void Install() {
     Cues_Init(g_dir);
     Tutorial_Init(g_dir);
     Dialogue_Install();
+    ActionRing_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
     if (Features().combat) Combat_Install();
 }

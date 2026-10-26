@@ -191,6 +191,10 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         }
         double ago = Gestures_LastAttackAgo();
         ApplySpecialMove(attacker);
+        __try {  // which attack KotOR is making (0 plain, else the feat: Power Attack, Critical Strike, ...)
+            BYTE* round = *(BYTE**)((BYTE*)attacker + 0x9C8);
+            if (round) Log("combat: player roll, attack type %d", *(int*)(round + 4 + *(round + 0x96C) * 0x14C + 0x64));
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
         if (Gestures_ConsumeRecentAttack(kTimedWindow) <= 0) return;
         unsigned nat = D20();
         int bonus = ago <= kPerfectWindow ? 4 : 2;  // on the beat / roughly in time
