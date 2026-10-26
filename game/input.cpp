@@ -18,6 +18,7 @@
 #include "gestures.h"
 #include "weapons.h"
 #include "features.h"
+#include "enginecam.h"
 #include "combat.h"
 #include "cues.h"
 
@@ -131,7 +132,8 @@ void Input_Update(HWND wnd) {
         // movement: left stick in head space -> rotate into the game camera's frame -> W/S forward/back, Z/C strafe
         // (KotOR keymap.2da). KotOR moves relative to its camera, which only turns with the right stick, so without
         // this the stick would steer like tank controls whenever you look around.
-        float psi = VR_HeadYaw();
+        // the view's heading is ours (enginecam), the game camera's may differ: rotate by both
+        float psi = VR_HeadYaw() + EngineCam_ViewYawOffset();
         float c = cosf(psi), sn = sinf(psi);
         float mr = in.lx * c - in.ly * sn;  // right component in the game camera frame
         float mf = in.lx * sn + in.ly * c;  // forward component
@@ -143,9 +145,27 @@ void Input_Update(HWND wnd) {
             if (mr < -0.38f * mag) keys[DIK_Z] = 0x80;
             if (mr > 0.38f * mag) keys[DIK_C] = 0x80;
         }
-        // camera rotate: right stick X -> A/D
-        if (in.rx < -0.6f) keys[DIK_A] = 0x80;
-        if (in.rx > 0.6f) keys[DIK_D] = 0x80;
+        // turning: right stick X turns our view directly (smooth, or snap steps with [Comfort] SnapTurn=1); the game's
+        // own camera keys are not used, so KotOR can neither ignore the turn nor swing the view around in combat
+        {
+            static double lastT = -1;
+            static bool snapArmed = true;
+            double tnow = GetTickCount() / 1000.0;
+            float dt = lastT > 0 ? (float)min(tnow - lastT, 0.1) : 0;
+            lastT = tnow;
+            const float deg = 3.14159265f / 180.0f;
+            if (Features().snapTurn) {
+                if (fabsf(in.rx) > 0.7f && snapArmed) {
+                    EngineCam_Turn((in.rx > 0 ? -1.0f : 1.0f) * Features().snapAngle * deg);
+                    snapArmed = false;
+                } else if (fabsf(in.rx) < 0.3f) {
+                    snapArmed = true;
+                }
+            } else if (fabsf(in.rx) > 0.15f) {
+                float k = (fabsf(in.rx) - 0.15f) / 0.85f;
+                EngineCam_Turn((in.rx > 0 ? -1.0f : 1.0f) * k * k * Features().turnSpeed * deg * dt);
+            }
+        }
         // ---- motion gestures (melee swings, shots, Force moves) and the attacks they trigger
         float headPos[3] = {0, 0, 0};
         VR_HeadPos(headPos);

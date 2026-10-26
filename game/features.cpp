@@ -5,7 +5,7 @@
 
 extern void Log(const char* fmt, ...);
 
-static FeatureFlags g_flags = {true, true, true, true, false, true, true, true, false, false};
+static FeatureFlags g_flags = {true, true, true, true, false, true, true, true, false, false, 30.0f, 120.0f, false};
 
 const FeatureFlags& Features() { return g_flags; }
 
@@ -28,6 +28,9 @@ void Features_Load(const char* gameDir) {
     g_flags.modelCull = GetPrivateProfileIntA("Features", "ModelCull", 1, path) != 0;
     g_flags.cues = GetPrivateProfileIntA("Features", "Cues", 1, path) != 0;
     g_flags.weaponGallery = GetPrivateProfileIntA("Debug", "WeaponGallery", 0, path) != 0;
+    g_flags.snapTurn = GetPrivateProfileIntA("Comfort", "SnapTurn", 0, path) != 0;
+    g_flags.snapAngle = (float)GetPrivateProfileIntA("Comfort", "SnapAngle", 30, path);
+    g_flags.turnSpeed = (float)GetPrivateProfileIntA("Comfort", "TurnSpeed", 120, path);
     g_flags.cueTest = GetPrivateProfileIntA("Debug", "CueTest", 0, path) != 0;
     g_flags.tracePosition = GetPrivateProfileIntA("Debug", "TracePosition", 0, path) != 0;
     Log("features: engineCamera %d weaponProxies %d gestures %d combat %d (%s)", g_flags.engineCamera,

@@ -12,6 +12,9 @@ struct FeatureFlags {
     bool modelCull;      // hide exactly the controlled character's model (0 = old radius heuristics)
     bool cues;           // combat feedback: haptics, weapon glow, KotOR sounds for blocks / timing / warnings
     bool cueTest;        // [Debug] CueTest=1: fire every combat cue in turn every 1.5 s (harness checks)
+    bool snapTurn;       // [Comfort] SnapTurn=1: right stick turns in SnapAngle steps instead of smoothly
+    float snapAngle;     // [Comfort] SnapAngle (degrees, default 30)
+    float turnSpeed;     // [Comfort] TurnSpeed (degrees per second at full stick, default 120)
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };
 

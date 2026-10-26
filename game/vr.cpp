@@ -654,8 +654,13 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     if (g_texW <= 0) return false;
     float Q[9];
     QuatToRows(aimQuat, Q);
-    // forward = Q * (0, 0, -1)
-    float d[3] = {-Q[2], -Q[5], -Q[8]};
+    // forward = Q * (0, 0, -1), then into the game camera's frame: our view heading differs from it by the offset
+    float d0[3] = {-Q[2], -Q[5], -Q[8]};
+    float off = EngineCam_ViewYawOffset(), co = cosf(off), so = sinf(off);
+    // right-handed rotation about +Y by +off (turns -Z toward -X, i.e. left)
+    float d[3] = {co * d0[0] + so * d0[2], d0[1], -so * d0[0] + co * d0[2]};
+    float p0[3] = {co * aimPos[0] + so * aimPos[2], aimPos[1], -so * aimPos[0] + co * aimPos[2]};
+    aimPos = p0;
     float a[3] = {aimPos[0] + d[0] * 10.0f, aimPos[1] + d[1] * 10.0f, aimPos[2] + d[2] * 10.0f};
     if (a[2] > -0.05f) return false;  // pointing behind the game camera
     double t = tan(g_gameFovy * 3.14159265358979 / 360.0);

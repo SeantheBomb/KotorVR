@@ -49,6 +49,37 @@ float g_playPos[3], g_playQ[4];
 bool g_haveEyeOffset;
 float g_eyeOffset[3];   // gameplay camera position minus the controlled creature's position (eye height, etc.)
 float g_followPos[3];   // cutscene anchor: the creature's live position + that offset
+// owned heading (see EngineCam_Turn)
+bool g_viewYawValid;
+float g_viewYaw, g_gameYaw, g_lastPlayPos[3];
+volatile float g_pendingTurn;
+
+float WrapPi(float a) {
+    while (a > 3.14159265f) a -= 6.2831853f;
+    while (a < -3.14159265f) a += 6.2831853f;
+    return a;
+}
+
+// camera (GL camera space: x right, y up, -z forward) -> world (KotOR: z up), level, facing heading psi (CCW from +X)
+void QuatFromYaw(float psi, float q[4]) {
+    float s = sinf(psi), c = cosf(psi);
+    float m[9] = {s, 0, -c, -c, 0, -s, 0, 1, 0};  // rows; columns = camera x, y, z in world
+    float tr = m[0] + m[4] + m[8];
+    if (tr > 0) {
+        float k = sqrtf(tr + 1.0f) * 2;
+        q[0] = 0.25f * k; q[1] = (m[7] - m[5]) / k; q[2] = (m[2] - m[6]) / k; q[3] = (m[3] - m[1]) / k;
+    } else if (m[0] > m[4] && m[0] > m[8]) {
+        float k = sqrtf(1.0f + m[0] - m[4] - m[8]) * 2;
+        q[0] = (m[7] - m[5]) / k; q[1] = 0.25f * k; q[2] = (m[1] + m[3]) / k; q[3] = (m[2] + m[6]) / k;
+    } else if (m[4] > m[8]) {
+        float k = sqrtf(1.0f + m[4] - m[0] - m[8]) * 2;
+        q[0] = (m[2] - m[6]) / k; q[1] = (m[1] + m[3]) / k; q[2] = 0.25f * k; q[3] = (m[5] + m[7]) / k;
+    } else {
+        float k = sqrtf(1.0f + m[8] - m[0] - m[4]) * 2;
+        q[0] = (m[3] - m[1]) / k; q[1] = (m[2] + m[6]) / k; q[2] = (m[5] + m[7]) / k; q[3] = 0.25f * k;
+    }
+}
+
 // aim picks (VR_BeginAimPick): the camera looks along the hand and is left that way for the game's own mouse picking
 bool g_pickApplied, g_leftAimed;
 float g_aimedPos[3], g_aimedQ[4];
@@ -114,8 +145,23 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     const float* baseQ = g_origQ;
     bool gameplay = fabsf(fov - kGameplayFov) < 0.5f;
     if (gameplay) {
+        // heading: the game camera's for reference, ours for the view
+        float M0[9];
+        QuatWxyzToRows(g_origQ, M0);
+        g_gameYaw = atan2f(-M0[5], -M0[2]);  // forward = -(column z)
+        float jx = g_origPos[0] - g_lastPlayPos[0], jy = g_origPos[1] - g_lastPlayPos[1];
+        if (!g_viewYawValid || jx * jx + jy * jy > 25.0f) {  // first frame / area change / teleport: start where the game looks
+            g_viewYaw = g_gameYaw;
+            g_viewYawValid = true;
+        }
+        memcpy(g_lastPlayPos, g_origPos, sizeof g_lastPlayPos);
+        g_viewYaw = WrapPi(g_viewYaw + g_pendingTurn);
+        g_pendingTurn = 0;
+        static float viewQ[4];
+        QuatFromYaw(g_viewYaw, viewQ);
+        baseQ = viewQ;
         memcpy(g_playPos, g_origPos, sizeof g_playPos);
-        memcpy(g_playQ, g_origQ, sizeof g_playQ);
+        memcpy(g_playQ, viewQ, sizeof g_playQ);
         g_havePlay = true;
         float cp[3];
         if (CreaturePos(cp)) {
@@ -130,7 +176,8 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                 // camera forward is local -Z: third column of M(q), negated
                 float M0[9];
                 QuatWxyzToRows(g_origQ, M0);
-                Log("pos: %.1f %.1f %.1f fwd %.2f %.2f", g_playPos[0], g_playPos[1], g_playPos[2], -M0[2], -M0[5]);
+                Log("pos: %.1f %.1f %.1f fwd %.2f %.2f view yaw %.0f game yaw %.0f", g_playPos[0], g_playPos[1], g_playPos[2],
+                    -M0[2], -M0[5], g_viewYaw * 57.29578f, g_gameYaw * 57.29578f);
             }
         }
     } else if (g_havePlay) {
@@ -212,6 +259,10 @@ void EngineCam_OnView(const float* m, const float p[3]) {
 }
 
 bool EngineCam_Applied() { return g_applied; }
+
+void EngineCam_Turn(float radians) { g_pendingTurn += radians; }
+
+float EngineCam_ViewYawOffset() { return g_viewYawValid ? WrapPi(g_viewYaw - g_gameYaw) : 0.0f; }
 
 __declspec(naked) static void CamStub() {
     __asm {

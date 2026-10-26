@@ -1,0 +1,25 @@
+# Owned view heading: turn with the right stick, walk, and check the walk follows the view (pos: lines).
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
+click u=0.410 v=0.431      # Game 1
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+wait 3
+shot start
+stick rx=1 for=1.5                 # turn right ~150 deg (smooth, 120 deg/s at full stick)
+wait 2.5
+shot turned
+stick ly=1 for=2                   # walk forward in the new view direction
+wait 2.5
+shot walked
+stick rx=-1 for=0.75               # turn back left ~90
+wait 2.5
+stick ly=1 for=2
+wait 2.5
