@@ -42,6 +42,9 @@ double g_lastSwingAt = -10, g_lastShotAt = -10, g_lastGuardAt = -10, g_lastDodge
 float g_lastAttackQuality;
 double g_lastAttackAt = -10;
 bool g_swingPending, g_pushPending, g_pullPending;
+GestureMove g_move = MOVE_NONE;
+double g_moveAt = -10, g_prevSwingAt = -10, g_prevShotAt = -10;
+const char* kMoveName[] = {"none", "power", "critical", "flurry", "power shot", "rapid"};
 float g_swingQuality;
 double g_lastPushAt = -10, g_lastPullAt = -10;
 
@@ -97,7 +100,27 @@ void Gestures_Update(const KvrInput& in, const float headPos[3]) {
     if (rp.melee && g_now - g_lastSwingAt > 0.45) {
         float peak, travel;
         Motion(g_right, 0.25, &peak, &travel, nullptr);
-        if (peak > rp.swingSpeed && travel > rp.swingTravel) {
+        // > 25 m/s is a tracking jump (lost / regained controller), not an arm: never a swing
+        if (peak > rp.swingSpeed && travel > rp.swingTravel && peak < 25.0f) {
+            // what kind of swing: over the last 0.35 s, relative to where the head faces
+            float pk, tr, d[3];
+            Motion(g_right, 0.35, &pk, &tr, d);
+            float yaw = VR_HeadYaw();
+            float fwd[2] = {-sinf(yaw), -cosf(yaw)};  // head forward on the floor (x, z)
+            float along = d[0] * fwd[0] + d[2] * fwd[1];
+            float side = fabsf(d[0] * fwd[1] - d[2] * fwd[0]);
+            float startY = g_right.count > 8 ? g_right.Back(g_right.count > 20 ? 20 : g_right.count - 1).p[1] : 0;
+            GestureMove move = MOVE_NONE;
+            if (g_now - g_prevSwingAt < 1.0) move = MOVE_FLURRY;
+            else if (along > 0.3f && along > 1.5f * side && fabsf(d[1]) < 0.6f * along) move = MOVE_CRITICAL;
+            else if (-d[1] > 0.35f && startY > headPos[1] - 0.05f) move = MOVE_POWER;
+            if (move != MOVE_NONE) {
+                g_move = move;
+                g_moveAt = g_now;
+                Log("gesture: special move %s (along %.2f side %.2f down %.2f start %.2f vs head %.2f)", kMoveName[move],
+                    along, side, -d[1], startY, headPos[1]);
+            }
+            g_prevSwingAt = g_now;
             g_lastSwingAt = g_now;
             g_swingQuality = fminf(2.0f, fmaxf(1.0f, peak / rp.swingSpeed));
             g_swingPending = true;
@@ -169,6 +192,15 @@ void Gestures_OnShot() {
     float peak, travel;
     Motion(g_aimDir, 0.3, &peak, &travel, nullptr);
     float q = travel < 0.03f ? 2.0f : travel < 0.08f ? 1.5f : 1.0f;
+    float pk2, held;
+    Motion(g_aimDir, 1.2, &pk2, &held, nullptr);
+    GestureMove move = g_now - g_prevShotAt < 1.0 ? MOVE_RAPID : held < 0.06f ? MOVE_POWER_SHOT : MOVE_NONE;
+    if (move != MOVE_NONE) {
+        g_move = move;
+        g_moveAt = g_now;
+        Log("gesture: special move %s (aim drift over 1.2 s %.3f rad)", kMoveName[move], held);
+    }
+    g_prevShotAt = g_now;
     g_lastShotAt = g_now;
     g_lastAttackQuality = q;
     g_lastAttackAt = g_now;
@@ -180,6 +212,13 @@ float Gestures_ConsumeRecentAttack(double seconds) {
     float q = g_lastAttackQuality;
     g_lastAttackQuality = 0;
     return q;
+}
+
+GestureMove Gestures_TakeMove(double seconds) {
+    if (g_move == MOVE_NONE || g_now - g_moveAt > seconds) return MOVE_NONE;
+    GestureMove m = g_move;
+    g_move = MOVE_NONE;
+    return m;
 }
 
 bool Gestures_Guarding(double seconds) { return g_now - g_lastGuardAt <= seconds; }

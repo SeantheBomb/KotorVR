@@ -132,6 +132,39 @@ const double kPerfectWindow = 0.6;  // seconds before the roll
 const double kTimedWindow = 2.0;
 const double kIncomingLead = 0.6;  // warning shown / cue fired this long before an attack lands
 
+// Special moves: the attack gesture's move becomes the best rank of that combat feat the character can use, written
+// into the attack record's AttackType (+0x64) before the roll; KotOR then applies the feat's own to-hit / damage
+// rules (attack bonus 0x5A7EA0, damage 0x5A9050). Feat use is checked with the engine's own test 0x5A6680
+// (thiscall on the creature stats [creature + 0xA74], feat id), so a character never gets a move it does not have.
+void ApplySpecialMove(void* creature) {
+    GestureMove m = Gestures_TakeMove(kTimedWindow);
+    if (m == MOVE_NONE) return;
+    static const unsigned short kFeats[][3] = {
+        {0, 0, 0},
+        {83, 17, 28},  // power attack: master, improved, base
+        {81, 19, 8},   // critical strike
+        {91, 11, 0},   // flurry: improved, base
+        {82, 18, 29},  // power blast
+        {92, 30, 0},   // rapid shot: improved, base
+    };
+    typedef bool(__thiscall * CanUseFeat_t)(void*, unsigned short);
+    const CanUseFeat_t CanUseFeat = (CanUseFeat_t)0x5A6680;
+    __try {
+        void* stats = *(void**)((BYTE*)creature + 0xA74);
+        BYTE* round = *(BYTE**)((BYTE*)creature + 0x9C8);
+        if (!stats || !round) return;
+        BYTE* record = round + 4 + *(round + 0x96C) * 0x14C;
+        for (unsigned short feat : kFeats[m]) {
+            if (!feat || !CanUseFeat(stats, feat)) continue;
+            *(WORD*)(record + 0x64) = feat;
+            Log("combat: special move %d -> feat %u on this attack", (int)m, feat);
+            Cues_Fire(CUE_PERFECT_HIT);
+            return;
+        }
+        Log("combat: special move %d, but the character has none of its feats", (int)m);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- 1. the roll
@@ -149,6 +182,7 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
             g_playerRolls[1] = t;
         }
         double ago = Gestures_LastAttackAgo();
+        ApplySpecialMove(attacker);
         if (Gestures_ConsumeRecentAttack(kTimedWindow) <= 0) return;
         unsigned nat = D20();
         int bonus = ago <= kPerfectWindow ? 4 : 2;  // on the beat / roughly in time
