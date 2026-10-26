@@ -665,6 +665,9 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.1);
+        } else if (cmd == "hover") {  // stand-in for the real host's ray hit-test: hover <panel> <line>
+            if (args.size() >= 2) g_shm->text[atoi(args[0].c_str()) % KVR_TEXT_PANELS].hover = atoi(args[1].c_str());
+            RunFor(0.1);
         } else if (cmd == "key") {
             std::string k = args.empty() ? "" : args[0];
             WORD vk = k == "grave" ? VK_OEM_3 : k == "enter" ? VK_RETURN : k == "escape" ? VK_ESCAPE : k == "space" ? VK_SPACE : k == "tab" ? VK_TAB : 0;

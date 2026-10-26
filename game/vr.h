@@ -54,6 +54,8 @@ void VR_Haptic(int hand, float amplitude, float duration, float frequency);
 // lines separated by newlines ('#' starts a title line), highlight = line index or -1.
 void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat[4], float width, const char* text,
                  int highlight);
+// the right hand can point at the panel's lines (reported back in KvrTextPanel::hover); ShowText clears it
+void VR_SetTextPickable(int slot, bool on);
 void VR_HideText(int slot);
 // Head (eye 0) position in the recenter-origin frame.
 void VR_HeadPos(float out[3]);

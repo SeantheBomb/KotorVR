@@ -269,6 +269,8 @@ static bool CreateSwapchain(Swapchain& sc, int32_t w, int32_t h) {
 
 static bool InitControls();
 static bool InitText();
+struct Swapchain;
+static void FillSwapchain(Swapchain& sc, const float rgba[4]);
 
 // ---------------------------------------------------------------- hand tracking (XR_EXT_hand_tracking)
 static bool g_extHands, g_extHandSource;
@@ -580,9 +582,14 @@ struct TextPanel {
     ID3D11Texture2D* tex = nullptr;   // D2D target (UNORM twin of the swapchain format), copied in on change
     ID2D1RenderTarget* rt = nullptr;
     uint32_t serial = 0xFFFFFFFF;
+    int drawnHover = -2;
     XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    int lines = 0;
+    float lineTop[24], lineBottom[24];  // texture pixels, for pointing at a line
 };
 static TextPanel g_text[KVR_TEXT_PANELS];
+static bool g_lastAimValid;    // this frame's right aim ray (LOCAL), for pointing at text panels
+static XrPosef g_lastAim;
 static const int kTextW = 1024, kTextH = 512;
 
 static bool InitText() {
@@ -628,7 +635,7 @@ static void ReleaseText() {
 
 // redraw a panel's texture from the game's text: dark rounded card, an optional '#' title line, the rest wrapped;
 // the highlighted line (pickable options) gets a gold bar
-static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src) {
+static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     wchar_t wide[1024];
     char text[sizeof src.text + 1];
     memcpy(text, src.text, sizeof src.text);
@@ -643,6 +650,7 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src) {
     p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(4, 4, kTextW - 4.0f, kTextH - 4.0f), 24, 24), bg);
     float y = 24;
     int line = 0;
+    p.lines = 0;
     for (char* s = text; s && *s && y < kTextH - 30; line++) {
         char* nl = strchr(s, '\n');
         if (nl) *nl = 0;
@@ -652,10 +660,16 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src) {
         g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? g_fmtTitle : g_fmtBody, kTextW - 72.0f, (float)kTextH, &lay);
         DWRITE_TEXT_METRICS m{};
         if (lay) lay->GetMetrics(&m);
-        if (line == src.highlight)
+        if (line < 24) {
+            p.lineTop[line] = y - 4;
+            p.lineBottom[line] = y + m.height + 4;
+            p.lines = line + 1;
+        }
+        bool lit = line == src.highlight || line == hover;
+        if (lit)
             p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(20, y - 4, kTextW - 20.0f, y + m.height + 4), 12, 12), hl);
         if (lay) {
-            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, title || line == src.highlight ? gold : fg);
+            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, title || lit ? gold : fg);
             lay->Release();
         }
         y += m.height + (title ? 14 : 8);
@@ -679,16 +693,18 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src) {
 }
 
 // the game's text panels as quad layers (anchor frame -> LOCAL)
-static void AddTextLayers(std::vector<XrCompositionLayerBaseHeader*>& layers, const XrPosef& head) {
+static void AddTextLayers(std::vector<XrCompositionLayerBaseHeader*>& layers, const XrPosef& head, bool aimValid,
+                          const XrPosef& aim) {
+    static XrCompositionLayerQuad tbeam{XR_TYPE_COMPOSITION_LAYER_QUAD}, tdot{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    bool beamUsed = false;
     for (int i = 0; i < KVR_TEXT_PANELS; i++) {
         TextPanel& p = g_text[i];
         if (!p.rt || p.sc.handle == XR_NULL_HANDLE) continue;
         KvrTextPanel src;
         memcpy(&src, (const void*)&g_shm->text[i], sizeof src);
-        if (src.anchor == KVR_ANCHOR_HIDDEN || src.width <= 0) continue;
-        if (src.serial != p.serial) {
-            DrawTextPanel(p, src);
-            p.serial = src.serial;
+        if (src.anchor == KVR_ANCHOR_HIDDEN || src.width <= 0) {
+            g_shm->text[i].hover = -1;
+            continue;
         }
         XrPosef local, rel;
         memcpy(&rel.position, src.pose.pos, 12);
@@ -704,13 +720,66 @@ static void AddTextLayers(std::vector<XrCompositionLayerBaseHeader*>& layers, co
         } else {
             local = PoseMul(g_origin, rel);
         }
+        // pointing: the right aim ray against the quad; the line under it is highlighted and reported to the game
+        int hover = -1;
+        float hitDist = 0;
+        float qw = src.width, qh = src.width * kTextH / kTextW;
+        if (src.pickable && aimValid) {
+            XrPosef o = PoseMul(PoseInv(local), aim);  // aim in quad space (quad faces +Z)
+            Quat q{o.orientation.x, o.orientation.y, o.orientation.z, o.orientation.w};
+            Vec3 d = qrot(q, {0, 0, -1});
+            if (d.z < -1e-4f || d.z > 1e-4f) {
+                float tt = -o.position.z / d.z;
+                float hx = o.position.x + d.x * tt, hy = o.position.y + d.y * tt;
+                if (tt > 0 && fabsf(hx) <= qw / 2 && fabsf(hy) <= qh / 2) {
+                    float py = (0.5f - hy / qh) * kTextH;
+                    for (int l = 1; l < p.lines; l++)  // line 0 is the title (the NPC's words)
+                        if (py >= p.lineTop[l] && py <= p.lineBottom[l]) hover = l;
+                    hitDist = tt;
+                }
+            }
+        }
+        g_shm->text[i].hover = hover;
+        if (src.serial != p.serial || hover != p.drawnHover) {
+            DrawTextPanel(p, src, src.pickable ? hover : -1);
+            p.serial = src.serial;
+            p.drawnHover = hover;
+        }
+        if (hitDist > 0 && !beamUsed) {  // the laser, only while it is on a pickable panel
+            beamUsed = true;
+            const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, white[4] = {1, 1, 1, 1};
+            FillSwapchain(g_beamSc, cyan);
+            FillSwapchain(g_dotSc, white);
+            Quat aq{aim.orientation.x, aim.orientation.y, aim.orientation.z, aim.orientation.w};
+            Vec3 ao = V(aim.position), ad = qrot(aq, {0, 0, -1});
+            Vec3 c = Add(ao, Mul(ad, hitDist * 0.5f));
+            Vec3 toHead = Sub(V(head.position), c);
+            Vec3 z = Norm(Sub(toHead, Mul(ad, Dot(toHead, ad))));
+            tbeam.space = g_local;
+            tbeam.pose.orientation = QuatFromBasis(Cross(ad, z), ad, z);
+            tbeam.pose.position = {c.x, c.y, c.z};
+            tbeam.size = {0.004f, hitDist};
+            tbeam.subImage.swapchain = g_beamSc.handle;
+            tbeam.subImage.imageRect = {{0, 0}, {g_beamSc.w, g_beamSc.h}};
+            Vec3 hit = Add(ao, Mul(ad, hitDist - 0.004f));
+            tdot.space = g_local;
+            tdot.pose.orientation = local.orientation;
+            tdot.pose.position = {hit.x, hit.y, hit.z};
+            tdot.size = {0.015f, 0.015f};
+            tdot.subImage.swapchain = g_dotSc.handle;
+            tdot.subImage.imageRect = {{0, 0}, {g_dotSc.w, g_dotSc.h}};
+        }
         p.quad.space = g_local;
         p.quad.pose = local;
-        p.quad.size = {src.width, src.width * kTextH / kTextW};
+        p.quad.size = {qw, qh};
         p.quad.subImage.swapchain = p.sc.handle;
         p.quad.subImage.imageRect = {{0, 0}, {kTextW, kTextH}};
         p.quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
         layers.push_back((XrCompositionLayerBaseHeader*)&p.quad);
+    }
+    if (beamUsed) {
+        layers.push_back((XrCompositionLayerBaseHeader*)&tbeam);
+        layers.push_back((XrCompositionLayerBaseHeader*)&tdot);
     }
 }
 
@@ -1144,6 +1213,8 @@ static void Frame() {
 
         // controllers: publish state, then draw the right-hand laser and the panel cursor
         PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
+        g_lastAimValid = pr.aimValid;
+        g_lastAim = pr.aimLocal;
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
         // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback
         if (pr.aimValid && tracked && pr.hitPanel) {
@@ -1181,7 +1252,7 @@ static void Frame() {
         }
     }
 
-    if (tracked) AddTextLayers(layers, views[0].pose);
+    if (tracked) AddTextLayers(layers, views[0].pose, g_lastAimValid, g_lastAim);
 
     XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
     fei.displayTime = fs.predictedDisplayTime;

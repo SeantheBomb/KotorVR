@@ -18,6 +18,7 @@ One-time (already done on this PC), from your own game files:
 | Right hand pointing | KotOR's own hover highlight (no beam in the world) |
 | Right grip | use / talk to / open / attack what your hand points at (no mouse click: never fires a HUD slot) |
 | Right trigger on the HUD / menus | click (laser + white dot) |
+| **Conversations** — point at a reply + right trigger | pick it (panel floats in front of you: the speaker's line on top, replies below; the laser shows while you point at it) |
 | **In combat** — melee swing | attack the current target (once attacking, swings only count for timing) |
 | **In combat** — overhead chop / forward thrust / 2 quick swings | Power Attack / Critical Strike / Flurry (best rank you have) |
 | **In combat** — right trigger | attack the current target (ranged: steady aim = better shot) |

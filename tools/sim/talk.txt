@@ -23,3 +23,19 @@ wait 6
 shot talk1
 wait 6
 shot talk2
+hover 1 4                          # point at reply 4 ("Kick the computer") on the VR panel (line 0 is the title)
+trigger
+hover 1 -1
+wait 4
+shot pick1
+hover 1 5                          # "Leave the computer alone": a 10 s scripted pause, then one "[Continue]"
+trigger
+hover 1 -1
+wait 3
+shot leave
+wait 9
+hover 1 1                          # the closing "[Continue]" ends the conversation; our panel must go with it
+trigger
+hover 1 -1
+wait 4
+shot after

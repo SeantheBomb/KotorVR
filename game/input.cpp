@@ -22,6 +22,7 @@
 #include "combat.h"
 #include "cues.h"
 #include "tutorial.h"
+#include "dialogue.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -175,6 +176,10 @@ void Input_Update(HWND wnd) {
         Cues_Update();
         Tutorial_Update();
         double now = Gestures_Now();
+        if (BYTE k = Dialogue_Update(in)) {  // trigger on a reply in the conversation panel: its number key
+            g_gestureKey = k;
+            g_gestureKeyAt = now;
+        }
         float swingQ;
         // Attacks go through KotOR's Default Action (R) on the current target: clicking would make the character
         // walk to the floor when the swing / shot isn't over an enemy. Grip selects / uses what the hand points at.
@@ -224,7 +229,7 @@ void Input_Update(HWND wnd) {
         // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
         // object your right hand points at (the game highlights it through its own hover feedback)
         bool world = in.pointerMode == KVR_POINTER_WORLD;
-        mouse[0] = !world && in.trigR > 0.6f;
+        mouse[0] = !world && in.trigR > 0.6f && !Dialogue_Active();
         // World grip: no mouse click at all (KotOR draws the target's action menu right at the target, so a click there
         // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
         // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes

@@ -776,9 +776,15 @@ void VR_ShowText(int slot, unsigned anchor, const float pos[3], const float quat
     memcpy(t.pose.quat, quat, sizeof t.pose.quat);
     t.width = width;
     t.highlight = highlight;
+    t.pickable = 0;
     strncpy_s(t.text, text, _TRUNCATE);
     MemoryBarrier();
     t.serial = t.serial + 1;
+}
+
+void VR_SetTextPickable(int slot, bool on) {
+    if (!g_shm || slot < 0 || slot >= KVR_TEXT_PANELS) return;
+    g_shm->text[slot].pickable = on ? 1 : 0;
 }
 
 void VR_HideText(int slot) {

@@ -49,6 +49,20 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 - Round length constant (no 3000/6000 immediates in the round functions; likely data-driven).
 - Scene render entry point in the exe (needed for synchronized two-pass stereo instead of alternate-eye).
 
+## Conversation panels (found 2026-10-26; NPC dialog and computer terminal share this code)
+- Reset `0x6A7160` thiscall (): first call for every node.
+- SetMessage `0x6A7010` thiscall (CExoString*), ret 4 — vtable slot 0x1D4; the computer overrides it (`0x6A9520`) and
+  calls this base. Pending text sits in the CExoString at panel+0x1DF0 only until it is shown.
+- Subtitle `0x6A7AE0` thiscall (CExoString*), ret 4 — the NPC dialog's line (layout of the subtitle bar).
+- SetReplies `0x6A86A0` thiscall (count, CExoString[count], ids, ?, show), ret 0x14 — vtable slot 0x1CC; computer override
+  `0x6A94E0` calls it then refreshes its skill readout. Empty reply text = KotOR's "continue" entry.
+- SelectReply `0x6A7110` thiscall (index), ret 4 — keys 1..9 in the panel's input handler `0x6A7230` end here.
+- panel+0x1C non-null exactly while the panel is up (0 before it opens and after the conversation ends).
+- Node order: Reset, SetMessage, SetReplies — at once, or after a scripted pause / voice line (the reply list is empty
+  meanwhile; Space does not skip a computer's pause).
+- Constructors: NPC dialog `0x6A8B40`, computer `0x6A8EB0` (LB_MESSAGE +0x2CFC, LB_REPLIES +0x19C4); computer vtable
+  `0x755730`.
+
 ## Combat timeline (found 2026-10-25 with Ghidra 12.2 headless, `tools/ghidra/q.ps1`)
 
 Rolled at round start, applied at the visible impact. Measured in the harness (kinrath melee vs the player): the damage

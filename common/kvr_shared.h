@@ -4,12 +4,12 @@
 #include <stdint.h>
 
 // the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v9"
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v10"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 9
+#define KVR_VERSION 10
 
 #pragma pack(push, 8)
 
@@ -107,7 +107,10 @@ struct KvrTextPanel {
     uint32_t anchor;       // KVR_ANCHOR_*
     KvrPose pose;          // quad center + orientation in the anchor's frame (quad faces +Z)
     float width;           // meters (height follows the text's aspect: 2:1)
-    int32_t highlight;     // line index drawn highlighted (-1 none), for pickable option lists
+    int32_t highlight;     // line index drawn highlighted (-1 none)
+    uint32_t pickable;     // the right hand can point at its lines (dialogue options): the host shows the laser,
+                           // highlights the line under it and reports it in `hover`
+    volatile int32_t hover;  // host -> game: line index under the right-hand ray (-1 none)
     char text[504];        // UTF-8; lines separated by \n; a line starting with '#' is a title
 };
 
