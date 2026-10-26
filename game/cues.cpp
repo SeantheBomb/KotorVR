@@ -241,6 +241,8 @@ double g_flashAt[2] = {-10, -10};
 bool g_window;
 
 double g_forceAt = -10;
+float g_tint[3] = {1, 1, 1};
+double g_tintUntil = -10;
 float g_spark;
 double g_sparkAt = -10;
 void Spark(float v) {
@@ -317,6 +319,30 @@ float Cues_Glow(int hand) {
 }
 
 void Cues_SetWindow(bool open) { g_window = open; }
+
+void Cues_GlowColor(int hand, float rgb[3]) {
+    bool tinted = Now() < g_tintUntil;
+    for (int i = 0; i < 3; i++) rgb[i] = tinted ? g_tint[i] : 1.0f;
+}
+
+void Cues_Move(int move) {
+    if (!Features().cues) return;
+    static const float kColor[6][3] = {{1, 1, 1}, {1.0f, 0.5f, 0.1f}, {1.0f, 0.15f, 0.1f}, {0.3f, 0.6f, 1.0f},
+                                       {1.0f, 0.5f, 0.1f}, {0.3f, 0.6f, 1.0f}};
+    if (move < 1 || move > 5) return;
+    memcpy(g_tint, kColor[move], sizeof g_tint);
+    g_tintUntil = Now() + 0.8;
+    Flash(1.0f);
+    for (int h = 0; h < 2; h++) g_flashAt[h] = Now() + 0.2;  // hold the flare a moment longer than a plain flash
+    switch (move) {
+        case 1: case 4: Haptic(0, 1, 1.0f, 0.25f, 60); break;  // power: heavy, low
+        case 2: Haptic(0, 1, 1.0f, 0.08f, 320); Haptic(0.1, 1, 0.8f, 0.06f, 320); break;  // critical: sharp crack
+        case 3: case 5:  // flurry / rapid: quick triple
+            Haptic(0, 1, 0.8f, 0.05f, 200); Haptic(0.09, 1, 0.8f, 0.05f, 200); Haptic(0.18, 1, 0.8f, 0.05f, 200); break;
+    }
+    static const char* names[6] = {"", "power", "critical", "flurry", "power shot", "rapid"};
+    Log("cue: move %s", names[move]);
+}
 
 float Cues_ForceGlow(int hand) {
     if (!Features().cues || hand != 0) return 0;

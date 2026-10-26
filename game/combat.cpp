@@ -158,7 +158,7 @@ void ApplySpecialMove(void* creature) {
             if (!feat || !CanUseFeat(stats, feat)) continue;
             *(WORD*)(record + 0x64) = feat;
             Log("combat: special_move %d -> feat %u on this attack", (int)m, feat);
-            Cues_Fire(CUE_PERFECT_HIT);
+            Cues_Move((int)m);
             return;
         }
         Log("combat: special move %d, but the character has none of its feats", (int)m);

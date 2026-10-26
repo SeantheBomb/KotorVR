@@ -344,7 +344,7 @@ float WeaponModels_Length(int row, int variation) {
     return -minZ;
 }
 
-bool WeaponModels_Draw(int row, int variation, float glow, float blade) {
+bool WeaponModels_Draw(int row, int variation, float glow, float blade, const float* glowRgb) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end() || !LoadGl()) return false;
     char resref[64];
@@ -390,7 +390,8 @@ bool WeaponModels_Draw(int row, int variation, float glow, float blade) {
             bool isBlade = (me.flags & 1) != 0;
             if (isBlade && blade <= 0.01f) continue;
             p_glBindTexture(GL_TEXTURE_2D, GetTexture(me.texture));
-            p_glColor4f(1, 1, 1, glow * (isBlade ? 1.0f : 0.8f));
+            if (glowRgb) p_glColor4f(glowRgb[0], glowRgb[1], glowRgb[2], glow * (isBlade ? 1.0f : 0.8f));
+            else p_glColor4f(1, 1, 1, glow * (isBlade ? 1.0f : 0.8f));
             EmitMesh(me, blade);
         }
         p_glDepthMask(GL_TRUE);

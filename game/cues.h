@@ -22,6 +22,11 @@ void Cues_Fire(CueEvent e);
 void Cues_Update();
 // Extra additive glow (0..1) for the weapon in a hand (0 left, 1 right): flashes from events + the window pulse.
 float Cues_Glow(int hand);
+// The glow's color (white unless a special move tinted it).
+void Cues_GlowColor(int hand, float rgb[3]);
+// A special move fired (1 power, 2 critical, 3 flurry, 4 power shot, 5 rapid): its own color flare and haptic pattern
+// on the weapon, so you can tell which one it was.
+void Cues_Move(int move);
 // Spark burst on the weapon for blocks and hits: 0..1 strength (fades over 0.3 s).
 float Cues_Sparks(double* age);
 // Force glow on a hand (0..1, fades over 0.5 s) after a Force gesture.

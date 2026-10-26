@@ -730,7 +730,9 @@ void Weapons_Draw(const float invEye[16]) {
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
-        if (!WeaponModels_Draw(row, var, Cues_Glow(h), IsSaber(c) ? g_bladeExt : 1.0f)) DrawClass(c);
+        float glowRgb[3];
+        Cues_GlowColor(h, glowRgb);
+        if (!WeaponModels_Draw(row, var, Cues_Glow(h), IsSaber(c) ? g_bladeExt : 1.0f, glowRgb)) DrawClass(c);
         if (!kProfiles[c].melee && h == 1) {
             memcpy(g_muzzleEye, mv, sizeof g_muzzleEye);
             g_muzzleLen = WeaponModels_Length(row, var);
