@@ -10,6 +10,8 @@ enum CueEvent {
     CUE_PERFECT_HIT,    // attack gesture inside the player's perfect timing window
     CUE_WINDOW_OPEN,    // the player's perfect attack window just opened
     CUE_INCOMING,       // an enemy attack on the player is about to resolve (warning)
+    CUE_HIT_LANDED,     // the player's blow / bolt connected (the damage just landed)
+    CUE_PERFECT_LANDED, // ... and it was an on-beat (+4) attack
     CUE_COUNT
 };
 
@@ -19,5 +21,11 @@ void Cues_Fire(CueEvent e);
 void Cues_Update();
 // Extra additive glow (0..1) for the weapon in a hand (0 left, 1 right): flashes from events + the window pulse.
 float Cues_Glow(int hand);
+// Spark burst on the weapon for blocks and hits: 0..1 strength (fades over 0.3 s).
+float Cues_Sparks(double* age);
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
+// Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the
+// hum's state plus the blade tip speed (m/s), which bends its pitch and volume and triggers swing whooshes.
+void Cues_SaberIgnite(bool on);
+void Cues_SaberHum(bool on, float tipSpeed);

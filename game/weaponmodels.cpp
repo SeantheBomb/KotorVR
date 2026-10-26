@@ -160,7 +160,24 @@ void WeaponModels_Init(const char* gameDir) {
     Log("weaponmodels: %zu base item model prefixes", g_prefix.size());
 }
 
-bool WeaponModels_Draw(int row, int variation, float glow) {
+// one mesh; saber blades are scaled along the blade axis (grip frame Z) by `blade`
+static void EmitMesh(const WMesh& me, float blade) {
+    bool scale = (me.flags & 1) && blade < 0.999f;
+    p_glBegin(GL_TRIANGLES);
+    for (unsigned short i : me.idx) {
+        if ((size_t)i * 3 + 2 >= me.pos.size()) continue;
+        p_glTexCoord2fv(&me.uv[(size_t)i * 2]);
+        if (scale) {
+            float v[3] = {me.pos[(size_t)i * 3], me.pos[(size_t)i * 3 + 1], me.pos[(size_t)i * 3 + 2] * blade};
+            p_glVertex3fv(v);
+        } else {
+            p_glVertex3fv(&me.pos[(size_t)i * 3]);
+        }
+    }
+    p_glEnd();
+}
+
+bool WeaponModels_Draw(int row, int variation, float glow, float blade) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end() || !LoadGl()) return false;
     char resref[64];
@@ -177,10 +194,11 @@ bool WeaponModels_Draw(int row, int variation, float glow) {
     p_glColor4f(1, 1, 1, 1);
     for (int pass = 0; pass < 2; pass++) {  // opaque parts first, then additive blades
         for (const WMesh& me : m->meshes) {
-            bool blade = (me.flags & 1) != 0;
-            if (blade != (pass == 1)) continue;
+            bool isBlade = (me.flags & 1) != 0;
+            if (isBlade != (pass == 1)) continue;
+            if (isBlade && blade <= 0.01f) continue;  // unlit saber: hilt only
             p_glBindTexture(GL_TEXTURE_2D, GetTexture(me.texture));
-            if (blade) {
+            if (isBlade) {
                 p_glDisable(GL_ALPHA_TEST);
                 p_glEnable(GL_BLEND);
                 p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
@@ -192,15 +210,9 @@ bool WeaponModels_Draw(int row, int variation, float glow) {
                 p_glDepthMask(GL_TRUE);
             }
             // unlit: dim the opaque parts a little so they sit in KotOR's dark scenes; blades stay full bright
-            if (blade) p_glColor4f(1, 1, 1, 1);
+            if (isBlade) p_glColor4f(1, 1, 1, 1);
             else p_glColor4f(0.72f, 0.72f, 0.75f, 1);
-            p_glBegin(GL_TRIANGLES);
-            for (unsigned short i : me.idx) {
-                if ((size_t)i * 3 + 2 >= me.pos.size()) continue;
-                p_glTexCoord2fv(&me.uv[(size_t)i * 2]);
-                p_glVertex3fv(&me.pos[(size_t)i * 3]);
-            }
-            p_glEnd();
+            EmitMesh(me, blade);
         }
     }
     if (glow > 0.01f) {  // cue glow: the same meshes again, additive, brighter on the blade than on the hilt / body
@@ -208,16 +220,11 @@ bool WeaponModels_Draw(int row, int variation, float glow) {
         p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         p_glDepthMask(GL_FALSE);
         for (const WMesh& me : m->meshes) {
-            bool blade = (me.flags & 1) != 0;
+            bool isBlade = (me.flags & 1) != 0;
+            if (isBlade && blade <= 0.01f) continue;
             p_glBindTexture(GL_TEXTURE_2D, GetTexture(me.texture));
-            p_glColor4f(1, 1, 1, glow * (blade ? 1.0f : 0.5f));
-            p_glBegin(GL_TRIANGLES);
-            for (unsigned short i : me.idx) {
-                if ((size_t)i * 3 + 2 >= me.pos.size()) continue;
-                p_glTexCoord2fv(&me.uv[(size_t)i * 2]);
-                p_glVertex3fv(&me.pos[(size_t)i * 3]);
-            }
-            p_glEnd();
+            p_glColor4f(1, 1, 1, glow * (isBlade ? 1.0f : 0.8f));
+            EmitMesh(me, blade);
         }
         p_glDepthMask(GL_TRUE);
     }

@@ -54,14 +54,16 @@ struct CueSound {
 // Defaults: parries for blocks (KotOR's own cb_pa_* parry sounds, saber clash for sabers), the weapon's swing whoosh
 // for a perfectly timed attack, the action-queue blip for the attack window, the GUI prompt for an incoming attack.
 const CueSound kSounds[CUE_COUNT] = {
-    {"Block", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 0.9f},
-    {"PerfectBlock", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.0f},
+    {"Block", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.3f},
+    {"PerfectBlock", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.6f},
     {"Dodge", false, {""}, 0.6f},
     {"BlockFailed", false, {""}, 0.6f},
     {"PerfectHit", true, {"cb_ls_swinglong1,cb_ls_swinglong2,cb_ls_swinglong3", "cb_sw_blade1", "cb_sw_bldlrg1",
-                          "cb_sw_unarmed1", ""}, 0.6f},
-    {"WindowOpen", false, {"gui_actqueue"}, 0.3f},
-    {"Incoming", false, {"gui_prompt"}, 0.45f},
+                          "cb_sw_unarmed1", ""}, 0.9f},
+    {"WindowOpen", false, {"gui_actqueue"}, 0.5f},
+    {"Incoming", false, {"gui_prompt"}, 0.8f},
+    {"HitLanded", false, {""}, 1.0f},  // KotOR plays its own impact sound
+    {"PerfectLanded", true, {"cb_ls_hithard1,cb_ls_hithard2", "", "", "", ""}, 1.0f},
 };
 
 struct Wav {
@@ -149,6 +151,56 @@ void InitAudio() {
         missing);
 }
 
+// finished one-shot voices are destroyed on the next play (they are short; a handful alive at most)
+std::vector<IXAudio2SourceVoice*> g_oneShots;
+void ReapOneShots() {
+    for (size_t i = 0; i < g_oneShots.size();) {
+        XAUDIO2_VOICE_STATE st;
+        g_oneShots[i]->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
+        if (st.BuffersQueued == 0) {
+            g_oneShots[i]->DestroyVoice();
+            g_oneShots[i] = g_oneShots.back();
+            g_oneShots.pop_back();
+        } else {
+            i++;
+        }
+    }
+}
+
+// a sound by resref (loaded on first use from kvr\sounds)
+IXAudio2SourceVoice* PlayResref(const char* resref, float gain, float ratio = 1.0f, bool loop = false) {
+    if (!g_xa) return nullptr;
+    auto it = g_wavs.find(resref);
+    if (it == g_wavs.end()) {
+        Wav w;
+        if (!LoadWav(resref, w)) {
+            static int warned;
+            if (warned++ < 5) Log("cues: sound %s missing (run tools\sound_export.py)", resref);
+            g_wavs[resref] = Wav();
+            return nullptr;
+        }
+        it = g_wavs.emplace(resref, std::move(w)).first;
+    }
+    const Wav& w = it->second;
+    if (w.data.empty()) return nullptr;
+    IXAudio2SourceVoice* v = nullptr;
+    if (FAILED(g_xa->CreateSourceVoice(&v, &w.fmt))) return nullptr;
+    XAUDIO2_BUFFER b{};
+    b.AudioBytes = (UINT32)w.data.size();
+    b.pAudioData = w.data.data();
+    b.Flags = XAUDIO2_END_OF_STREAM;
+    if (loop) b.LoopCount = XAUDIO2_LOOP_INFINITE;
+    v->SetVolume(g_master * gain);
+    v->SetFrequencyRatio(ratio);
+    v->SubmitSourceBuffer(&b);
+    v->Start();
+    if (!loop) {
+        ReapOneShots();
+        g_oneShots.push_back(v);
+    }
+    return v;
+}
+
 void PlaySoundFor(CueEvent e) {
     if (!g_xa) return;
     Family fam = kSounds[e].perFamily ? FamilyOf(Weapon_Right()) : FAM_SABER;
@@ -164,20 +216,8 @@ void PlaySoundFor(CueEvent e) {
     v->SetVolume(g_master * kSounds[e].gain);
     v->SubmitSourceBuffer(&b);
     v->Start();
-    // reap finished voices (one-shots are short; a handful alive at most)
-    static std::vector<IXAudio2SourceVoice*> live;
-    for (size_t i = 0; i < live.size();) {
-        XAUDIO2_VOICE_STATE st;
-        live[i]->GetState(&st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
-        if (st.BuffersQueued == 0) {
-            live[i]->DestroyVoice();
-            live[i] = live.back();
-            live.pop_back();
-        } else {
-            i++;
-        }
-    }
-    live.push_back(v);
+    ReapOneShots();
+    g_oneShots.push_back(v);
 }
 
 // ---------------------------------------------------------------- haptics
@@ -199,6 +239,13 @@ float g_flash[2];
 double g_flashAt[2] = {-10, -10};
 bool g_window;
 
+float g_spark;
+double g_sparkAt = -10;
+void Spark(float v) {
+    g_spark = v;
+    g_sparkAt = Now();
+}
+
 void Flash(float v) {
     for (int h = 0; h < 2; h++) {
         g_flash[h] = v;
@@ -218,23 +265,34 @@ void Cues_Init(const char* gameDir) {
 void Cues_Fire(CueEvent e) {
     if (!Features().cues) return;
     static const char* names[CUE_COUNT] = {"block", "perfect block", "dodge", "block failed", "perfect hit",
-                                           "window open", "incoming_warning"};
+                                           "window open", "incoming_warning", "hit landed", "perfect landed"};
     if (e != CUE_WINDOW_OPEN) Log("cue: %s", names[e]);
     PlaySoundFor(e);
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands
-        case CUE_PERFECT_BLOCK: Haptic(0, 1, 1.0f, 0.08f, 320); Flash(1.0f); break;
-        case CUE_BLOCK: Haptic(0, 1, 0.8f, 0.06f, 250); Flash(0.7f); break;
-        case CUE_DODGE: Haptic(0, 2, 0.5f, 0.06f, 200); break;
-        case CUE_BLOCK_FAILED: Haptic(0, 1, 0.45f, 0.05f, 90); Haptic(0.12, 1, 0.45f, 0.05f, 90); break;
-        case CUE_PERFECT_HIT: Haptic(0, 1, 1.0f, 0.12f, 100); Flash(0.8f); break;
-        case CUE_WINDOW_OPEN: Haptic(0, 1, 0.15f, 0.02f, 200); break;
-        case CUE_INCOMING: Haptic(0, 2, 0.3f, 0.04f, 160); break;
+        case CUE_PERFECT_BLOCK:  // crack + ring: unmistakable
+            Haptic(0, 1, 1.0f, 0.12f, 320); Haptic(0.14, 1, 0.7f, 0.10f, 160); Flash(1.0f); Spark(1.0f); break;
+        case CUE_BLOCK: Haptic(0, 1, 0.9f, 0.14f, 250); Flash(0.75f); Spark(0.6f); break;
+        case CUE_DODGE: Haptic(0, 2, 0.6f, 0.12f, 200); break;
+        case CUE_BLOCK_FAILED: Haptic(0, 1, 0.6f, 0.08f, 80); Haptic(0.14, 1, 0.6f, 0.08f, 80); break;
+        case CUE_PERFECT_HIT: Haptic(0, 1, 0.8f, 0.10f, 120); Flash(0.6f); break;
+        case CUE_WINDOW_OPEN: Haptic(0, 1, 0.25f, 0.03f, 200); break;
+        case CUE_INCOMING: Haptic(0, 2, 0.5f, 0.06f, 160); break;
+        case CUE_HIT_LANDED: Haptic(0, 1, 0.8f, 0.12f, 90); Flash(0.5f); Spark(0.6f); break;
+        case CUE_PERFECT_LANDED: Haptic(0, 1, 1.0f, 0.22f, 70); Flash(1.0f); Spark(1.0f); break;
         default: break;
     }
 }
 
 void Cues_Update() {
     double t = Now();
+    if (Features().cueTest) {  // harness: every cue in turn
+        static double next;
+        static int i;
+        if (t >= next) {
+            next = t + 1.5;
+            Cues_Fire((CueEvent)(i++ % CUE_COUNT));
+        }
+    }
     for (size_t i = 0; i < g_pulses.size();) {
         if (g_pulses[i].at <= t) {
             VR_Haptic(g_pulses[i].hand, g_pulses[i].amp, g_pulses[i].dur, g_pulses[i].freq);
@@ -249,9 +307,52 @@ void Cues_Update() {
 float Cues_Glow(int hand) {
     if (!Features().cues || hand < 0 || hand > 1) return 0;
     double t = Now();
-    float flash = g_flash[hand] * (float)max(0.0, 1.0 - (t - g_flashAt[hand]) / 0.3);
+    float flash = g_flash[hand] * (float)max(0.0, 1.0 - (t - g_flashAt[hand]) / 0.6);
     float pulse = g_window ? 0.12f + 0.1f * (float)sin(t * 2 * 3.14159 * 4) : 0;
     return max(flash, pulse);
 }
 
 void Cues_SetWindow(bool open) { g_window = open; }
+
+float Cues_Sparks(double* age) {
+    *age = Now() - g_sparkAt;
+    if (!Features().cues || *age > 0.3) return 0;
+    return g_spark * (float)(1.0 - *age / 0.3);
+}
+
+// ---------------------------------------------------------------- lightsaber
+static IXAudio2SourceVoice* g_hum;
+static double g_lastWhoosh;
+static float g_prevSpeed;
+
+void Cues_SaberIgnite(bool on) {
+    if (!Features().cues) return;
+    PlayResref(on ? "cb_ls_powerup" : "cb_ls_powerdown", 0.8f);
+}
+
+void Cues_SaberHum(bool on, float speed) {
+    if (!Features().cues || !g_xa) return;
+    if (!on) {
+        if (g_hum) {
+            g_hum->Stop();
+            g_hum->DestroyVoice();
+            g_hum = nullptr;
+        }
+        g_prevSpeed = 0;
+        return;
+    }
+    if (!g_hum) g_hum = PlayResref("cb_ls_humgood", 0.35f, 1.0f, true);
+    if (!g_hum) return;
+    // the movie effect: faster blade = louder, higher hum
+    float k = min(speed / 6.0f, 1.0f);
+    g_hum->SetVolume(g_master * (0.3f + 0.5f * k));
+    g_hum->SetFrequencyRatio(1.0f + 0.35f * k);
+    // swing whoosh on a fast stroke (rising edge, rate-limited)
+    double t = Now();
+    if (speed > 4.5f && g_prevSpeed <= 4.5f && t - g_lastWhoosh > 0.25) {
+        static const char* kWhoosh[3] = {"cb_ls_swingshrt1", "cb_ls_swingshrt2", "cb_ls_swingshrt3"};
+        PlayResref(kWhoosh[rand() % 3], 0.35f + 0.4f * k, 0.95f + 0.1f * (rand() % 100) / 100.0f);
+        g_lastWhoosh = t;
+    }
+    g_prevSpeed = speed;
+}

@@ -139,6 +139,7 @@ void(APIENTRY* p_glDepthFunc)(GLenum);
 void(APIENTRY* p_glColorMask)(GLboolean, GLboolean, GLboolean, GLboolean);
 void(APIENTRY* p_glUseProgramObject)(GLuint);  // unused placeholder
 void(APIENTRY* p_glActiveTextureARB)(GLenum);
+void(APIENTRY* p_glLineWidth)(GLfloat);
 
 bool LoadGl() {
     if (p_glBegin) return true;
@@ -147,7 +148,7 @@ bool LoadGl() {
 #define L(n) p_##n = (decltype(p_##n))GetProcAddress(gl, #n)
     L(glBegin); L(glEnd); L(glVertex3f); L(glColor4f); L(glLoadMatrixf); L(glMatrixMode); L(glPushMatrix);
     L(glPopMatrix); L(glPushAttrib); L(glPopAttrib); L(glDisable); L(glEnable); L(glBlendFunc); L(glDepthMask);
-    L(glDepthFunc); L(glColorMask);
+    L(glDepthFunc); L(glColorMask); L(glLineWidth);
 #undef L
     typedef PROC(WINAPI * GPA)(LPCSTR);
     GPA wgpa = (GPA)GetProcAddress(gl, "wglGetProcAddress");
@@ -458,12 +459,86 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     p_glPopAttrib();
 }
 
+// Spark burst (blocks / hits): bright streaks flying out from a point on the weapon, in the hand's frame.
+static void DrawSparks(float strength, double age, float along) {
+    p_glDisable(GL_TEXTURE_2D);
+    p_glEnable(GL_BLEND);
+    p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    p_glDepthMask(GL_FALSE);
+    if (p_glLineWidth) p_glLineWidth(3.0f);
+    unsigned seed = 12345u;
+    auto rnd = [&]() { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xFFFF) / 65535.0f * 2 - 1; };
+    float r0 = 0.02f + (float)age * 0.9f, r1 = r0 + 0.06f + (float)age * 0.4f;
+    p_glBegin(GL_LINES);
+    for (int i = 0; i < 28; i++) {
+        float d[3] = {rnd(), rnd(), rnd() * 0.5f};
+        float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) + 1e-4f;
+        for (float& v : d) v /= n;
+        p_glColor4f(1.0f, 0.95f, 0.7f, strength);
+        p_glVertex3f(d[0] * r0, d[1] * r0, along + d[2] * r0);
+        p_glColor4f(1.0f, 0.6f, 0.2f, strength * 0.2f);
+        p_glVertex3f(d[0] * r1, d[1] * r1, along + d[2] * r1);
+    }
+    p_glEnd();
+    p_glDepthMask(GL_TRUE);
+}
+
+// Lightsabers are lit only in combat (KotOR draws them only then too): ignite when a fight starts, extinguish 4 s
+// after it ends, with the blade extending / retracting over 0.2 s. While lit, the hum follows the blade tip speed.
+static float g_bladeExt;  // 0 = hilt only .. 1 = full blade
+static bool g_saberLit;
+static double g_lastFight = -100, g_lastSaberT;
+static float g_lastTip[3];
+static double g_lastTipT = -1;
+
+static bool IsSaber(WeaponClass c) { return c == WC_SABER || c == WC_SABER_SHORT || c == WC_SABER_DOUBLE; }
+
+static void UpdateSaber(const KvrInput& in) {
+    double t = GetTickCount() / 1000.0;
+    double dt = g_lastSaberT > 0 ? t - g_lastSaberT : 0;
+    g_lastSaberT = t;
+    bool saber = IsSaber(g_right) || IsSaber(g_left);
+    if (Weapon_PlayerInCombat()) g_lastFight = t;
+    bool want = saber && (t - g_lastFight < 4.0 || Features().weaponGallery);
+    if (want != g_saberLit) {
+        g_saberLit = want;
+        if (saber) {
+            Cues_SaberIgnite(want);
+            Log("weapons: saber %s", want ? "ignited" : "extinguished");
+        }
+    }
+    float target = g_saberLit ? 1.0f : 0.0f;
+    float step = (float)(dt / 0.2);
+    g_bladeExt = g_bladeExt < target ? min(target, g_bladeExt + step) : max(target, g_bladeExt - step);
+    // blade tip speed (1 m up the blade from the weapon hand), from the host's pose timestamps
+    int h = IsSaber(g_right) ? 1 : 0;
+    float speed = 0;
+    if (in.gripValid & (1u << h)) {
+        const float* p = in.grip[h].pos;
+        const float* q = in.grip[h].quat;  // x, y, z, w; blade along -Z
+        float fwd[3] = {-(2 * (q[0] * q[2] + q[3] * q[1])), -(2 * (q[1] * q[2] - q[3] * q[0])),
+                        -(1 - 2 * (q[0] * q[0] + q[1] * q[1]))};
+        float tip[3] = {p[0] + fwd[0], p[1] + fwd[1], p[2] + fwd[2]};
+        double tdt = in.time - g_lastTipT;
+        if (g_lastTipT > 0 && tdt > 0.001 && tdt < 0.2) {
+            float dx = tip[0] - g_lastTip[0], dy = tip[1] - g_lastTip[1], dz = tip[2] - g_lastTip[2];
+            speed = sqrtf(dx * dx + dy * dy + dz * dz) / (float)tdt;
+        }
+        if (tdt > 0.001 || g_lastTipT < 0) {
+            memcpy(g_lastTip, tip, sizeof g_lastTip);
+            g_lastTipT = in.time;
+        }
+    }
+    Cues_SaberHum(saber && g_bladeExt > 0.5f, speed);
+}
+
 void Weapons_Draw(const float invEye[16]) {
     const KvrShared* shm = VR_Shared();
     if (!shm || !LoadGl()) return;
     KvrInput in;
     memcpy(&in, (const void*)&shm->input, sizeof in);  // a torn read only costs one frame of pose
     if (!in.active || !(in.gripValid & 3)) return;
+    UpdateSaber(in);
     if (g_right == WC_NONE && g_left == WC_NONE) return;
 
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
@@ -502,7 +577,10 @@ void Weapons_Draw(const float invEye[16]) {
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
-        if (!WeaponModels_Draw(row, var, Cues_Glow(h))) DrawClass(c);  // the game's own mesh; procedural proxy as fallback
+        if (!WeaponModels_Draw(row, var, Cues_Glow(h), IsSaber(c) ? g_bladeExt : 1.0f)) DrawClass(c);
+        double sparkAge;
+        float spark = Cues_Sparks(&sparkAge);
+        if (spark > 0 && h == 1) DrawSparks(spark, sparkAge, IsSaber(c) ? -0.55f : kProfiles[c].melee ? -0.35f : -0.2f);  // the game's own mesh; procedural proxy as fallback
         if (kProfiles[c].twoHanded) break;  // a two-handed weapon occupies both hands
     }
 

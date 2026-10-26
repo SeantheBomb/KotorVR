@@ -9,6 +9,7 @@ struct FeatureFlags {
     bool combat;         // timing bonus and block / dodge on the d20 roll
     bool weaponGallery;  // [Debug] WeaponGallery=1: cycle the in-hand model through every class (screenshots)
     bool cues;           // combat feedback: haptics, weapon glow, KotOR sounds for blocks / timing / warnings
+    bool cueTest;        // [Debug] CueTest=1: fire every combat cue in turn every 1.5 s (harness checks)
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };
 

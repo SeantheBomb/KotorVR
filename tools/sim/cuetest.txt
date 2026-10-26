@@ -1,0 +1,43 @@
+# [Debug] CueTest=1 in kvr.ini: every cue fires in turn every 1.5 s; screenshots catch the flashes / sparks.
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
+click u=0.410 v=0.431      # Game 1
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+pointer world
+hand R x=0.15 y=-0.10 z=-0.35 yaw=0 pitch=50
+wait 0.55
+shot c1
+wait 0.55
+shot c2
+wait 0.55
+shot c3
+wait 0.55
+shot c4
+wait 0.55
+shot c5
+wait 0.55
+shot c6
+wait 0.55
+shot c7
+wait 0.55
+shot c8
+wait 0.55
+shot c9
+wait 0.55
+shot c10
+wait 0.55
+shot c11
+wait 0.55
+shot c12
+wait 0.55
+shot c13
+wait 0.55
+shot c14

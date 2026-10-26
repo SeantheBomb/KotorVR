@@ -20,6 +20,8 @@ DEFAULTS = [
     "cb_ls_swinglong1", "cb_ls_swinglong2", "cb_ls_swinglong3", "cb_sw_blade1", "cb_sw_bldlrg1", "cb_sw_unarmed1",
     # rhythm window / incoming warning: GUI blips
     "gui_actqueue", "gui_prompt",
+    # lightsaber: ignition, shut-down, hum, swing whooshes
+    "cb_ls_powerup", "cb_ls_powerdown", "cb_ls_humgood", "cb_ls_swingshrt1", "cb_ls_swingshrt2", "cb_ls_swingshrt3",
 ]
 
 

@@ -116,6 +116,8 @@ const double kDefaultDelay = 0.5;
 
 // ---------------------------------------------------------------- the player's attack rhythm
 double g_playerRolls[2] = {-10, -10};  // the last two player attack rolls (separate rounds)
+int g_lastPlayerBonus;                  // bonus given to the player's last roll (4 = on the beat)
+double g_lastPlayerBonusAt = -10;
 bool g_windowOpen;
 
 double PredictedNextRoll() {
@@ -152,6 +154,8 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         int bonus = ago <= kPerfectWindow ? 4 : 2;  // on the beat / roughly in time
         unsigned forced = nat == 1 ? 1 : (nat + bonus > 20 ? 20 : nat + bonus);
         *kForcedRoll = forced;
+        g_lastPlayerBonus = bonus;
+        g_lastPlayerBonusAt = Now();
         Log("combat: player_attack, gesture %.2f s before the roll: d20 %u +%d -> %u", ago, nat, bonus, forced);
         return;
     }
@@ -190,7 +194,14 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
     int* ints;
     if (!IsWeaponDamage(data, &ints)) return;
     DWORD playerId = ObjectId(Weapon_PlayerCreature());
-    if (!playerId || object != playerId || caller == playerId) return;
+    if (!playerId) return;
+    if (caller == playerId && object != playerId) {  // the player's blow / bolt just connected
+        bool beat = g_lastPlayerBonus == 4 && Now() - g_lastPlayerBonusAt < 3.0;
+        if (beat) g_lastPlayerBonus = 0;
+        Cues_Fire(beat ? CUE_PERFECT_LANDED : CUE_HIT_LANDED);
+        return;
+    }
+    if (object != playerId || caller == playerId) return;
     // the blow just landed: match it to its roll (oldest pending from this attacker) and log the prediction error
     double t = Now();
     EnterCriticalSection(&g_lock);
