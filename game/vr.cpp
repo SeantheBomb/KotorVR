@@ -357,6 +357,10 @@ static bool g_eyeChosen;
 static bool g_inWorldPass;  // between the world perspective and the first ortho (post-processing / GUI)
 static double g_zn = 0.1, g_zf = 10000.0;  // the world pass's clip planes (weapon proxies must share its depth)
 
+// The world pass's own view matrix (engine-camera mode): R from its glMultMatrixf, p from the glTranslatef after it.
+static float g_engR[16], g_worldView[16];
+static bool g_worldViewValid;
+
 // Draw the in-hand weapons into the finished world image (scene depth still valid), in this eye's projection.
 static void DrawHandItems() {
     if (!Features().weaponProxies) return;
@@ -393,7 +397,10 @@ static void DrawHandItems() {
     invE[15] = 1;
     Weapons_Draw(invE);
     float worldView[16];
-    if (EngineCam_WorldView(worldView)) Weapons_DrawWarnings(worldView);
+    if (g_worldViewValid) {
+        memcpy(worldView, g_worldView, sizeof worldView);
+        Weapons_DrawWarnings(worldView);
+    }
     p_glMatrixMode(GL_PROJECTION);
     p_glPopMatrix();
     p_glMatrixMode(mode);
@@ -452,7 +459,8 @@ bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) 
 bool VR_OnMultMatrixf(GLenum mode, const GLfloat* m) {
     if (g_camState != 1 || mode != GL_MODELVIEW) return false;
     if (EngineCam_Applied()) {  // the engine is already rendering from the eye pose (and culling with it)
-        g_camState = 0;
+        memcpy(g_engR, m, sizeof g_engR);
+        g_camState = 4;  // remember its translate too (warning glyphs draw in world space)
         return false;
     }
     memcpy(g_R, m, sizeof g_R);
@@ -471,6 +479,13 @@ static const double kGameplayFov = 170.0;  // camerastyle.2da viewangle in Overr
 static const float kFreezeRadius = 12.0f;  // meters; scripted cameras further away are a cut elsewhere
 
 bool VR_OnTranslatef(GLenum mode, GLfloat x, GLfloat y, GLfloat z) {
+    if (g_camState == 4 && mode == GL_MODELVIEW) {  // engine camera: view = R * T(x, y, z), passed through untouched
+        memcpy(g_worldView, g_engR, sizeof g_worldView);
+        for (int r = 0; r < 3; r++) g_worldView[12 + r] += g_engR[0 * 4 + r] * x + g_engR[1 * 4 + r] * y + g_engR[2 * 4 + r] * z;
+        g_worldViewValid = true;
+        g_camState = 0;
+        return false;
+    }
     if (g_camState != 2 || mode != GL_MODELVIEW) return false;
     float p[3] = {-x, -y, -z};
     bool gameplay = fabs(g_gameFovy - kGameplayFov) < 0.5;
@@ -584,6 +599,7 @@ void VR_OnSwap(HDC dc) {
         g_vrActive = g_exportReady && g_shm->host.running;
     }
     g_worldThisFrame = false;
+    g_worldViewValid = false;
     g_eyeChosen = false;
     g_camPosValid = false;
     g_eyeCaptured = false;

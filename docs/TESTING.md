@@ -30,5 +30,6 @@ in swkotor.ini (remove them afterwards). It also turns on `invulnerability`: the
 (`key grave`, `type warp kas_m22ab`, `key enter`) and warps to the Kashyyyk Upper Shadowlands, which Game1 has never
 loaded, so the kinrath ~14 m from the entry are still alive (Game1 already cleared the Dantooine wilderness).
 `[Debug] TracePosition=1` in kvr.ini logs `pos:` lines every 2 s for route-finding. Extra simhost commands:
-`key <name>`, `type <text>`, `wait_log <substring> <timeout>`. Runs drive the real mouse and keyboard focus:
+`key <name>`, `type <text>`, `wait_log <substring> <timeout>` (whole log), `wait_new_log <substring> <timeout>`
+(only lines written after it starts; a sync point, never fails the run). Haptic requests print as `haptic L/R ...`. Runs drive the real mouse and keyboard focus:
 they only work while nobody is using the PC.

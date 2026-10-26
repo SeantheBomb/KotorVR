@@ -51,14 +51,17 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
 
 ## Combat timeline (found 2026-10-25 with Ghidra 12.2 headless, `tools/ghidra/q.ps1`)
 
-Rolled at round start, applied at the visible impact:
+Rolled at round start, applied at the visible impact. Measured in the harness (kinrath melee vs the player): the damage
+event is created *at* the impact and queued with 0 ms delay, ~500 ms (+- 6) after the roll; the record's ReaxnDelay
+stays 0 for melee (set for ranged by `0x5B6DB0`). So the roll is the only advance notice: warnings are timed from the
+roll plus a per-attacker learned roll -> impact delay.
 
 | Step | Where | Notes |
 |---|---|---|
 | Roll | `0x5BACA0` thiscall (ecx attacker, target obj, ...), ret 0xC | writes the attack record; d20 replaced by `[0x832874]` when non-zero |
-| Attack record | `0x4D2B50(round, index)`, index = byte `[round + 0x96C]` | see fields below |
+| Attack record | `round + 4 + index * 0x14C` (`0x4D2B50`), index = byte `[round + 0x96C]` | see fields below |
 | Damage effect | melee `0x5B6F30`, ranged `0x5B75D0` | `new` 0x8C bytes, type WORD `+8` = 38 (damage); ints at `[+0x34]`, count `+0x30`; ints 0..14 = damage per type, 0x10 = delay, 0x13 / 0x15 = 1 for weapon attacks |
-| Queue | `0x4B08D0` AddEventDeltaTime, thiscall (days, ms, caller id, object id, event type, data), ret 0x18 | event 5 = apply effect; delay = the record's ReaxnDelay |
+| Queue | `0x4B08D0` AddEventDeltaTime, thiscall (days, ms, caller id, object id, event type, data), ret 0x18 | event 5 = apply effect; weapon damage is queued at the impact with 0 ms |
 | Impact | `0x4DFA40` damage handler, stdcall (target obj, effect, flags), ret 0xC | reads the 15 damage ints, runs damage reduction (vtable `+0xA4`) / resistance (`+0xA8`), applies HP loss |
 
 Attack record (`CSWSCombatAttackData`, from its save code `0x4D2210`): `+0x00` AttackGroup, `+0x08` AnimationLength,

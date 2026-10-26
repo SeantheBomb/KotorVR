@@ -17,8 +17,8 @@ key enter
 wait 6
 wait_world 120
 wait 3
-key grave                  # the kinrath swarm kills a Dantooine-level party: player invulnerable (damage only, rolls unchanged)
-type invulnerability
+key grave                  # invulnerable: KotOR then skips the damage roll, so "damage stopped" reads 0; run without
+type invulnerability       # it (delete these 3 lines) for real numbers, but the party may not survive the long waits
 key enter
 shot arrived
 pointer world
@@ -27,13 +27,25 @@ hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
 # module the save has never loaded: Kashyyyk Upper Shadowlands, kinrath ~14 m from the entry (faces (0.2,0.98)).
 # TracePosition=1 in kvr.ini logs "pos:" lines for route checks.
 # also needs [Autopause Options] Enemy Sighted=0 in swkotor.ini, or the game pauses on arrival
+wait_new_log incoming_attack 30                    # the first kinrath attack on the player (rolled; lands ~0.5 s later)
+shot warning                                       # the chevron over the attacker
 wait 8                     # let it close in and attack (opens the swing gate)
 shot walked
 shot fight
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 1.5
-hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # saber across the body: guard (blocks decided at impact)
-wait 8
+# parry: wait for the warning cue (an attack on the player lands in <= 0.6 s), then raise the guard into it
+wait_new_log incoming_warning 40
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # saber across the body
+wait 1.2
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
+wait_new_log incoming_warning 40
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10
+wait 1.2
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
+# held guard (block), then attacks on the beat and a dodge
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10
+wait 6
 hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 1.5
@@ -45,4 +57,4 @@ head yaw=0 x=0 over=0.3
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 3
 shot after
-wait_log impact 30
+wait_log d20 30              # any roll or impact line (player_attack, impact parried / blocked / failed)

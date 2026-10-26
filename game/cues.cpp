@@ -218,7 +218,7 @@ void Cues_Init(const char* gameDir) {
 void Cues_Fire(CueEvent e) {
     if (!Features().cues) return;
     static const char* names[CUE_COUNT] = {"block", "perfect block", "dodge", "block failed", "perfect hit",
-                                           "window open", "incoming"};
+                                           "window open", "incoming_warning"};
     if (e != CUE_WINDOW_OPEN) Log("cue: %s", names[e]);
     PlaySoundFor(e);
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands

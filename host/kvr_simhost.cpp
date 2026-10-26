@@ -216,9 +216,22 @@ static void TypeChar(char c) {
     SendInput(n, in, sizeof(INPUT));
 }
 
-static bool LogContains(const std::string& needle) {
-    FILE* f = _fsopen("C:\\Program Files (x86)\\Steam\\steamapps\\common\\swkotor\\kvr\\probe.log", "rb", _SH_DENYNO);
+static const char* kProbeLog = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\swkotor\\kvr\\probe.log";
+
+static long LogSize() {
+    FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fclose(f);
+    return n;
+}
+
+// `from`: byte offset to start at (wait_new_log only looks at lines written after the command started)
+static bool LogContains(const std::string& needle, long from = 0) {
+    FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
     if (!f) return false;
+    fseek(f, from, SEEK_SET);
     static std::string buf;
     buf.assign(1 << 20, '\0');
     bool hit = false;
@@ -430,10 +443,21 @@ static void Tick() {
     Sleep(13);  // ~72 Hz like the headset
 }
 
+// KotOR freezes when it loses the foreground. Once the game world is up (never in menus, where a refocus can
+// eat clicks), take the foreground back every 2 s if something else grabbed it.
+static bool g_keepFocus;
+static void KeepFocus() {
+    static double last;
+    if (!g_keepFocus || Now() - last < 2.0) return;
+    last = Now();
+    FocusGame();
+}
+
 static void RunFor(double seconds) {
     double end = Now() + seconds;
     while (!g_quit && Now() < end) {
         Tick();
+        KeepFocus();
     }
 }
 
@@ -441,6 +465,7 @@ template <class F> static bool RunUntil(double timeout, F cond) {
     double end = Now() + timeout;
     while (!g_quit && Now() < end) {
         Tick();
+        KeepFocus();
         if (cond()) return true;
     }
     return false;
@@ -536,6 +561,7 @@ int main(int argc, char** argv) {
             bool world = cmd == "wait_world";
             bool ok = RunUntil(timeout, [&] { return world ? InWorld() : (g_shared[2].have && g_pulls[2] > 30); });
             printf("[%.1f]   %s\n", Now(), ok ? "ok" : "TIMED OUT");
+            if (ok && world) g_keepFocus = true;
             if (!ok) {  // leave evidence of where it got stuck
                 const char* suffix[3] = {"eye0", "eye1", "panel"};
                 for (int i = 0; i < 3; i++) SavePng(g_shared[i], g_out + "\\timeout_" + suffix[i] + ".png");
@@ -623,12 +649,15 @@ int main(int argc, char** argv) {
                 RunFor(0.04);
             }
             RunFor(0.2);
-        } else if (cmd == "wait_log") {
+        } else if (cmd == "wait_log" || cmd == "wait_new_log") {
             std::string needle = args.empty() ? "" : args[0];
             double timeout = args.size() > 1 ? atof(args[1].c_str()) : 60;
-            bool ok = RunUntil(timeout, [&] { return LogContains(needle); });
+            long from = cmd == "wait_new_log" ? LogSize() : 0;
+            bool ok = RunUntil(timeout, [&] { return LogContains(needle, from); });
             printf("[%.1f]   %s\n", Now(), ok ? "found" : "NOT FOUND");
-            if (!ok) {
+            if (!ok && cmd == "wait_new_log") {
+                printf("[%.1f]   (wait_new_log is a sync point, not a check: continuing)\n", Now());
+            } else if (!ok) {
                 const char* suffix[3] = {"eye0", "eye1", "panel"};
                 for (int i = 0; i < 3; i++) SavePng(g_shared[i], g_out + "\\timeout_" + suffix[i] + ".png");
                 result = 1;

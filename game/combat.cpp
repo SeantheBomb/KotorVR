@@ -5,9 +5,9 @@
 //   1. At the start of the attacker's combat round the attack is rolled: 0x5BACA0 (thiscall, ecx = attacker,
 //      first stack arg = target object, ret 0xC) rolls the d20 and writes the result into the round's attack record.
 //      Right after RollDice(1,20) it checks the debug global 0x832874: non-zero replaces the natural roll.
-//   2. The damage is turned into a damage effect (type 38, 15 damage slots + flags) and queued as an "apply
-//      effect" event (type 5) with a delay = the attack's ReaxnDelay, i.e. the moment the swing / bolt visibly
-//      lands: AddEventDeltaTime 0x4B08D0 (thiscall on the AI master: days, ms, caller id, object id, type, data,
+//   2. When the swing / bolt visibly lands (~500 ms after the roll for kinrath melee), the damage is turned into a
+//      damage effect (type 38, 15 damage slots + flags) and queued as an "apply effect" event (type 5) with 0 ms
+//      delay: AddEventDeltaTime 0x4B08D0 (thiscall on the AI master: days, ms, caller id, object id, type, data,
 //      ret 0x18).
 //   3. When the event fires, the damage handler 0x4DFA40 (stdcall: target object, effect, flags; ret 0xC) applies it.
 //
@@ -15,8 +15,9 @@
 //   resolver   player attacking -> an attack gesture right before the roll adds +4 (in the rhythm window, 0.6 s)
 //              or +2 (within 2 s) to a fresh d20; a natural 1 still misses.
 //              player attacked  -> [Combat] ImpactBlock=0 only: guard / dodge at roll time (the old behavior).
-//   queue      weapon damage queued against the player -> the incoming-attack timeline (exact impact time and the
-//              attacker), which drives the Arkham-style warnings.
+//   resolver   also: an enemy roll against the player starts a warning (impact = roll + the attacker's learned
+//              roll -> impact delay), which drives the Arkham-style chevrons and the incoming cue.
+//   queue      weapon damage queued against the player = the impact: matched to its roll to learn the delay.
 //   damage     [Combat] ImpactBlock=1 (default): the block / parry / dodge is decided at the impact itself, when the
 //              player can see the swing land. A successful one zeroes the effect's damage before KotOR applies it.
 
@@ -26,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <vector>
 
 #include "cues.h"
@@ -97,14 +99,20 @@ bool IsWeaponDamage(void* effect, int** ints) {
 }
 
 // ---------------------------------------------------------------- incoming-attack timeline
+// An enemy attack rolled against the player. KotOR rolls at the start of the attacker's round and fills the attack
+// record's ReaxnDelay (ms from the roll to the moment the blow lands) right after; the damage event itself is only
+// created at that moment (queued with 0 ms), so the record is the only advance notice.
 struct Incoming {
     DWORD attacker;
-    void* effect;
-    double queued, due;  // Now() seconds
+    BYTE* record;        // the attacker's attack record (round + 4 + index * 0x14C)
+    double rolled, due;  // Now() seconds; due < 0 until ReaxnDelay is known
     bool warned;
 };
 CRITICAL_SECTION g_lock;
 std::vector<Incoming> g_incoming;
+// Roll -> impact delay learned per attacker (melee records leave ReaxnDelay at 0; kinrath measured 500 +- 6 ms).
+std::map<DWORD, double> g_learnedDelay;
+const double kDefaultDelay = 0.5;
 
 // ---------------------------------------------------------------- the player's attack rhythm
 double g_playerRolls[2] = {-10, -10};  // the last two player attack rolls (separate rounds)
@@ -147,6 +155,17 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         Log("combat: player_attack, gesture %.2f s before the roll: d20 %u +%d -> %u", ago, nat, bonus, forced);
         return;
     }
+    if (target == player) {
+        __try {
+            BYTE* round = *(BYTE**)((BYTE*)attacker + 0x9C8);
+            BYTE* record = round ? round + 4 + *(round + 0x96C) * 0x14C : nullptr;
+            if (record) {
+                EnterCriticalSection(&g_lock);
+                g_incoming.push_back({ObjectId(attacker), record, Now(), -1, false});
+                LeaveCriticalSection(&g_lock);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
     if (target == player && !g_impactBlock) {
         bool melee = Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
         bool guard = melee && Gestures_Guarding(0.6);
@@ -172,9 +191,21 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
     if (!IsWeaponDamage(data, &ints)) return;
     DWORD playerId = ObjectId(Weapon_PlayerCreature());
     if (!playerId || object != playerId || caller == playerId) return;
+    // the blow just landed: match it to its roll (oldest pending from this attacker) and log the prediction error
     double t = Now();
     EnterCriticalSection(&g_lock);
-    g_incoming.push_back({caller, data, t, t + ms / 1000.0, false});
+    for (size_t i = 0; i < g_incoming.size(); i++)
+        if (g_incoming[i].attacker == caller) {
+            double d = t - g_incoming[i].rolled;
+            Log("combat: incoming_damage from %08lX, %.0f ms after the roll (predicted %.0f ms, queued +%lu ms)",
+                caller, d * 1000, (g_incoming[i].due - g_incoming[i].rolled) * 1000, ms);
+            if (d > 0.1 && d < 3.0) {
+                auto it = g_learnedDelay.find(caller);
+                g_learnedDelay[caller] = it == g_learnedDelay.end() ? d : it->second * 0.7 + d * 0.3;
+            }
+            g_incoming.erase(g_incoming.begin() + i);
+            break;
+        }
     LeaveCriticalSection(&g_lock);
 }
 
@@ -184,15 +215,6 @@ extern "C" void __cdecl Combat_DamagePre(void* targetObj, void* effect) {
     if (!IsWeaponDamage(effect, &ints)) return;
     void* player = Weapon_PlayerCreature();
     if (!player || AsCreature(targetObj) != player) return;
-    double late = 0;
-    EnterCriticalSection(&g_lock);
-    for (size_t i = 0; i < g_incoming.size(); i++)
-        if (g_incoming[i].effect == effect) {
-            late = Now() - g_incoming[i].due;
-            g_incoming.erase(g_incoming.begin() + i);
-            break;
-        }
-    LeaveCriticalSection(&g_lock);
     if (!g_impactBlock) return;
 
     bool melee = Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
@@ -208,8 +230,8 @@ extern "C" void __cdecl Combat_DamagePre(void* targetObj, void* effect) {
     if (roll <= chance) {
         for (int i = 0; i < 15; i++)
             if (ints[i] > 0) ints[i] = 0;
-        Log("combat: impact %s (d20 %u <= %u), %d damage stopped (guard held %.2f s, %.2f s after due)",
-            perfect ? "parried" : guard ? "blocked" : "dodged", roll, chance, total, held, late);
+        Log("combat: impact %s (d20 %u <= %u), %d damage stopped (guard held %.2f s)",
+            perfect ? "parried" : guard ? "blocked" : "dodged", roll, chance, total, held);
         Cues_Fire(perfect ? CUE_PERFECT_BLOCK : guard ? CUE_BLOCK : CUE_DODGE);
     } else {
         Log("combat: impact, %s failed (d20 %u > %u), %d damage", guard ? "block" : "dodge", roll, chance, total);
@@ -306,11 +328,24 @@ void Combat_Update() {
     EnterCriticalSection(&g_lock);
     for (size_t i = 0; i < g_incoming.size();) {
         Incoming& in = g_incoming[i];
-        if (t > in.due + 1.0) {  // never applied (attacker died, event dropped)
+        if (in.due < 0) {  // ReaxnDelay is filled in after the roll
+            short reaxn = 0, anim = 0;
+            __try {
+                reaxn = *(short*)(in.record + 0x10);
+                anim = *(short*)(in.record + 0x08);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            if (reaxn > 0 || t - in.rolled > 0.05) {
+                auto it = g_learnedDelay.find(in.attacker);
+                double learned = it != g_learnedDelay.end() ? it->second : kDefaultDelay;
+                in.due = in.rolled + (reaxn > 0 ? reaxn / 1000.0 : learned);
+                Log("combat: incoming_attack from %08lX, reaxn %d ms, anim %d ms", in.attacker, reaxn, anim);
+            }
+        }
+        if (in.due > 0 && t > in.due + 1.0 || t - in.rolled > 5.0) {  // a miss (no damage event) or a dropped attack
             g_incoming.erase(g_incoming.begin() + i);
             continue;
         }
-        if (!in.warned && t >= in.due - kIncomingLead) {
+        if (!in.warned && in.due > 0 && t >= in.due - kIncomingLead) {
             in.warned = true;
             Cues_Fire(CUE_INCOMING);
         }
@@ -333,6 +368,7 @@ int Combat_IncomingWarnings(CombatWarning* out, int max) {
     EnterCriticalSection(&g_lock);
     for (const Incoming& in : g_incoming) {
         if (n >= max) break;
+        if (in.due < 0) continue;
         double left = in.due - t;
         if (left > kIncomingLead || left < -0.15) continue;
         out[n].attacker = in.attacker;
