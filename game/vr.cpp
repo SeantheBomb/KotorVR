@@ -685,6 +685,16 @@ bool VR_IsOwnBody(const float t[3], int depth) {
             g_rootDepth = depth;
             return true;
         }
+        // running / combat moves can put the drawn root a bit away from the server position for a frame: at the
+        // model-root depth (whole objects only) accept up to 0.6 m, which only a creature standing inside you reaches
+        if (depth == g_rootDepth && h2 < 0.6f * 0.6f && fabsf(dz) < 0.6f) return true;
+        if (depth == g_rootDepth && h2 < 1.2f * 1.2f && fabsf(dz) < 1.0f) {  // near miss: log (popping diagnosis)
+            static DWORD last;
+            if (GetTickCount() - last > 1000) {
+                last = GetTickCount();
+                g_log("modelcull: near miss root at %.2f m horizontal, %.2f m vertical", sqrtf(h2), dz);
+            }
+        }
         // the head is a separate model attached at the neck: its origin sits right above the feet at head height
         if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return true;
         // held weapons are separate models at the hand: other model roots (same stack depth as the body's root) that
