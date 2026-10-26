@@ -30,7 +30,6 @@ namespace {
 const DWORD kCamSetupVA = 0x45C540;
 const BYTE kCamSetupOrig[9] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8, 0x83, 0xEC, 0x68};
 const float kGameplayFov = 170.0f;   // camerastyle.2da viewangle in Override
-const float kFreezeRadius = 12.0f;
 
 BYTE* g_tramp;
 
@@ -60,10 +59,28 @@ float WrapPi(float a) {
     return a;
 }
 
+void QuatFromRows(const float m[9], float q[4]);
+
 // camera (GL camera space: x right, y up, -z forward) -> world (KotOR: z up), level, facing heading psi (CCW from +X)
 void QuatFromYaw(float psi, float q[4]) {
     float s = sinf(psi), c = cosf(psi);
     float m[9] = {s, 0, -c, -c, 0, -s, 0, 1, 0};  // rows; columns = camera x, y, z in world
+    QuatFromRows(m, q);
+}
+
+// camera looking along world direction f (any pitch), up kept toward +Z
+void QuatLookAlong(const float f[3], float q[4]) {
+    float n = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]) + 1e-6f;
+    float F[3] = {f[0] / n, f[1] / n, f[2] / n};
+    float h = sqrtf(F[0] * F[0] + F[1] * F[1]) + 1e-6f;
+    float Rt[3] = {F[1] / h, -F[0] / h, 0};  // right = forward x up (level)
+    float Z[3] = {-F[0], -F[1], -F[2]};
+    float U[3] = {Z[1] * Rt[2] - Z[2] * Rt[1], Z[2] * Rt[0] - Z[0] * Rt[2], Z[0] * Rt[1] - Z[1] * Rt[0]};  // y = z x x
+    float m[9] = {Rt[0], U[0], Z[0], Rt[1], U[1], Z[1], Rt[2], U[2], Z[2]};
+    QuatFromRows(m, q);
+}
+
+void QuatFromRows(const float m[9], float q[4]) {
     float tr = m[0] + m[4] + m[8];
     if (tr > 0) {
         float k = sqrtf(tr + 1.0f) * 2;
@@ -79,6 +96,10 @@ void QuatFromYaw(float psi, float q[4]) {
         q[0] = (m[3] - m[1]) / k; q[1] = (m[2] + m[6]) / k; q[2] = (m[5] + m[7]) / k; q[3] = 0.25f * k;
     }
 }
+
+// cutscene shots: one hidden line-of-sight probe per shot decides first person (clear) or the game's cut (blocked)
+float g_shotPos[3], g_shotQ[4];
+int g_shotMode;  // 0 none, 1 first person, 2 cut, 3 probe this frame, 4 waiting for the result
 
 // aim picks (VR_BeginAimPick): the camera looks along the hand and is left that way for the game's own mouse picking
 bool g_pickApplied, g_leftAimed;
@@ -181,19 +202,47 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             }
         }
     } else if (g_havePlay) {
-        // dialogue / cutscene camera nearby: stay in the player's head instead of cutting away
-        float dx = g_origPos[0] - g_playPos[0], dy = g_origPos[1] - g_playPos[1], dz = g_origPos[2] - g_playPos[2];
-        if (dx * dx + dy * dy + dz * dz < kFreezeRadius * kFreezeRadius) {
-            basePos = g_playPos;
-            baseQ = g_playQ;
-            // follow the character if the scene walks them somewhere (the view stays in their head)
-            float cp[3];
-            if (g_haveEyeOffset && CreaturePos(cp)) {
-                for (int i = 0; i < 3; i++) g_followPos[i] = cp[i] + g_eyeOffset[i];
-                basePos = g_followPos;
+        // Dialogue / cutscene camera: stay in the character's head unless the shot is out of their line of sight.
+        // Each new shot (the scripted camera jumps) gets one hidden probe frame rendered from the eye toward the
+        // scripted camera; if nothing is in between, the shot shows something you could see: stay first person.
+        float sdx = g_origPos[0] - g_shotPos[0], sdy = g_origPos[1] - g_shotPos[1], sdz = g_origPos[2] - g_shotPos[2];
+        float qd = fabsf(g_origQ[0] * g_shotQ[0] + g_origQ[1] * g_shotQ[1] + g_origQ[2] * g_shotQ[2] + g_origQ[3] * g_shotQ[3]);
+        if (g_shotMode == 0 || sdx * sdx + sdy * sdy + sdz * sdz > 0.5f * 0.5f || qd < 0.996f) {  // a cut (> ~10 deg)
+            memcpy(g_shotPos, g_origPos, sizeof g_shotPos);
+            memcpy(g_shotQ, g_origQ, sizeof g_shotQ);
+            g_shotMode = 3;
+        }
+        // the character's eye (follows them if the scene walks them somewhere)
+        const float* headPos = g_playPos;
+        float cp[3];
+        if (g_haveEyeOffset && CreaturePos(cp)) {
+            for (int i = 0; i < 3; i++) g_followPos[i] = cp[i] + g_eyeOffset[i];
+            headPos = g_followPos;
+        }
+        if (g_shotMode == 4) {
+            int r = VR_LosProbeResult();
+            if (r >= 0) g_shotMode = r ? 1 : 2;
+        }
+        if (g_shotMode == 3 || g_shotMode == 4) {  // probe frame: from the eye straight at the scripted camera
+            float f[3] = {g_origPos[0] - headPos[0], g_origPos[1] - headPos[1], g_origPos[2] - headPos[2]};
+            float dist = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+            static float probeQ[4];
+            QuatLookAlong(f, probeQ);
+            basePos = headPos;
+            baseQ = probeQ;
+            eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
+            eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;
+            eye.quat[3] = 1;
+            if (g_shotMode == 3) {
+                VR_RequestLosProbe(dist);
+                g_shotMode = 4;
             }
+        } else if (g_shotMode == 1) {
+            basePos = headPos;
+            baseQ = g_playQ;
         }
     }
+    if (gameplay) g_shotMode = 0;
     VR_SetCinematic(!gameplay);
 
     // eye pose is in the camera's local frame (verified to be GL camera space): C_eye = C_base * E

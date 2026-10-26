@@ -371,6 +371,9 @@ static void RefreshPlayerPos() {
 }
 
 static double g_pickUntilMs;  // aim pick active until (NowMs)
+static int g_probeState;         // 0 idle, 1 probing this frame, 2 result ready
+static float g_probeDist;
+static bool g_probeClear;
 static KvrPose g_pickPose;
 
 static bool g_eyeChosen;
@@ -565,7 +568,20 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     g_inWorldPass = false;  // post-processing / GUI from here on: nothing here is the player's body
     // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
-    if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
+    if (g_probeState == 1) {  // line-of-sight probe: depth at the view center vs the distance to the target point
+        static void(APIENTRY* p_rp)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
+        if (!p_rp) p_rp = (decltype(p_rp))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glReadPixels");
+        double tl = tan(g_curFov.angleLeft), tr = tan(g_curFov.angleRight), td = tan(g_curFov.angleDown), tu = tan(g_curFov.angleUp);
+        GLint x = (GLint)((0 - tl) / (tr - tl) * g_texW), y = (GLint)((0 - td) / (tu - td) * g_texH);
+        float d = 1.0f;
+        p_rp(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
+        double zn = g_zn, zf = g_zf, ndc = 2.0 * d - 1.0;
+        double eyeZ = 2.0 * zn * zf / (zf + zn - ndc * (zf - zn));
+        g_probeClear = d >= 0.99999f || eyeZ >= g_probeDist - 0.6;
+        g_log("cutscene: line of sight to the shot camera (%.1f m): first hit at %.1f m -> %s", g_probeDist, eyeZ,
+              g_probeClear ? "clear, stay first person" : "blocked, cut");
+        g_probeState = 2;
+    } else if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
         DrawHandItems();
         Capture(g_curEye, &g_curPose, &g_curFov);
     }
@@ -615,8 +631,20 @@ void VR_OnSwap(HDC dc) {
             }
         }
         if (g_exportReady) {
-            if (g_worldThisFrame && !g_eyeCaptured && NowMs() >= g_pickUntilMs) Capture(g_curEye, &g_curPose, &g_curFov);
+            if (g_worldThisFrame && !g_eyeCaptured && NowMs() >= g_pickUntilMs && g_probeState != 1) Capture(g_curEye, &g_curPose, &g_curFov);
             Capture(SLOT_PANEL, nullptr, nullptr);
+            // a probe that never got its depth read (no world / GUI pass this frame): give up after 3 frames as
+            // "clear" so a cutscene can never hold the headset on a stale frame
+            static int probeFrames;
+            if (g_probeState == 1) {
+                if (++probeFrames > 3) {
+                    g_probeClear = true;
+                    g_probeState = 2;
+                    g_log("cutscene: line-of-sight probe not answered, staying first person");
+                }
+            } else {
+                probeFrames = 0;
+            }
             if (g_worldThisFrame) {
                 g_shm->lastWorldFrame = g_shm->gameAlive;
                 g_worldFrames++;
@@ -715,6 +743,17 @@ void VR_EngineCamApplied(const float basePos[3]) {
 
 void VR_SetCinematic(bool on) {
     if (g_shm) g_shm->cinematic = on ? 1 : 0;
+}
+
+void VR_RequestLosProbe(float distance) {
+    g_probeDist = distance;
+    g_probeState = 1;
+}
+
+int VR_LosProbeResult() {
+    if (g_probeState != 2) return -1;
+    g_probeState = 0;
+    return g_probeClear ? 1 : 0;
 }
 
 void VR_BeginAimPick(const KvrPose& aim, double seconds) {

@@ -43,6 +43,11 @@ float VR_HeadYaw();
 // exactly what the hand points at) and those frames are not sent to the headset.
 void VR_BeginAimPick(const KvrPose& aim, double seconds);
 bool VR_AimPick(KvrPose* out);
+// Line-of-sight probe for cutscene shots: this frame is rendered from the player's eye looking straight at a point
+// `distance` away; after the world pass the depth at the view center says whether anything is in between. The frame
+// is not shown. Result next frame: 1 = clear, 0 = blocked, -1 = none pending.
+void VR_RequestLosProbe(float distance);
+int VR_LosProbeResult();
 // Ask the host for one controller rumble pulse (hand 0 left, 1 right); amplitude 0..1, seconds, Hz (0 = default).
 void VR_Haptic(int hand, float amplitude, float duration, float frequency);
 // Head (eye 0) position in the recenter-origin frame.
