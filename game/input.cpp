@@ -190,9 +190,19 @@ void Input_Update(HWND wnd) {
         }
         static bool trigWas;
         bool trigNow = in.trigR > 0.6f;
+        static bool rangedPickWanted;
+        static double lastRangedPick = -10;
         if (trigNow && !trigWas && fighting) {
-            if (!Weapon_Profile(Weapon_Right()).melee) Gestures_OnShot();
-            if (!Combat_PlayerAttacking()) {
+            bool ranged = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
+            if (ranged) {
+                Gestures_OnShot();
+                // shoot what you point at: pick along the hand (target) + attack; at most once a second (KotOR
+                // keeps firing every round on its own, extra presses only fill its queue)
+                if (now - lastRangedPick > 1.0) {
+                    rangedPickWanted = true;
+                    lastRangedPick = now;
+                }
+            } else if (!Combat_PlayerAttacking()) {
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
             }
@@ -220,7 +230,8 @@ void Input_Update(HWND wnd) {
         static bool gripWas;
         bool gripNow = world && in.gripR > 0.7f;
         double tick = (double)GetTickCount();
-        if (gripNow && !gripWas && g_pickStartMs < 0) {
+        if (((gripNow && !gripWas) || rangedPickWanted) && g_pickStartMs < 0) {
+            rangedPickWanted = false;
             int w, h;
             VR_ClientSize(&w, &h);
             if (w > 0) {

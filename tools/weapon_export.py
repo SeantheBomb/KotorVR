@@ -90,6 +90,25 @@ def grip_frame(meshes):
     return [right, up, [-x for x in fwd]]
 
 
+def blade_edge_up(meshes, rows):
+    """Blades: the flat must face the palm (thin along X, edge along Y) so a natural thumb-up grip holds the edge
+    forward. Models whose blade (beyond 15 cm from the grip) is wider in X than in Y get a 90 deg turn about the
+    blade axis."""
+    xs, ys = [], []
+    for _t, flags, pos, _uv, _f in meshes:
+        if flags & 1:  # saber blades are round
+            continue
+        for p in pos:
+            q = mvec(rows, p)
+            if q[2] < -0.15:
+                xs.append(q[0])
+                ys.append(q[1])
+    if xs and (max(xs) - min(xs)) > 1.5 * (max(ys) - min(ys)) and (max(xs) - min(xs)) > 0.03:
+        rz = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]  # x -> y
+        return mmul(rz, rows)
+    return rows
+
+
 def write_model(path, meshes, rows):
     with open(path, "wb") as f:
         f.write(b"KVRW" + struct.pack("<II", 1, len(meshes)))
@@ -161,7 +180,7 @@ def main(game, out):
             if not meshes:
                 print(f"{r}: no renderable meshes")
                 continue
-            rows = grip_frame(meshes)
+            rows = blade_edge_up(meshes, grip_frame(meshes))
             write_model(os.path.join(out, "models", r + ".kvrw"), meshes, rows)
             textures.update(t for t, *_ in meshes)
             print(f"{r}: {len(meshes)} meshes, {sum(len(x[2]) for x in meshes)} verts")

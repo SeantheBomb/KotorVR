@@ -13,8 +13,10 @@
 
 #include <GL/gl.h>
 #include <cmath>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "../common/kvr_shared.h"
 #include "vr.h"
@@ -416,6 +418,31 @@ void Weapons_Update() {
     }
 }
 
+// ---------------------------------------------------------------- blaster bolts
+// The game's own bolt leaves the (hidden) body's hand; ours leaves the muzzle you are holding.
+struct Bolt {
+    double t0;          // GetTickCount seconds the bolt leaves the muzzle
+    float to[3];        // world target
+    float from[3];      // world muzzle, set on the first frame after t0
+    bool fromSet;
+};
+static std::vector<Bolt> g_bolts;
+static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix in eye space (tip along -Z)
+static float g_muzzleLen;
+static bool g_muzzleValid;
+static float g_lastInvEye[16];
+static double g_lastFlash = -10;
+
+static double NowS() { return GetTickCount() / 1000.0; }
+
+void Weapons_FireBolt(const float targetWorld[3], float delay) {
+    Bolt b{};
+    b.t0 = NowS() + delay;
+    memcpy(b.to, targetWorld, sizeof b.to);
+    g_bolts.push_back(b);
+    if (g_bolts.size() > 8) g_bolts.erase(g_bolts.begin());
+}
+
 void* Weapon_CreatureById(DWORD id) {
     __try {
         BYTE* app = *(BYTE**)0x7A39FC;
@@ -431,7 +458,25 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     if (!Features().cues || !LoadGl()) return;
     CombatWarning w[8];
     int n = Combat_IncomingWarnings(w, 8);
-    if (n == 0) return;
+    // bolts: fix each one's world muzzle the first frame it flies, then draw it in this eye
+    double tnow = NowS();
+    for (Bolt& b : g_bolts) {
+        if (b.fromSet || tnow < b.t0 || !g_muzzleValid) continue;
+        // muzzle in eye space -> world: inverse of the (rigid) world view
+        float me[3] = {g_muzzleEye[8] * -g_muzzleLen + g_muzzleEye[12], g_muzzleEye[9] * -g_muzzleLen + g_muzzleEye[13],
+                       g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
+        float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
+        for (int r = 0; r < 3; r++) b.from[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
+        b.fromSet = true;
+        g_lastFlash = tnow;
+        VR_Haptic(1, 0.9f, 0.06f, 140);  // recoil kick
+    }
+    bool anyBolt = false;
+    for (const Bolt& b : g_bolts)
+        if (b.fromSet && tnow - b.t0 < 1.5) anyBolt = true;
+    g_bolts.erase(std::remove_if(g_bolts.begin(), g_bolts.end(), [&](const Bolt& b) { return tnow - b.t0 > 1.5; }),
+                  g_bolts.end());
+    if (n == 0 && !anyBolt) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -458,6 +503,39 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     p_glDepthMask(GL_FALSE);
+    for (const Bolt& b : g_bolts) {  // a 1 m streak flying at 40 m/s from the muzzle to the target
+        if (!b.fromSet) continue;
+        float dir[3] = {b.to[0] - b.from[0], b.to[1] - b.from[1], b.to[2] - b.from[2]};
+        float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]) + 1e-4f;
+        float head = (float)(tnow - b.t0) * 40.0f, tail = head - 1.0f;
+        if (tail > len) continue;
+        head = min(head, len);
+        tail = max(tail, 0.0f);
+        float pw[2][3], pe[2][3];
+        for (int k = 0; k < 3; k++) {
+            pw[0][k] = b.from[k] + dir[k] / len * tail;
+            pw[1][k] = b.from[k] + dir[k] / len * head;
+        }
+        for (int e = 0; e < 2; e++)
+            for (int r = 0; r < 3; r++)
+                pe[e][r] = worldView[0 * 4 + r] * pw[e][0] + worldView[1 * 4 + r] * pw[e][1] + worldView[2 * 4 + r] * pw[e][2] + worldView[12 + r];
+        // a camera-facing ribbon: offset perpendicular to the streak in eye space
+        float sx = pe[1][0] - pe[0][0], sy = pe[1][1] - pe[0][1];
+        float sl = sqrtf(sx * sx + sy * sy) + 1e-5f;
+        float ox = -sy / sl * 0.018f, oy = sx / sl * 0.018f;
+        for (int pass = 0; pass < 2; pass++) {
+            float k = pass ? 1.0f : 3.0f, a = pass ? 1.0f : 0.25f;
+            p_glColor4f(1.0f, pass ? 0.75f : 0.25f, pass ? 0.65f : 0.15f, a);
+            p_glBegin(GL_TRIANGLES);
+            p_glVertex3f(pe[0][0] - ox * k, pe[0][1] - oy * k, pe[0][2]);
+            p_glVertex3f(pe[1][0] - ox * k, pe[1][1] - oy * k, pe[1][2]);
+            p_glVertex3f(pe[1][0] + ox * k, pe[1][1] + oy * k, pe[1][2]);
+            p_glVertex3f(pe[0][0] - ox * k, pe[0][1] - oy * k, pe[0][2]);
+            p_glVertex3f(pe[1][0] + ox * k, pe[1][1] + oy * k, pe[1][2]);
+            p_glVertex3f(pe[0][0] + ox * k, pe[0][1] + oy * k, pe[0][2]);
+            p_glEnd();
+        }
+    }
     for (int i = 0; i < n; i++) {
         float wp[3];
         __try {
@@ -620,11 +698,32 @@ void Weapons_Draw(const float invEye[16]) {
             WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, curl, idx, Cues_ForceGlow(h));
         }
     }
+    // Ranged weapons point along the controller's aim ray, not its grip axis (the grip pose is tilted ~40 deg up from
+    // where a pointing hand aims): the grip -> aim rotation, measured on the right controller, applied to both hands.
+    float gripToAim[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    if ((in.gripValid & 2) && fabsf(in.aim.quat[3]) + fabsf(in.aim.quat[0]) + fabsf(in.aim.quat[1]) + fabsf(in.aim.quat[2]) > 0.5f) {
+        float G[16], A[16];
+        float zero[3] = {0, 0, 0};
+        PoseMatrix(zero, in.grip[1].quat, G);
+        PoseMatrix(zero, in.aim.quat, A);
+        for (int c = 0; c < 3; c++)
+            for (int r = 0; r < 3; r++) {
+                float v = 0;
+                for (int k = 0; k < 3; k++) v += G[r * 4 + k] * A[c * 4 + k];  // G^T * A
+                gripToAim[c * 4 + r] = v;
+            }
+    }
+    memcpy(g_lastInvEye, invEye, sizeof g_lastInvEye);
+    g_muzzleValid = false;
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
         if (c == WC_NONE || !(in.gripValid & (1u << h))) continue;
         if (Weapon_Profile(c).twoHanded && kProfiles[c].melee && h == 1 && TwoHandMatrix(in, hand)) {
             // held between both hands
+        } else if (!kProfiles[c].melee) {
+            float g[16];
+            PoseMatrix(in.grip[h].pos, in.grip[h].quat, g);
+            MulMat(g, gripToAim, hand);
         } else {
             PoseMatrix(in.grip[h].pos, in.grip[h].quat, hand);
         }
@@ -632,6 +731,30 @@ void Weapons_Draw(const float invEye[16]) {
         p_glLoadMatrixf(mv);
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
         if (!WeaponModels_Draw(row, var, Cues_Glow(h), IsSaber(c) ? g_bladeExt : 1.0f)) DrawClass(c);
+        if (!kProfiles[c].melee && h == 1) {
+            memcpy(g_muzzleEye, mv, sizeof g_muzzleEye);
+            g_muzzleLen = WeaponModels_Length(row, var);
+            if (g_muzzleLen < 0.1f) g_muzzleLen = 0.25f;
+            g_muzzleValid = true;
+            if (NowS() - g_lastFlash < 0.07) {  // muzzle flash: a hot star at the tip
+                p_glDisable(GL_TEXTURE_2D);
+                p_glEnable(GL_BLEND);
+                p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                p_glDepthMask(GL_FALSE);
+                float z = -g_muzzleLen, r = 0.05f;
+                p_glBegin(GL_TRIANGLES);
+                for (int k = 0; k < 6; k++) {
+                    float a0 = k * 1.0472f, a1 = a0 + 0.35f;
+                    p_glColor4f(1.0f, 0.9f, 0.7f, 1.0f);
+                    p_glVertex3f(0, 0, z);
+                    p_glColor4f(1.0f, 0.4f, 0.2f, 0.0f);
+                    p_glVertex3f(r * cosf(a0), r * sinf(a0), z - 0.02f);
+                    p_glVertex3f(r * cosf(a1), r * sinf(a1), z - 0.02f);
+                }
+                p_glEnd();
+                p_glDepthMask(GL_TRUE);
+            }
+        }
         double sparkAge;
         float spark = Cues_Sparks(&sparkAge);
         if (spark > 0 && h == 1) DrawSparks(spark, sparkAge, IsSaber(c) ? -0.55f : kProfiles[c].melee ? -0.35f : -0.2f);  // the game's own mesh; procedural proxy as fallback

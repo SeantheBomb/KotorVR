@@ -328,6 +328,22 @@ static void EmitMesh(const WMesh& me, float blade) {
     p_glEnd();
 }
 
+float WeaponModels_Length(int row, int variation) {
+    auto pre = g_prefix.find(row);
+    if (pre == g_prefix.end()) return 0;
+    char resref[64];
+    sprintf_s(resref, "%s_%03d", pre->second.c_str(), variation > 0 ? variation : 1);
+    const WModel* m = &GetModel(resref);
+    if (!m->ok) {
+        sprintf_s(resref, "%s_001", pre->second.c_str());
+        m = &GetModel(resref);
+    }
+    float minZ = 0;
+    for (const WMesh& me : m->meshes)
+        for (size_t i = 2; i < me.pos.size(); i += 3) minZ = min(minZ, me.pos[i]);
+    return -minZ;
+}
+
 bool WeaponModels_Draw(int row, int variation, float glow, float blade) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end() || !LoadGl()) return false;

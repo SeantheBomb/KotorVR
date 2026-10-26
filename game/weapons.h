@@ -44,3 +44,6 @@ void Weapons_Draw(const float invEye[16]);
 void Weapons_DrawWarnings(const float worldView[16]);
 // Server creature for an object id, or null.
 void* Weapon_CreatureById(DWORD id);
+// The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
+// with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
+void Weapons_FireBolt(const float targetWorld[3], float delay);

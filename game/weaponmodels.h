@@ -8,6 +8,8 @@ void WeaponModels_Init(const char* gameDir);
 // additive white sheen over the whole weapon (combat cue flashes / timing pulse). `blade` (0..1) is how far the
 // saber blades are extended (0 = hilt only, ignition animates it).
 bool WeaponModels_Draw(int row, int variation, float glow = 0, float blade = 1);
+// How far the model reaches along -Z from the grip (meters): the muzzle of a blaster, the tip of a blade. 0 if unknown.
+float WeaponModels_Length(int row, int variation);
 // Hands from the character's own body model (exported by tools/hand_export.py to <game>\kvr\hands), drawn in the
 // current modelview = the hand bone's frame (fingers along -Z). side 0 left / 1 right; curl 0 open .. 1 fist for the
 // middle / ring / little fingers and thumb (grip), index separately (trigger). texture "" = the model's own.

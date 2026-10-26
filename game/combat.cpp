@@ -176,6 +176,14 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     void* target = targetObj ? AsCreature(targetObj) : nullptr;
 
     if (attacker == player) {
+        if (!Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE && target) {
+            __try {
+                float to[3];
+                memcpy(to, (BYTE*)target + 0x90, sizeof to);
+                to[2] += 1.1f;  // chest height
+                Weapons_FireBolt(to, 0.15f);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
         double t = Now();
         if (t - g_playerRolls[1] > 0.3) {  // several rolls in one round (flurry, off hand, bursts) = one beat
             g_playerRolls[0] = g_playerRolls[1];
