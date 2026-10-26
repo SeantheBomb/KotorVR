@@ -353,6 +353,23 @@ static void QuatToRows(const float q[4], float m[9]) {
 }
 
 // ---------------------------------------------------------------- per-frame eye choice
+// The controlled creature's world position, refreshed every frame (model culling matches against it).
+static float g_playerPos[3];
+static bool g_playerPosValid;
+static float g_nearestOwn = 1e9f;  // diagnostics: closest object origin to the player this frame
+static int g_rootDepth = -1;        // matrix stack depth of model roots (where the player's body root matched)
+
+static void RefreshPlayerPos() {
+    g_playerPosValid = false;
+    __try {
+        BYTE* c = (BYTE*)Weapon_PlayerCreature();
+        if (c) {
+            memcpy(g_playerPos, c + 0x90, sizeof g_playerPos);
+            g_playerPosValid = true;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 static double g_pickUntilMs;  // aim pick active until (NowMs)
 static KvrPose g_pickPose;
 
@@ -558,6 +575,16 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
 
 void VR_OnSwap(HDC dc) {
     Weapons_Update();
+    if (Features().tracePosition && g_worldThisFrame) {
+        static DWORD last;
+        if (GetTickCount() - last > 2000) {
+            last = GetTickCount();
+            g_log("modelcull: nearest object origin to the player %.3f m (player %.2f %.2f %.2f)", sqrtf(g_nearestOwn),
+                  g_playerPos[0], g_playerPos[1], g_playerPos[2]);
+        }
+    }
+    g_nearestOwn = 1e9f;
+    RefreshPlayerPos();
     Combat_EndFrame();
     static double lastStat, lastSwap;
     static unsigned frames, worldFrames;
@@ -640,7 +667,25 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     return true;
 }
 
-bool VR_IsOwnBody(const float t[3]) {
+bool VR_IsOwnBody(const float t[3], int depth) {
+    if (Features().modelCull) {
+        // exact: the model hierarchy whose world transform sits on the controlled creature (its body, head, hair and
+        // held items are all children of it); nothing else in the scene is touched
+        if (!g_vrActive || !g_inWorldPass || !g_playerPosValid) return false;
+        float dx = t[0] - g_playerPos[0], dy = t[1] - g_playerPos[1], dz = t[2] - g_playerPos[2];
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < g_nearestOwn) g_nearestOwn = d2;
+        float h2 = dx * dx + dy * dy;
+        if (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f) {  // the body hierarchy's root (feet)
+            g_rootDepth = depth;
+            return true;
+        }
+        // the head is a separate model attached at the neck: its origin sits right above the feet at head height
+        if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return true;
+        // held weapons are separate models at the hand: other model roots (same stack depth as the body's root) that
+        // sit within arm's reach. Only whole roots: parts of a nearby NPC are deeper in its own hierarchy.
+        return depth == g_rootDepth && h2 < 0.75f * 0.75f && dz > 0.1f && dz < 1.9f;
+    }
     if (!g_camPosValid || !g_vrActive) return false;
     float dx = t[0] - g_camPos[0], dy = t[1] - g_camPos[1], dz = t[2] - g_camPos[2];
     // KotOR world is Z-up; the camera sits at the character's camera hook, the body is a column below it
@@ -727,6 +772,7 @@ static void EyeToCam(const float pe[3], float oc[3]) {
 // CPU-skinned meshes have world-space vertices under a view-only modelview, so their origin says nothing:
 // test actual vertices of the draw instead.
 bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices) {
+    if (Features().modelCull) return false;  // whole hierarchy already skipped exactly
     if (!g_vrActive || !g_inWorldPass || !g_camPosValid || !g_vtxPtr || count <= 0) return false;
     static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
     if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
@@ -750,6 +796,7 @@ bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices) {
 }
 
 bool VR_ShouldSkipDraw() {
+    if (Features().modelCull) return false;
     if (!g_vrActive || !g_inWorldPass || !g_camPosValid) return false;
     static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
     if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");

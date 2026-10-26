@@ -40,6 +40,9 @@ Remove-Item "$game\kvr\probe.log" -ErrorAction SilentlyContinue
 # KotOR rewrites swkotor.ini on exit; a force-kill mid-write mangled it once. Snapshot it and put it back afterwards.
 $iniSnapshot = Join-Path $out 'swkotor.ini.before'
 Copy-Item "$game\swkotor.ini" $iniSnapshot
+# Warps into new modules make KotOR autosave over the player's AUTOSAVE slot: snapshot the saves and put them back.
+$savesSnapshot = Join-Path $out 'saves.before'
+Copy-Item "$game\saves" $savesSnapshot -Recurse
 
 # --- run ---------------------------------------------------------------------------------------
 $log = Join-Path $out 'simhost.log'
@@ -59,6 +62,15 @@ $code = if ($sim.HasExited) { $sim.ExitCode } else { -1 }
 if (-not $KeepGame) {
     Get-Process swkotor -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
     Copy-Item $iniSnapshot "$game\swkotor.ini" -Force
+    # only replace the live saves with a complete snapshot (same save folders as when the run started)
+    $snapCount = @(Get-ChildItem $savesSnapshot -Directory -ErrorAction SilentlyContinue).Count
+    if ((Test-Path $savesSnapshot) -and $snapCount -gt 0) {
+        Remove-Item "$game\saves" -Recurse -Force
+        Copy-Item $savesSnapshot "$game\saves" -Recurse
+        Remove-Item $savesSnapshot -Recurse -Force
+    } else {
+        Write-Host "WARNING: saves snapshot missing or empty; live saves left as they are"
+    }
 }
 if (Test-Path "$game\kvr\probe.log") { Copy-Item "$game\kvr\probe.log" (Join-Path $out 'probe.log') }
 $probe = Join-Path $out 'probe.log'

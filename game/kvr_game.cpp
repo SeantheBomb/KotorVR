@@ -120,7 +120,7 @@ static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
     T("glMultMatrixf [%s] %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f",
       ModeName(g_mode), m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     if (VR_OnMultMatrixf(g_mode, m)) { T("  -> VR eye view"); return; }
-    if (g_mode == GL_MODELVIEW && g_hideDepth < 0 && VR_IsOwnBody(m + 12)) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
+    if (g_mode == GL_MODELVIEW && g_hideDepth < 0 && VR_IsOwnBody(m + 12, g_mvDepth)) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
     r_glMultMatrixf(m);
 }
 static void APIENTRY h_glMatrixMode(GLenum m) { FIRST("glMatrixMode"); g_mode = m; T("glMatrixMode %s", ModeName(m)); r_glMatrixMode(m); }

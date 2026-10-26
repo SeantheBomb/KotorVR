@@ -21,7 +21,7 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t);
 void VR_OnSwap(HDC dc);
 bool VR_IsOurTexture(GLuint name);
 // True for a node translation (world space) inside the player's own body column around the first-person camera.
-bool VR_IsOwnBody(const float t[3]);
+bool VR_IsOwnBody(const float t[3], int depth);  // depth: modelview stack depth of the multiply
 // Per draw call during the world pass: true when the draw belongs to the player's own body (skip it).
 bool VR_ShouldSkipDraw();
 bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices);
