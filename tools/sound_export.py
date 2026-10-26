@@ -22,6 +22,8 @@ DEFAULTS = [
     "gui_actqueue", "gui_prompt",
     # lightsaber: ignition, shut-down, hum, swing whooshes
     "cb_ls_powerup", "cb_ls_powerdown", "cb_ls_humgood", "cb_ls_swingshrt1", "cb_ls_swingshrt2", "cb_ls_swingshrt3",
+    # on-beat hit landing (saber)
+    "cb_ls_hithard1", "cb_ls_hithard2",
 ]
 
 
