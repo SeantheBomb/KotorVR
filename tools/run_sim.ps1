@@ -37,6 +37,9 @@ Get-Process kvr_simhost -ErrorAction SilentlyContinue | Stop-Process -Force
 Get-Process swkotor -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 2
 Remove-Item "$game\kvr\probe.log" -ErrorAction SilentlyContinue
+# KotOR rewrites swkotor.ini on exit; a force-kill mid-write mangled it once. Snapshot it and put it back afterwards.
+$iniSnapshot = Join-Path $out 'swkotor.ini.before'
+Copy-Item "$game\swkotor.ini" $iniSnapshot
 
 # --- run ---------------------------------------------------------------------------------------
 $log = Join-Path $out 'simhost.log'
@@ -53,7 +56,10 @@ if (-not $sim.WaitForExit($TimeoutSec * 1000)) {
 $code = if ($sim.HasExited) { $sim.ExitCode } else { -1 }
 
 # --- collect -----------------------------------------------------------------------------------
-if (-not $KeepGame) { Get-Process swkotor -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1 }
+if (-not $KeepGame) {
+    Get-Process swkotor -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
+    Copy-Item $iniSnapshot "$game\swkotor.ini" -Force
+}
 if (Test-Path "$game\kvr\probe.log") { Copy-Item "$game\kvr\probe.log" (Join-Path $out 'probe.log') }
 $probe = Join-Path $out 'probe.log'
 $stalls = if (Test-Path $probe) { @(Select-String -Path $probe -Pattern 'STALL') } else { @() }

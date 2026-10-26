@@ -353,6 +353,9 @@ static void QuatToRows(const float q[4], float m[9]) {
 }
 
 // ---------------------------------------------------------------- per-frame eye choice
+static double g_pickUntilMs;  // aim pick active until (NowMs)
+static KvrPose g_pickPose;
+
 static bool g_eyeChosen;
 static bool g_inWorldPass;  // between the world perspective and the first ortho (post-processing / GUI)
 static double g_zn = 0.1, g_zf = 10000.0;  // the world pass's clip planes (weapon proxies must share its depth)
@@ -545,8 +548,10 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     g_inWorldPass = false;  // post-processing / GUI from here on: nothing here is the player's body
     // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
-    DrawHandItems();
-    Capture(g_curEye, &g_curPose, &g_curFov);
+    if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
+        DrawHandItems();
+        Capture(g_curEye, &g_curPose, &g_curFov);
+    }
     g_eyeCaptured = true;
     ClearForGui();
 }
@@ -583,7 +588,7 @@ void VR_OnSwap(HDC dc) {
             }
         }
         if (g_exportReady) {
-            if (g_worldThisFrame && !g_eyeCaptured) Capture(g_curEye, &g_curPose, &g_curFov);
+            if (g_worldThisFrame && !g_eyeCaptured && NowMs() >= g_pickUntilMs) Capture(g_curEye, &g_curPose, &g_curFov);
             Capture(SLOT_PANEL, nullptr, nullptr);
             if (g_worldThisFrame) {
                 g_shm->lastWorldFrame = g_shm->gameAlive;
@@ -650,6 +655,17 @@ void VR_EngineCamApplied(const float basePos[3]) {
 
 void VR_SetCinematic(bool on) {
     if (g_shm) g_shm->cinematic = on ? 1 : 0;
+}
+
+void VR_BeginAimPick(const KvrPose& aim, double seconds) {
+    g_pickPose = aim;
+    g_pickUntilMs = NowMs() + seconds * 1000.0;
+}
+
+bool VR_AimPick(KvrPose* out) {
+    if (NowMs() >= g_pickUntilMs) return false;
+    *out = g_pickPose;
+    return true;
 }
 
 void VR_Haptic(int hand, float amplitude, float duration, float frequency) {

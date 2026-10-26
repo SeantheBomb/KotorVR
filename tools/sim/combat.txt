@@ -1,11 +1,13 @@
 # Combat smoke test: load Game1, point at what is ahead, swing the right hand (melee) and check the log for
 # "gesture: swing", "input: swing -> attack" and, if a fight starts, "combat:" resolver lines.
 wait_menu 90
-wait 8
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
 click u=0.559 v=0.521      # Load Game
-wait 3
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
 click u=0.410 v=0.431      # Game 1
-wait 1.5
+wait 0.5
+wait_calm 1.5 60
 click u=0.499 v=0.671      # Load
 pointer none
 wait_world 120

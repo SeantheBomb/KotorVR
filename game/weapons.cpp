@@ -2,7 +2,8 @@
 //
 // Player and equipment come straight from the server-side game objects (Steam build addresses, see FINDINGS.md):
 //   app      = [0x7A39FC];  server = [app + 8];  internal = [server + 4]
-//   party    = internal + 0x1B770;  leader id = [party + 0xEC]       (the character the player controls)
+//   player   = first entry of [internal + 0x10064] (vtable[1] cast); controlled creature id = [player + 0x34]
+//              (the party NPC after Tab, else the PC = [player + 0x38])
 //   creature = 0x4AE770(server, id)          thiscall: object id -> server creature
 //   item     = 0x5A4C20([creature + 0xA2C], slot)   thiscall: inventory -> item in slot (0x10 right, 0x20 left)
 //   base     = [item + 0x0C]                 row in baseitems.2da
@@ -12,6 +13,7 @@
 
 #include <GL/gl.h>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "../common/kvr_shared.h"
@@ -91,12 +93,6 @@ void* FindPlayer() {
         if (!server) return nullptr;
         BYTE* internal = *(BYTE**)(server + 4);
         if (!internal) return nullptr;
-        // party leader when the player switched to a party NPC (-1 = the PC itself leads)
-        DWORD leader = *(DWORD*)(internal + 0x1B770 + 0xEC);
-        if (leader && leader != 0xFFFFFFFF && leader != 0x7F000000) {
-            void* c = GetCreature(server, leader);
-            if (c) return c;
-        }
         // the PC: first entry of the server player list -> player object -> [player + 0x38] = PC object id
         BYTE* list = *(BYTE**)(internal + 0x10064);
         if (!list) return nullptr;
@@ -109,12 +105,15 @@ void* FindPlayer() {
         typedef void*(__thiscall * Cast_t)(void*);
         void* player = ((Cast_t)((*(void***)data)[1]))(data);
         if (!player) return nullptr;
-        DWORD pc = *(DWORD*)((BYTE*)player + 0x38);
+        // [player + 0x34] = the creature being controlled (a party NPC after Tab; 0x7FFFFFFF the PC);
+        // [player + 0x38] = the PC. The party table's leader field (+0xEC) holds an NPC index, not an object id.
+        DWORD pc = *(DWORD*)((BYTE*)player + 0x34);
+        if (!pc || pc == 0x7F000000) pc = *(DWORD*)((BYTE*)player + 0x38);
         void* c = GetCreature(server, pc);
-        static int traces;
-        if (traces < 3) {
-            traces++;
-            Log("weapons: PC via player list: player %p id %08lX -> creature %p (leader %08lX)", player, pc, c, leader);
+        static DWORD lastId;
+        if (pc != lastId) {
+            lastId = pc;
+            Log("weapons: controlled creature via player list: player %p id %08lX -> creature %p", player, pc, c);
         }
         return c;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}

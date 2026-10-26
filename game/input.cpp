@@ -60,7 +60,7 @@ struct TargetSample {
 static TargetSample g_targetHist[64];
 static int g_targetHead;
 // scripted click: move to (tx, ty) and click once the GUI has seen the hover
-static int g_autoClickFrames;  // frames remaining (press during the middle of the run)
+static double g_pickStartMs = -1;  // world grip pick in progress (GetTickCount ms), see below
 static float g_autoTx, g_autoTy;
 // keys pressed by gestures for a few frames
 // gesture key press: held for a fixed time (a few frames is only ~16 ms at 250 fps), then released
@@ -159,17 +159,23 @@ void Input_Update(HWND wnd) {
         bool inWorld = in.pointerMode == KVR_POINTER_WORLD && Features().gestures;
         bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
         if (Gestures_TakeSwing(&swingQ) && fighting) {
-            g_gestureKey = DIK_R;
-            g_gestureKeyAt = now;
-            Log("input: swing -> attack current target");
+            if (Combat_PlayerAttacking()) {  // KotOR repeats the attack by itself: the swing only counts for timing
+                Log("input: swing (already attacking: timing only)");
+            } else {
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+                Log("input: swing -> attack current target");
+            }
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         static bool trigWas;
         bool trigNow = in.trigR > 0.6f;
         if (trigNow && !trigWas && fighting) {
             if (!Weapon_Profile(Weapon_Right()).melee) Gestures_OnShot();
-            g_gestureKey = DIK_R;
-            g_gestureKeyAt = now;
+            if (!Combat_PlayerAttacking()) {
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+            }
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         trigWas = trigNow;
@@ -186,7 +192,26 @@ void Input_Update(HWND wnd) {
         // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
         // object your right hand points at (the game highlights it through its own hover feedback)
         bool world = in.pointerMode == KVR_POINTER_WORLD;
-        mouse[0] = (!world && in.trigR > 0.6f) || (world && in.gripR > 0.7f);
+        mouse[0] = !world && in.trigR > 0.6f;
+        // World grip: no mouse click at all (KotOR draws the target's action menu right at the target, so a click there
+        // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
+        // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes
+        // the target, and KotOR's Default Action key (R) uses / talks to / opens / attacks it.
+        static bool gripWas;
+        bool gripNow = world && in.gripR > 0.7f;
+        double tick = (double)GetTickCount();
+        if (gripNow && !gripWas && g_pickStartMs < 0) {
+            int w, h;
+            VR_ClientSize(&w, &h);
+            if (w > 0) {
+                VR_BeginAimPick(in.aim, 0.35);
+                g_autoTx = w * 0.5f;
+                g_autoTy = h * 0.5f;
+                g_pickStartMs = tick;
+                Log("input: world grip -> aim pick + default action");
+            }
+        }
+        gripWas = gripNow;
         mouse[1] = in.trigL > 0.6f;
 
         // cursor steering toward the pointer target
@@ -201,12 +226,17 @@ void Input_Update(HWND wnd) {
         } else if (in.pointerMode == KVR_POINTER_WORLD) {
             haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
         }
-        if (g_autoClickFrames > 0) {
-            g_autoClickFrames--;
+        if (g_pickStartMs >= 0) {
+            double t = tick - g_pickStartMs;
+            if (t >= 120 && g_gestureKeyAt < 0 && t < 200) {  // hover has settled on the aimed object
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+            }
+            if (t > 330) g_pickStartMs = -1;
             tx = g_autoTx;
             ty = g_autoTy;
             haveTarget = true;
-            mouse[0] = g_autoClickFrames <= 6 && g_autoClickFrames >= 3;  // hold a few frames after the hover settles
+            mouse[0] = false;
         } else if (haveTarget && in.pointerMode == KVR_POINTER_WORLD) {
             g_targetHist[g_targetHead] = {now, {0, 0}, tx, ty};
             g_targetHead = (g_targetHead + 1) % 64;

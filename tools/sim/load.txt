@@ -1,10 +1,12 @@
 # Minimal: auto-load Game1 and idle in the world for a few seconds (quick diagnostics).
 wait_menu 90
-wait 8
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
 click u=0.559 v=0.521      # Load Game
-wait 3
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
 click u=0.410 v=0.431      # Game 1
-wait 1.5
+wait 0.5
+wait_calm 1.5 60
 click u=0.499 v=0.671      # Load
 pointer none
 wait_world 120

@@ -1,4 +1,4 @@
 # Capture the main menu so click coordinates can be read off the screenshot.
 wait_menu 90
-wait 6
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
 shot menu

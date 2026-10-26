@@ -39,6 +39,10 @@ struct KvrPose;
 bool VR_IsActive();
 // Head yaw relative to the game camera (radians, + = turned left); 0 when VR is inactive.
 float VR_HeadYaw();
+// World picks along the hand: for `seconds` the engine camera looks along the aim pose (so the screen center is
+// exactly what the hand points at) and those frames are not sent to the headset.
+void VR_BeginAimPick(const KvrPose& aim, double seconds);
+bool VR_AimPick(KvrPose* out);
 // Ask the host for one controller rumble pulse (hand 0 left, 1 right); amplitude 0..1, seconds, Hz (0 = default).
 void VR_Haptic(int hand, float amplitude, float duration, float frequency);
 // Head (eye 0) position in the recenter-origin frame.

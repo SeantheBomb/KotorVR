@@ -22,6 +22,8 @@
 //   key <name>                        tap a key in the game window: grave (console), enter, escape, space, f1..f12
 //   type <text...>                    type text into the game window (the rest of the line, spaces included)
 //   wait_log <substring> <timeout>    until <game>\kvr\probe.log contains the substring (e.g. "combat round active")
+//   wait_new_log <substring> <timeout>  same, only lines written after the command starts; a sync point (never fails)
+//   wait_calm <seconds> <timeout>     until the panel has delivered frames without a gap for <seconds> (before menu clicks)
 //   pointer none|world                stop pointing / point into the world along the head direction
 //   shot <name>                       save <name>_eye0.png, <name>_eye1.png, <name>_panel.png
 //   expect_world                      fail the run unless the world is rendering
@@ -428,10 +430,24 @@ static void LogHaptics() {
     primed = true;
 }
 
+// Frame-flow tracking for wait_calm: KotOR can stall 10+ s right after the menu first shows; clicks then are lost.
+static double g_lastPanelPull = -1, g_calmSince = -1;
+static uint32_t g_seenPanelPulls;
+
+static void TrackCalm() {
+    double now = Now();
+    if (g_pulls[2] != g_seenPanelPulls) {
+        g_seenPanelPulls = g_pulls[2];
+        if (g_lastPanelPull < 0 || now - g_lastPanelPull > 0.5) g_calmSince = now;  // frames resumed after a gap
+        g_lastPanelPull = now;
+    }
+}
+
 static void Tick() {
     PublishHead();
     PublishInput();
     PullAll();
+    TrackCalm();
     LogHaptics();
     static double lastCsv;
     double now = Now();
@@ -634,7 +650,7 @@ int main(int argc, char** argv) {
             RunFor(0.1);
         } else if (cmd == "key") {
             std::string k = args.empty() ? "" : args[0];
-            WORD vk = k == "grave" ? VK_OEM_3 : k == "enter" ? VK_RETURN : k == "escape" ? VK_ESCAPE : k == "space" ? VK_SPACE : 0;
+            WORD vk = k == "grave" ? VK_OEM_3 : k == "enter" ? VK_RETURN : k == "escape" ? VK_ESCAPE : k == "space" ? VK_SPACE : k == "tab" ? VK_TAB : 0;
             if (!vk && k.size() >= 2 && (k[0] == 'f' || k[0] == 'F')) vk = (WORD)(VK_F1 + atoi(k.c_str() + 1) - 1);
             if (!vk) { printf("line %d: unknown key\n", lineNo); result = 2; break; }
             FocusGame();
@@ -649,6 +665,15 @@ int main(int argc, char** argv) {
                 RunFor(0.04);
             }
             RunFor(0.2);
+        } else if (cmd == "wait_calm") {
+            // until the panel has delivered frames without a gap > 0.5 s for <seconds> (menus: before clicking)
+            double need = args.empty() ? 3 : atof(args[0].c_str());
+            double timeout = args.size() > 1 ? atof(args[1].c_str()) : 90;
+            bool ok = RunUntil(timeout, [&] {
+                double now = Now();
+                return g_calmSince >= 0 && now - g_lastPanelPull < 0.5 && now - g_calmSince >= need;
+            });
+            printf("[%.1f]   %s\n", Now(), ok ? "calm" : "never calm (continuing)");
         } else if (cmd == "wait_log" || cmd == "wait_new_log") {
             std::string needle = args.empty() ? "" : args[0];
             double timeout = args.size() > 1 ? atof(args[1].c_str()) : 60;

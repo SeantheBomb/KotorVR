@@ -1,7 +1,7 @@
 # Spin test: auto-load Game1, then turn the head through 360 deg in 30 deg steps and look up/down,
 # screenshotting both eyes at every step. Checks stereo, head tracking and what culls at each heading.
 wait_menu 90
-wait 8                     # the menu ignores clicks for a moment after it appears
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
 click u=0.559 v=0.521      # main menu: Load Game
 wait 3
 click u=0.410 v=0.431      # save slot: Game 1

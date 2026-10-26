@@ -21,6 +21,7 @@
 #include "../common/kvr_shared.h"
 #include "features.h"
 #include "vr.h"
+#include "weapons.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -45,6 +46,23 @@ BYTE* g_cam;
 float g_origPos[3], g_origQ[4];
 bool g_havePlay;
 float g_playPos[3], g_playQ[4];
+bool g_haveEyeOffset;
+float g_eyeOffset[3];   // gameplay camera position minus the controlled creature's position (eye height, etc.)
+float g_followPos[3];   // cutscene anchor: the creature's live position + that offset
+// aim picks (VR_BeginAimPick): the camera looks along the hand and is left that way for the game's own mouse picking
+bool g_pickApplied, g_leftAimed;
+float g_aimedPos[3], g_aimedQ[4];
+
+// The controlled creature's world position ([creature + 0x90]), false if unavailable.
+bool CreaturePos(float out[3]) {
+    __try {
+        BYTE* c = (BYTE*)Weapon_PlayerCreature();
+        if (!c) return false;
+        memcpy(out, c + 0x90, 3 * sizeof(float));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
 
 // quaternion (w, x, y, z) -> rotation matrix rows
 void QuatWxyzToRows(const float q[4], float m[9]) {
@@ -80,6 +98,15 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     }
     KvrPose eye;
     if (!VR_ChooseEye(&eye)) return;
+    // the last pick frame left the camera aimed: give the game its own values back (unless it already rewrote them)
+    if (g_leftAimed && cam == g_cam && !memcmp(pos, g_aimedPos, sizeof g_aimedPos) && !memcmp(q, g_aimedQ, sizeof g_aimedQ)) {
+        memcpy(pos, g_origPos, sizeof g_origPos);
+        memcpy(q, g_origQ, sizeof g_origQ);
+    }
+    g_leftAimed = false;
+    KvrPose aim;
+    g_pickApplied = VR_AimPick(&aim);
+    if (g_pickApplied) eye = aim;  // the hand's aim pose in the same head-relative frame as the eyes
 
     memcpy(g_origPos, pos, sizeof g_origPos);
     memcpy(g_origQ, q, sizeof g_origQ);
@@ -90,6 +117,11 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         memcpy(g_playPos, g_origPos, sizeof g_playPos);
         memcpy(g_playQ, g_origQ, sizeof g_playQ);
         g_havePlay = true;
+        float cp[3];
+        if (CreaturePos(cp)) {
+            for (int i = 0; i < 3; i++) g_eyeOffset[i] = g_origPos[i] - cp[i];
+            g_haveEyeOffset = true;
+        }
         if (Features().tracePosition) {
             static DWORD last;
             DWORD t = GetTickCount();
@@ -107,6 +139,12 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         if (dx * dx + dy * dy + dz * dz < kFreezeRadius * kFreezeRadius) {
             basePos = g_playPos;
             baseQ = g_playQ;
+            // follow the character if the scene walks them somewhere (the view stays in their head)
+            float cp[3];
+            if (g_haveEyeOffset && CreaturePos(cp)) {
+                for (int i = 0; i < 3; i++) g_followPos[i] = cp[i] + g_eyeOffset[i];
+                basePos = g_followPos;
+            }
         }
     }
     VR_SetCinematic(!gameplay);
@@ -120,6 +158,10 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     for (int r = 0; r < 3; r++)
         pos[r] = basePos[r] + M[r * 3 + 0] * eye.pos[0] + M[r * 3 + 1] * eye.pos[1] + M[r * 3 + 2] * eye.pos[2];
     memcpy(q, nq, sizeof nq);
+    if (g_pickApplied) {
+        memcpy(g_aimedPos, pos, sizeof g_aimedPos);
+        memcpy(g_aimedQ, q, sizeof g_aimedQ);
+    }
     g_cam = cam;
     g_applied = true;
     VR_EngineCamApplied(basePos);
@@ -127,8 +169,12 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
 
 extern "C" void __cdecl EngineCam_Post(BYTE* cam) {
     if (g_applied && cam == g_cam) {
-        memcpy(cam + 0x7C, g_origPos, sizeof g_origPos);
-        memcpy(cam + 0x88, g_origQ, sizeof g_origQ);
+        if (g_pickApplied) {
+            g_leftAimed = true;  // keep it aimed so this frame's mouse pick goes along the hand
+        } else {
+            memcpy(cam + 0x7C, g_origPos, sizeof g_origPos);
+            memcpy(cam + 0x88, g_origQ, sizeof g_origQ);
+        }
     }
     g_applied = false;
 }
