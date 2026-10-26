@@ -685,17 +685,19 @@ void Weapons_Draw(const float invEye[16]) {
     if (drawHands) {
         // the character's own hands at the controllers: palm center on the grip (the hand frame's origin is the wrist,
         // ~7 cm behind it), fingers curling with grip (index with trigger); a held weapon closes the fist around it
+        // tracked hand skeletons from the host (real hands, or the runtime's controller-driven hand pose) when present
+        KvrHands hs;
+        memcpy(&hs, (const void*)&shm->hands, sizeof hs);  // a torn read only costs one frame of pose
+        p_glLoadMatrixf(invEye);  // vertices are skinned straight into the tracking frame
         for (int h = 0; h < 2; h++) {
-            if (!(in.gripValid & (1u << h))) continue;
-            PoseMatrix(in.grip[h].pos, in.grip[h].quat, hand);
-            for (int r = 0; r < 3; r++) hand[12 + r] += hand[8 + r] * 0.07f;  // + local Z: back toward the wrist
-            MulMat(invEye, hand, mv);
-            p_glLoadMatrixf(mv);
+            bool tracked = (hs.valid & (1u << h)) != 0;
+            if (!tracked && !(in.gripValid & (1u << h))) continue;
             WeaponClass held = h ? g_right : g_left;
             bool holding = held != WC_NONE || (h == 0 && kProfiles[g_right].twoHanded);
             float grip = h ? in.gripR : in.gripL, trig = h ? in.trigR : in.trigL;
             float curl = holding ? max(grip, 0.85f) : grip, idx = holding ? max(trig, 0.8f) : trig;
-            WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, curl, idx, Cues_ForceGlow(h));
+            WeaponModels_DrawHand(g_handModel.c_str(), g_handTexture.c_str(), h, tracked ? hs.joint[h] : nullptr,
+                                  &in.grip[h], curl, idx, Cues_ForceGlow(h));
         }
     }
     // Ranged weapons point along the controller's aim ray, not its grip axis (the grip pose is tilted ~40 deg up from

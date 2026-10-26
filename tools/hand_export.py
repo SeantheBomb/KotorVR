@@ -9,10 +9,12 @@ pose), and split them per finger segment with the joint pivots so the game can c
 Writes <out>/hands/<model>_<r|l>.kvrh, <out>/hands/appearance.txt (row -> model / texture per body letter a..j)
 and the body textures to <out>/textures/<name>.kvrt (same format as the weapons).
 
-kvrh: 'KVRH' u32 version=1, char texture[32], u32 segCount, then per segment:
-      char name[16], i32 parent (segment index or -1), f32 pivot[3] (hand frame), u32 vcount, u32 icount,
-      f32 pos[v][3], f32 uv[v][2], u16 idx[icount] (+2 pad bytes if icount is odd)
-Hand frame = the hand bone's bind-pose frame (KotOR: fingers along -Z, origin at the wrist).
+kvrh v2 (skinned): 'KVRH' u32 version=2, char texture[32], u32 segCount, then per segment:
+      char name[16], i32 parent (segment index or -1), f32 pivot[3] (hand frame);
+      then u32 vcount, u32 icount, f32 pos[v][3], f32 uv[v][2], u8 bone[v][4] (segment indices), f32 weight[v][4],
+      u16 idx[icount] (+2 pad bytes if icount is odd)
+Hand frame = the hand bone's bind-pose frame (KotOR: fingers along -Z, origin at the wrist). Segment 0 is the palm;
+weights on bones outside the hand (forearm) go to the palm, so the wrist blends instead of tearing.
 """
 import os
 import struct
@@ -84,42 +86,59 @@ def export_hand(model, side):
             segs.setdefault(seg, []).append(f)
         if not segs:
             continue
-        out = []
-        order = sorted(segs, key=lambda s: (s != hand_name, s))
-        for s in order:
-            faces = segs[s]
-            remap, pos, uv, idx = {}, [], [], []
-            for f in faces:
+        order = sorted(segs, key=lambda s: (s != hand_name, s))  # palm first
+        seg_index = {name: i for i, name in enumerate(order)}
+        segments = []
+        for name in order:
+            base = name.replace("fngrt", "fngrb").replace("thumbt", "thumbb")
+            parent = seg_index.get(base, -1) if base != name else -1
+            pivot = to_hand(worlds[name][1]) if name in worlds else [0, 0, 0]
+            segments.append((name, parent, pivot))
+        # one skinned mesh over all the hand's faces; each vertex keeps its 4 weights, bones mapped to segments
+        remap, pos, uv, bones, weights, idx = {}, [], [], [], [], []
+        for name in order:
+            for f in segs[name]:
                 for v in f:
                     if v not in remap:
                         remap[v] = len(pos)
                         wp = [ts[i] + mvec(Rs, me.positions[v])[i] for i in range(3)]
                         pos.append(to_hand(wp))
                         uv.append(me.uvs[v])
+                        acc = {}
+                        for w, b in zip(me.weights[v], me.bones[v]):
+                            if w <= 0 or b < 0:
+                                continue
+                            bn = by_idx.get(b)
+                            nm = bn.name.lower() if bn else ""
+                            si = seg_index.get(nm, 0) if hand_bone(nm, side) else 0
+                            acc[si] = acc.get(si, 0.0) + w
+                        top = sorted(acc.items(), key=lambda kv: -kv[1])[:4] or [(0, 1.0)]
+                        total = sum(w for _, w in top) or 1.0
+                        top += [(0, 0.0)] * (4 - len(top))
+                        bones.append([b for b, _ in top])
+                        weights.append([w / total for _, w in top])
                     idx.append(remap[v])
-            pivot = to_hand(worlds[s][1]) if s in worlds else [0, 0, 0]
-            out.append([s, pivot, pos, uv, idx])
-        names = [o[0] for o in out]
-        for o in out:  # tips hang off their base segment
-            base = o[0].replace("fngrt", "fngrb").replace("thumbt", "thumbb")
-            o.append(names.index(base) if base != o[0] and base in names else -1)
-        return me.texture.lower(), out
+        return me.texture.lower(), segments, pos, uv, bones, weights, idx
     return None
 
 
-def write_kvrh(path, texture, segs):
+def write_kvrh(path, texture, segments, pos, uv, bones, weights, idx):
     with open(path, "wb") as f:
-        f.write(b"KVRH" + struct.pack("<I", 1) + texture.encode()[:31].ljust(32, b"\0") + struct.pack("<I", len(segs)))
-        for name, pivot, pos, uv, idx, parent in segs:
+        f.write(b"KVRH" + struct.pack("<I", 2) + texture.encode()[:31].ljust(32, b"\0") + struct.pack("<I", len(segments)))
+        for name, parent, pivot in segments:
             f.write(name.encode()[:15].ljust(16, b"\0") + struct.pack("<i3f", parent, *pivot))
-            f.write(struct.pack("<II", len(pos), len(idx)))
-            for p in pos:
-                f.write(struct.pack("<3f", *p))
-            for t in uv:
-                f.write(struct.pack("<2f", *t))
-            f.write(struct.pack("<%dH" % len(idx), *idx))
-            if len(idx) % 2:
-                f.write(b"\0\0")
+        f.write(struct.pack("<II", len(pos), len(idx)))
+        for p in pos:
+            f.write(struct.pack("<3f", *p))
+        for t in uv:
+            f.write(struct.pack("<2f", *t))
+        for b in bones:
+            f.write(struct.pack("<4B", *b))
+        for w in weights:
+            f.write(struct.pack("<4f", *w))
+        f.write(struct.pack("<%dH" % len(idx), *idx))
+        if len(idx) % 2:
+            f.write(b"\0\0")
 
 
 def main(game, out):

@@ -14,7 +14,12 @@ float WeaponModels_Length(int row, int variation);
 // current modelview = the hand bone's frame (fingers along -Z). side 0 left / 1 right; curl 0 open .. 1 fist for the
 // middle / ring / little fingers and thumb (grip), index separately (trigger). texture "" = the model's own.
 // Returns false when that body model has no exported hand.
-bool WeaponModels_DrawHand(const char* model, const char* texture, int side, float curl, float indexCurl, float forceGlow = 0);
+// Skinned (blended at the joints). With `joints` (26 OpenXR hand joints in the tracking frame) every segment follows
+// the tracked hand; otherwise the palm sits on `grip` and the fingers curl by `curl` / `indexCurl`. The modelview must
+// map the tracking frame to the eye.
+struct KvrPose;
+bool WeaponModels_DrawHand(const char* model, const char* texture, int side, const KvrPose* joints, const KvrPose* grip,
+                           float curl, float indexCurl, float forceGlow = 0);
 // Body model + texture for appearance.2da row `appearance`, body letter 0..9 (a..j) and armor TextureVar (from
 // kvr\handsppearance.txt). False if the row has no body model for that letter.
 bool WeaponModels_BodyFor(int appearance, int letter, int texVar, std::string* model, std::string* texture);

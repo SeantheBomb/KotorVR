@@ -8,7 +8,7 @@
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 7
+#define KVR_VERSION 8
 
 #pragma pack(push, 8)
 
@@ -81,6 +81,17 @@ struct KvrHaptic {
     float frequency;    // Hz, 0 = runtime default
 };
 
+// Host -> game tracked hand skeletons (XR_EXT_hand_tracking, OpenXR joint order: palm, wrist, thumb metacarpal..tip,
+// index metacarpal..tip, middle, ring, little; 26 per hand), relative to the recenter origin like the grip poses.
+// Joint frames follow OpenXR: -Z toward the fingertip along the bone, +Y out of the back of the hand.
+// Driven by real hands or, while holding Touch controllers, by the runtime's controller-driven hand poses.
+#define KVR_HAND_JOINTS 26
+struct KvrHands {
+    volatile uint32_t seq;  // seqlock like KvrInput
+    uint32_t valid;         // bit 0 left, bit 1 right: joints this frame are tracked
+    KvrPose joint[2][KVR_HAND_JOINTS];
+};
+
 struct KvrShared {
     uint32_t magic;
     uint32_t version;
@@ -97,6 +108,7 @@ struct KvrShared {
     KvrInput input;                    // host -> game controller state
     volatile uint32_t cinematic;       // game is on a dialogue/cutscene camera (world FOV != gameplay FOV)
     KvrHaptic haptic[2];               // game -> host, left / right hand
+    KvrHands hands;                    // host -> game
 };
 
 #pragma pack(pop)

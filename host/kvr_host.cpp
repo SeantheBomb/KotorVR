@@ -263,14 +263,100 @@ static bool CreateSwapchain(Swapchain& sc, int32_t w, int32_t h) {
 
 static bool InitControls();
 
+// ---------------------------------------------------------------- hand tracking (XR_EXT_hand_tracking)
+static bool g_extHands, g_extHandSource;
+static XrHandTrackerEXT g_handTracker[2];
+static PFN_xrCreateHandTrackerEXT p_xrCreateHandTrackerEXT;
+static PFN_xrDestroyHandTrackerEXT p_xrDestroyHandTrackerEXT;
+static PFN_xrLocateHandJointsEXT p_xrLocateHandJointsEXT;
+
+static bool HasExtension(const char* name) {
+    uint32_t n = 0;
+    xrEnumerateInstanceExtensionProperties(nullptr, 0, &n, nullptr);
+    std::vector<XrExtensionProperties> p(n, {XR_TYPE_EXTENSION_PROPERTIES});
+    xrEnumerateInstanceExtensionProperties(nullptr, n, &n, p.data());
+    for (auto& e : p)
+        if (!strcmp(e.extensionName, name)) return true;
+    return false;
+}
+
+static void CreateHandTrackers() {
+    if (!g_extHands) return;
+    xrGetInstanceProcAddr(g_inst, "xrCreateHandTrackerEXT", (PFN_xrVoidFunction*)&p_xrCreateHandTrackerEXT);
+    xrGetInstanceProcAddr(g_inst, "xrDestroyHandTrackerEXT", (PFN_xrVoidFunction*)&p_xrDestroyHandTrackerEXT);
+    xrGetInstanceProcAddr(g_inst, "xrLocateHandJointsEXT", (PFN_xrVoidFunction*)&p_xrLocateHandJointsEXT);
+    if (!p_xrCreateHandTrackerEXT || !p_xrLocateHandJointsEXT) return;
+    for (int h = 0; h < 2; h++) {
+        XrHandTrackerCreateInfoEXT ci{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+        ci.hand = h ? XR_HAND_RIGHT_EXT : XR_HAND_LEFT_EXT;
+        ci.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+        // hands from cameras when free, and the runtime's controller-driven hand pose while holding Touch controllers
+        XrHandTrackingDataSourceEXT sources[2] = {XR_HAND_TRACKING_DATA_SOURCE_UNOBSTRUCTED_EXT,
+                                                 XR_HAND_TRACKING_DATA_SOURCE_CONTROLLER_EXT};
+        XrHandTrackingDataSourceInfoEXT si{XR_TYPE_HAND_TRACKING_DATA_SOURCE_INFO_EXT};
+        si.requestedDataSourceCount = 2;
+        si.requestedDataSources = sources;
+        if (g_extHandSource) ci.next = &si;
+        XrResult r = p_xrCreateHandTrackerEXT(g_session, &ci, &g_handTracker[h]);
+        printf("hand tracker %s: %d\n", h ? "right" : "left", r);
+        if (XR_FAILED(r)) g_handTracker[h] = XR_NULL_HANDLE;
+    }
+}
+
+static void DestroyHandTrackers() {
+    for (auto& t : g_handTracker) {
+        if (t != XR_NULL_HANDLE && p_xrDestroyHandTrackerEXT) p_xrDestroyHandTrackerEXT(t);
+        t = XR_NULL_HANDLE;
+    }
+}
+
+// both hands' joints, relative to the recenter origin, into shared memory
+static void PublishHands(XrTime t) {
+    KvrHands& hs = g_shm->hands;
+    hs.seq++;
+    MemoryBarrier();
+    hs.valid = 0;
+    XrPosef invOrigin = PoseInv(g_origin);
+    for (int h = 0; h < 2; h++) {
+        if (g_handTracker[h] == XR_NULL_HANDLE) continue;
+        XrHandJointLocationEXT loc[XR_HAND_JOINT_COUNT_EXT];
+        XrHandJointLocationsEXT locs{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+        locs.jointCount = XR_HAND_JOINT_COUNT_EXT;
+        locs.jointLocations = loc;
+        XrHandJointsLocateInfoEXT li{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+        li.baseSpace = g_local;
+        li.time = t;
+        if (XR_FAILED(p_xrLocateHandJointsEXT(g_handTracker[h], &li, &locs)) || !locs.isActive) continue;
+        bool ok = true;
+        for (int j = 0; j < KVR_HAND_JOINTS && j < XR_HAND_JOINT_COUNT_EXT; j++) {
+            if (!(loc[j].locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) ||
+                !(loc[j].locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+                ok = false;
+                break;
+            }
+            XrPosef rel = PoseMul(invOrigin, loc[j].pose);
+            memcpy(hs.joint[h][j].pos, &rel.position, 12);
+            memcpy(hs.joint[h][j].quat, &rel.orientation, 16);
+        }
+        if (ok) hs.valid |= 1u << h;
+    }
+    MemoryBarrier();
+    hs.seq++;
+}
+
 static bool InitXR() {
-    const char* exts[] = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+    std::vector<const char*> exts = {XR_KHR_D3D11_ENABLE_EXTENSION_NAME};
+    g_extHands = HasExtension(XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+    g_extHandSource = g_extHands && HasExtension(XR_EXT_HAND_TRACKING_DATA_SOURCE_EXTENSION_NAME);
+    if (g_extHands) exts.push_back(XR_EXT_HAND_TRACKING_EXTENSION_NAME);
+    if (g_extHandSource) exts.push_back(XR_EXT_HAND_TRACKING_DATA_SOURCE_EXTENSION_NAME);
+    printf("hand tracking: %s, controller-driven hands: %s\n", g_extHands ? "yes" : "no", g_extHandSource ? "yes" : "no");
     XrInstanceCreateInfo ici{XR_TYPE_INSTANCE_CREATE_INFO};
     strcpy_s(ici.applicationInfo.applicationName, "KotorVR");
     ici.applicationInfo.applicationVersion = 1;
     ici.applicationInfo.apiVersion = XR_API_VERSION_1_0;
-    ici.enabledExtensionCount = 1;
-    ici.enabledExtensionNames = exts;
+    ici.enabledExtensionCount = (uint32_t)exts.size();
+    ici.enabledExtensionNames = exts.data();
     CHECK_XR(xrCreateInstance(&ici, &g_inst));
     XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
     sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -298,6 +384,7 @@ static bool InitXR() {
     sci.next = &gb;
     sci.systemId = g_sys;
     CHECK_XR(xrCreateSession(g_inst, &sci, &g_session));
+    CreateHandTrackers();
 
     XrReferenceSpaceCreateInfo rs{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
     rs.poseInReferenceSpace.orientation.w = 1;
@@ -529,6 +616,7 @@ static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& 
     syn.activeActionSets = &aas;
     bool synced = XR_SUCCEEDED(xrSyncActions(g_session, &syn));
     if (synced) PlayHaptics();
+    if (synced) PublishHands(t);
 
     XrSpaceLocation loc{XR_TYPE_SPACE_LOCATION};
     if (synced && XR_SUCCEEDED(xrLocateSpace(g_aimSpace[1], g_local, t, &loc)) &&
@@ -990,6 +1078,7 @@ static void Teardown() {
     ResetSwapchain(g_beamSc);
     ResetSwapchain(g_dotSc);
     // children before parents: destroying a live session through its instance deadlocks the Meta runtime
+    DestroyHandTrackers();
     for (auto& sp : g_aimSpace) {
         if (sp) xrDestroySpace(sp);
         sp = XR_NULL_HANDLE;

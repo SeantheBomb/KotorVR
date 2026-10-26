@@ -4,6 +4,8 @@
 
 #include "weaponmodels.h"
 
+#include "../common/kvr_shared.h"
+
 #include <windows.h>
 #include <GL/gl.h>
 #include <cstdio>
@@ -113,48 +115,69 @@ struct HSeg {
     std::string name;
     int parent;
     float pivot[3];
-    std::vector<float> pos, uv;
-    std::vector<unsigned short> idx;
+    int joint;  // OpenXR hand joint driving it
 };
 struct HModel {
     bool ok = false;
     std::string texture;
     std::vector<HSeg> segs;
+    std::vector<float> pos, uv, weight;  // 3 / 2 / 4 per vertex
+    std::vector<unsigned char> bone;     // 4 per vertex (segment indices)
+    std::vector<unsigned short> idx;
 };
 std::map<std::string, HModel> g_hands;
 std::map<int, std::vector<std::string>> g_bodies;  // appearance row -> model a..j, tex a..j ("-" = none)
+
+// KotOR hand segment -> OpenXR joint (XrHandJointEXT): the palm hangs off the wrist, finger bases (B) off the
+// proximal phalanges, tips (T) off the intermediate ones; a/b/c/d = index/middle/ring/little
+int JointFor(const std::string& n) {
+    if (n.find("hand") != std::string::npos) return 1;
+    if (n.find("thumbb") != std::string::npos) return 2;
+    if (n.find("thumbt") != std::string::npos) return 3;
+    static const char* f[4] = {"afngr", "bfngr", "cfngr", "dfngr"};
+    for (int i = 0; i < 4; i++)
+        if (n.find(f[i]) != std::string::npos) return 7 + 5 * i + (n.find("fngrt") != std::string::npos ? 1 : 0);
+    return 1;
+}
 
 const HModel& GetHand(const std::string& key) {
     auto it = g_hands.find(key);
     if (it != g_hands.end()) return it->second;
     HModel& h = g_hands[key];
     std::vector<unsigned char> d;
-    if (!ReadFile(g_dir + "\\kvr\\hands\\" + key + ".kvrh", d) || d.size() < 44 || memcmp(d.data(), "KVRH", 4)) {
-        Log("weaponmodels: no hand file for %s", key.c_str());
+    if (!ReadFile(g_dir + "\\kvr\\hands\\" + key + ".kvrh", d) || d.size() < 44 || memcmp(d.data(), "KVRH", 4) ||
+        *(unsigned*)(d.data() + 4) != 2) {
+        Log("weaponmodels: no (v2) hand file for %s - run tools/hand_export.py", key.c_str());
         return h;
     }
     h.texture.assign((const char*)d.data() + 8, strnlen((const char*)d.data() + 8, 32));
     unsigned n = *(unsigned*)(d.data() + 40);
     size_t o = 44;
-    for (unsigned i = 0; i < n && o + 40 <= d.size(); i++) {
+    for (unsigned i = 0; i < n && o + 32 <= d.size(); i++) {
         HSeg s;
         s.name.assign((const char*)d.data() + o, strnlen((const char*)d.data() + o, 16));
         s.parent = *(int*)(d.data() + o + 16);
         memcpy(s.pivot, d.data() + o + 20, sizeof s.pivot);
-        unsigned vc = *(unsigned*)(d.data() + o + 32), ic = *(unsigned*)(d.data() + o + 36);
-        o += 40;
-        size_t need = (size_t)vc * 20 + (size_t)ic * 2 + (ic % 2 ? 2 : 0);
-        if (o + need > d.size()) break;
-        s.pos.assign((const float*)(d.data() + o), (const float*)(d.data() + o) + vc * 3);
-        o += vc * 12;
-        s.uv.assign((const float*)(d.data() + o), (const float*)(d.data() + o) + vc * 2);
-        o += vc * 8;
-        s.idx.assign((const unsigned short*)(d.data() + o), (const unsigned short*)(d.data() + o) + ic);
-        o += ic * 2 + (ic % 2 ? 2 : 0);
-        h.segs.push_back(std::move(s));
+        s.joint = JointFor(s.name);
+        h.segs.push_back(s);
+        o += 32;
     }
-    h.ok = !h.segs.empty();
-    Log("weaponmodels: loaded hand %s (%zu segments, texture %s)", key.c_str(), h.segs.size(), h.texture.c_str());
+    if (o + 8 > d.size()) return h;
+    unsigned vc = *(unsigned*)(d.data() + o), ic = *(unsigned*)(d.data() + o + 4);
+    o += 8;
+    size_t need = (size_t)vc * (12 + 8 + 4 + 16) + (size_t)ic * 2;
+    if (o + need > d.size()) return h;
+    h.pos.assign((const float*)(d.data() + o), (const float*)(d.data() + o) + vc * 3);
+    o += vc * 12;
+    h.uv.assign((const float*)(d.data() + o), (const float*)(d.data() + o) + vc * 2);
+    o += vc * 8;
+    h.bone.assign(d.data() + o, d.data() + o + vc * 4);
+    o += vc * 4;
+    h.weight.assign((const float*)(d.data() + o), (const float*)(d.data() + o) + vc * 4);
+    o += vc * 16;
+    h.idx.assign((const unsigned short*)(d.data() + o), (const unsigned short*)(d.data() + o) + ic);
+    h.ok = !h.segs.empty() && vc > 0;
+    Log("weaponmodels: loaded hand %s (%zu segments, %u verts, texture %s)", key.c_str(), h.segs.size(), vc, h.texture.c_str());
     return h;
 }
 
@@ -195,32 +218,94 @@ GLuint GetTexture(const std::string& name) {
 
 }  // namespace
 
-bool WeaponModels_DrawHand(const char* model, const char* texture, int side, float curl, float indexCurl, float forceGlow) {
-    if (!model || !*model || !LoadGl()) return false;
+namespace {
+void QuatRows(const float q[4], float m[9]) {  // q = x, y, z, w
+    float x = q[0], y = q[1], z = q[2], w = q[3];
+    m[0] = 1 - 2 * (y * y + z * z); m[1] = 2 * (x * y - z * w); m[2] = 2 * (x * z + y * w);
+    m[3] = 2 * (x * y + z * w); m[4] = 1 - 2 * (x * x + z * z); m[5] = 2 * (y * z - x * w);
+    m[6] = 2 * (x * z - y * w); m[7] = 2 * (y * z + x * w); m[8] = 1 - 2 * (x * x + y * y);
+}
+void Mul33(const float a[9], const float b[9], float o[9]) {
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c];
+}
+void Mul3(const float a[9], const float v[3], float o[3]) {
+    for (int r = 0; r < 3; r++) o[r] = a[r * 3] * v[0] + a[r * 3 + 1] * v[1] + a[r * 3 + 2] * v[2];
+}
+struct BoneX {
+    float R[9], T[3], P[3];  // v -> T + R (v - P)
+};
+}  // namespace
+
+bool WeaponModels_DrawHand(const char* model, const char* texture, int side, const KvrPose* joints, const KvrPose* grip,
+                           float curl, float indexCurl, float forceGlow) {
+    if (!model || !*model || !LoadGl() || (!joints && !grip)) return false;
     const HModel& h = GetHand(std::string(model) + (side ? "_r" : "_l"));
     if (!h.ok) return false;
     GLuint tex = GetTexture(texture && *texture ? texture : h.texture);
     if (!tex) tex = GetTexture(h.texture);
-    // per segment: v' = R (v - P) + P, applied for the segment and then its parent (tips ride on their base)
-    struct X { float R[9]; float P[3]; };
-    std::vector<X> xf(h.segs.size());
-    float dir = side ? 1.0f : -1.0f;  // fingers curl toward the palm: -X for the right hand, +X for the left
-    for (size_t i = 0; i < h.segs.size(); i++) {
-        const std::string& n = h.segs[i].name;
-        bool thumb = n.find("thumb") != std::string::npos, index = n.find("afngr") != std::string::npos;
-        bool tip = n.find("fngrt") != std::string::npos || n.find("thumbt") != std::string::npos;
-        bool palm = n.find("hand") != std::string::npos;
-        float c = index ? indexCurl : curl;
-        float deg = palm ? 0 : thumb ? (tip ? 35 : 25) * c : (tip ? 85 : 75) * c;
-        float a = dir * deg * 3.14159265f / 180.0f, cs = cosf(a), sn = sinf(a);
-        float R[9] = {cs, 0, sn, 0, 1, 0, -sn, 0, cs};  // about the hand's Y axis (across the palm)
-        memcpy(xf[i].R, R, sizeof R);
-        memcpy(xf[i].P, h.segs[i].pivot, sizeof xf[i].P);
+    std::vector<BoneX> bx(h.segs.size());
+    if (joints) {
+        // KotOR hand frame -> OpenXR joint frame (+Y back of the hand, -Z toward the fingertips):
+        // right: KotOR +X (back of hand) -> +Y, KotOR +Y (index side) -> -X; left: KotOR -X -> +Y, +Y -> +X
+        static const float kAlignR[9] = {0, -1, 0, 1, 0, 0, 0, 0, 1};
+        static const float kAlignL[9] = {0, 1, 0, -1, 0, 0, 0, 0, 1};
+        const float* A = side ? kAlignR : kAlignL;
+        for (size_t i = 0; i < h.segs.size(); i++) {
+            const KvrPose& j = joints[h.segs[i].joint];
+            float Rj[9];
+            QuatRows(j.quat, Rj);
+            Mul33(Rj, A, bx[i].R);
+            memcpy(bx[i].T, j.pos, sizeof bx[i].T);
+            memcpy(bx[i].P, h.segs[i].pivot, sizeof bx[i].P);
+        }
+    } else {
+        // no tracked hand: the palm on the controller grip (wrist 7 cm behind the grip center), fingers curled by grip
+        float Rg[9];
+        QuatRows(grip->quat, Rg);
+        float back[3] = {0, 0, 0.07f}, ob[3];
+        Mul3(Rg, back, ob);
+        float dir = side ? 1.0f : -1.0f;  // fingers curl toward the palm: -X for the right hand, +X for the left
+        for (size_t i = 0; i < h.segs.size(); i++) {
+            const std::string& n = h.segs[i].name;
+            bool thumb = n.find("thumb") != std::string::npos, index = n.find("afngr") != std::string::npos;
+            bool tip = n.find("fngrt") != std::string::npos || n.find("thumbt") != std::string::npos;
+            bool palm = n.find("hand") != std::string::npos;
+            float c = index ? indexCurl : curl;
+            float deg = palm ? 0 : thumb ? (tip ? 35 : 25) * c : (tip ? 85 : 75) * c;
+            float a = dir * deg * 3.14159265f / 180.0f, cs = cosf(a), sn = sinf(a);
+            float C[9] = {cs, 0, sn, 0, 1, 0, -sn, 0, cs};  // about the hand's Y axis (across the palm)
+            memcpy(bx[i].P, h.segs[i].pivot, sizeof bx[i].P);
+            int par = h.segs[i].parent;
+            if (palm || i == 0) {
+                memcpy(bx[i].R, Rg, sizeof Rg);
+                for (int r = 0; r < 3; r++) bx[i].T[r] = grip->pos[r] + ob[r];
+                memset(bx[i].P, 0, sizeof bx[i].P);
+                continue;
+            }
+            const BoneX& base = (par >= 0 && (size_t)par < i) ? bx[par] : bx[0];
+            Mul33(base.R, C, bx[i].R);
+            // where this segment's pivot ends up under its parent: T = base(P_i)
+            float d[3] = {bx[i].P[0] - base.P[0], bx[i].P[1] - base.P[1], bx[i].P[2] - base.P[2]}, rd[3];
+            Mul3(base.R, d, rd);
+            for (int r = 0; r < 3; r++) bx[i].T[r] = base.T[r] + rd[r];
+        }
     }
-    auto apply = [](const X& x, const float in[3], float out[3]) {
-        float d[3] = {in[0] - x.P[0], in[1] - x.P[1], in[2] - x.P[2]};
-        for (int r = 0; r < 3; r++) out[r] = x.R[r * 3] * d[0] + x.R[r * 3 + 1] * d[1] + x.R[r * 3 + 2] * d[2] + x.P[r];
-    };
+    // linear blend skinning on the CPU (a few hundred vertices)
+    size_t vc = h.pos.size() / 3;
+    std::vector<float> sk(vc * 3);
+    for (size_t v = 0; v < vc; v++) {
+        float out[3] = {0, 0, 0};
+        for (int k = 0; k < 4; k++) {
+            float w = h.weight[v * 4 + k];
+            if (w <= 0) continue;
+            const BoneX& b = bx[h.bone[v * 4 + k] < bx.size() ? h.bone[v * 4 + k] : 0];
+            float d[3] = {h.pos[v * 3] - b.P[0], h.pos[v * 3 + 1] - b.P[1], h.pos[v * 3 + 2] - b.P[2]}, rd[3];
+            Mul3(b.R, d, rd);
+            for (int r = 0; r < 3; r++) out[r] += w * (b.T[r] + rd[r]);
+        }
+        memcpy(&sk[v * 3], out, sizeof out);
+    }
     p_glEnable(GL_TEXTURE_2D);
     p_glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     p_glBindTexture(GL_TEXTURE_2D, tex);
@@ -228,27 +313,21 @@ bool WeaponModels_DrawHand(const char* model, const char* texture, int side, flo
     p_glDisable(GL_ALPHA_TEST);
     p_glDepthMask(GL_TRUE);
     for (int pass = 0; pass < (forceGlow > 0.01f ? 2 : 1); pass++) {
-    if (pass == 1) {  // Force surge: the same hand again, additive blue
-        p_glEnable(GL_BLEND);
-        p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-        p_glDepthMask(GL_FALSE);
-        p_glColor4f(0.45f, 0.65f, 1.0f, forceGlow);
-    } else {
-        p_glColor4f(0.72f, 0.72f, 0.75f, 1);
-    }
-    p_glBegin(GL_TRIANGLES);
-    for (size_t i = 0; i < h.segs.size(); i++) {
-        const HSeg& s = h.segs[i];
-        for (unsigned short k : s.idx) {
-            if ((size_t)k * 3 + 2 >= s.pos.size()) continue;
-            float v[3];
-            apply(xf[i], &s.pos[(size_t)k * 3], v);
-            if (s.parent >= 0 && (size_t)s.parent < xf.size()) apply(xf[s.parent], v, v);
-            p_glTexCoord2fv(&s.uv[(size_t)k * 2]);
-            p_glVertex3fv(v);
+        if (pass == 1) {  // Force surge: the same hand again, additive blue
+            p_glEnable(GL_BLEND);
+            p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+            p_glDepthMask(GL_FALSE);
+            p_glColor4f(0.45f, 0.65f, 1.0f, forceGlow);
+        } else {
+            p_glColor4f(0.72f, 0.72f, 0.75f, 1);
         }
-    }
-    p_glEnd();
+        p_glBegin(GL_TRIANGLES);
+        for (unsigned short k : h.idx) {
+            if (k >= vc) continue;
+            p_glTexCoord2fv(&h.uv[(size_t)k * 2]);
+            p_glVertex3fv(&sk[(size_t)k * 3]);
+        }
+        p_glEnd();
     }
     p_glDisable(GL_BLEND);
     p_glDepthMask(GL_TRUE);
