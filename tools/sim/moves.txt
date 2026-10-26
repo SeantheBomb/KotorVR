@@ -23,7 +23,6 @@ wait 1.5
 hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
 wait 1
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16             # plain swing -> normal
-wait 0.6
-hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
-swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16             # second within 1 s -> flurry
+wait 0.5
+swing dx=0.6 dy=0.35 dz=0.15 over=0.16                # back the other way within 1 s -> flurry
 wait 1

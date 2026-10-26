@@ -157,7 +157,7 @@ void ApplySpecialMove(void* creature) {
         for (unsigned short feat : kFeats[m]) {
             if (!feat || !CanUseFeat(stats, feat)) continue;
             *(WORD*)(record + 0x64) = feat;
-            Log("combat: special move %d -> feat %u on this attack", (int)m, feat);
+            Log("combat: special_move %d -> feat %u on this attack", (int)m, feat);
             Cues_Fire(CUE_PERFECT_HIT);
             return;
         }

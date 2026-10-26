@@ -44,6 +44,7 @@ double g_lastAttackAt = -10;
 bool g_swingPending, g_pushPending, g_pullPending;
 GestureMove g_move = MOVE_NONE;
 double g_moveAt = -10, g_prevSwingAt = -10, g_prevShotAt = -10;
+bool g_prevPlainSwing;
 const char* kMoveName[] = {"none", "power", "critical", "flurry", "power shot", "rapid"};
 float g_swingQuality;
 double g_lastPushAt = -10, g_lastPullAt = -10;
@@ -110,10 +111,14 @@ void Gestures_Update(const KvrInput& in, const float headPos[3]) {
             float along = d[0] * fwd[0] + d[2] * fwd[1];
             float side = fabsf(d[0] * fwd[1] - d[2] * fwd[0]);
             float startY = g_right.count > 8 ? g_right.Back(g_right.count > 20 ? 20 : g_right.count - 1).p[1] : 0;
+            // a clear thrust / overhead chop wins; a flurry is two plain swings in quick succession
             GestureMove move = MOVE_NONE;
-            if (g_now - g_prevSwingAt < 1.0) move = MOVE_FLURRY;
-            else if (along > 0.3f && along > 1.5f * side && fabsf(d[1]) < 0.6f * along) move = MOVE_CRITICAL;
+            bool plain = false;
+            if (along > 0.3f && along > 1.5f * side && fabsf(d[1]) < 0.6f * along) move = MOVE_CRITICAL;
             else if (-d[1] > 0.35f && startY > headPos[1] - 0.05f) move = MOVE_POWER;
+            else plain = true;
+            if (plain && g_prevPlainSwing && g_now - g_prevSwingAt < 1.0) move = MOVE_FLURRY;
+            g_prevPlainSwing = plain && move == MOVE_NONE;
             if (move != MOVE_NONE) {
                 g_move = move;
                 g_moveAt = g_now;

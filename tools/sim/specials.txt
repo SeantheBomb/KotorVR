@@ -1,0 +1,64 @@
+# Special moves in a real fight: load Game1, warp to the Kashyyyk Shadowlands with the cheat console, let the kinrath
+# start a fight, then swing, block and shoot. Requires EnableCheats=1 in swkotor.ini
+# (run_sim does not change it; the dantooine wrapper does). Nothing is saved.
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
+click u=0.410 v=0.431      # Game 1
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+key grave                  # cheat console
+type warp kas_m22ab
+key enter
+wait 6
+wait_world 120
+wait 3
+key grave                  # invulnerable: KotOR then skips the damage roll, so "damage stopped" reads 0; run without
+type invulnerability       # it (delete these 3 lines) for real numbers, but the party may not survive the long waits
+key enter
+shot arrived
+pointer world
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=40
+# Game1 has already cleared the Dantooine wilderness (Matale Grounds hounds, Crystal Caves kinrath), so warp to a
+# module the save has never loaded: Kashyyyk Upper Shadowlands, kinrath ~14 m from the entry (faces (0.2,0.98)).
+# TracePosition=1 in kvr.ini logs "pos:" lines for route checks.
+# also needs [Autopause Options] Enemy Sighted=0 in swkotor.ini, or the game pauses on arrival
+wait_new_log incoming_attack 30                    # the first kinrath attack on the player (rolled; lands ~0.5 s later)
+shot warning                                       # the chevron over the attacker
+wait 8                     # let it close in and attack (opens the swing gate)
+shot walked
+shot fight
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16          # start attacking
+wait 2
+hand R x=0.25 y=0.20 z=-0.25 yaw=0 pitch=60
+wait 0.8
+swing dx=0.0 dy=-0.85 dz=-0.15 over=0.2            # overhead chop -> power attack
+wait 2.5
+hand R x=0.20 y=-0.15 z=-0.10 yaw=0 pitch=0
+wait 0.8
+swing dx=0.0 dy=0.0 dz=-0.55 over=0.15             # thrust -> critical strike
+wait 2.5
+hand R x=0.25 y=0.20 z=-0.25 yaw=0 pitch=60
+wait 0.8
+swing dx=0.0 dy=-0.85 dz=-0.15 over=0.2            # overhead chop -> power attack
+wait 2.5
+hand R x=0.20 y=-0.15 z=-0.10 yaw=0 pitch=0
+wait 0.8
+swing dx=0.0 dy=0.0 dz=-0.55 over=0.15             # thrust -> critical strike
+wait 2.5
+hand R x=0.25 y=0.20 z=-0.25 yaw=0 pitch=60
+wait 0.8
+swing dx=0.0 dy=-0.85 dz=-0.15 over=0.2            # overhead chop -> power attack
+wait 2.5
+hand R x=0.20 y=-0.15 z=-0.10 yaw=0 pitch=0
+wait 0.8
+swing dx=0.0 dy=0.0 dz=-0.55 over=0.15             # thrust -> critical strike
+wait 2.5
+shot after
+wait_log special_move 30
