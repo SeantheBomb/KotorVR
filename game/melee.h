@@ -22,3 +22,6 @@ bool Melee_BladeNear(const float point[3], float radius, float* speed);
 bool Melee_BladeCrossesLine(const float a[3], const float b[3], float radius, float* speed);
 // A trigger shot along the barrel (world): credits the first enemy body it passes through.
 void Melee_Shot(const float origin[3], const float dir[3]);
+// Force aim: the left controller's ray (world) each frame, and the enemy it points at (within 25 deg, 15 m; 0 none).
+void Melee_SetPalm(const float origin[3], const float dir[3]);
+DWORD Melee_PalmTarget();

@@ -310,6 +310,35 @@ bool Melee_BladeCrossesLine(const float a[3], const float b2[3], float radius, f
     return false;
 }
 
+// --- Force: the enemy the left hand points at
+static float g_palmO[3], g_palmD[3];
+static double g_palmAt = -10;
+void Melee_SetPalm(const float origin[3], const float dir[3]) {
+    memcpy(g_palmO, origin, 12);
+    memcpy(g_palmD, dir, 12);
+    g_palmAt = Now();
+}
+
+DWORD Melee_PalmTarget() {
+    if (Now() - g_palmAt > 0.3) return 0;
+    DWORD best = 0;
+    float bestCos = cosf(25.0f * 3.14159265f / 180.0f);
+    for (auto& kv : g_fighters) {
+        if (!Melee_IsEnemy(kv.first)) continue;
+        float p[3];
+        if (!CreaturePos(kv.first, p)) continue;
+        float v[3] = {p[0] - g_palmO[0], p[1] - g_palmO[1], p[2] + 1.1f - g_palmO[2]};
+        float l = sqrtf(Dot(v, v));
+        if (l < 0.3f || l > 15.0f) continue;
+        float c = Dot(v, g_palmD) / l;
+        if (c > bestCos) {
+            bestCos = c;
+            best = kv.first;
+        }
+    }
+    return best;
+}
+
 // --- ranged: the barrel ray against enemy bodies
 void Melee_Shot(const float origin[3], const float dir[3]) {
     float best = 40.0f;

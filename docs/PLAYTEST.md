@@ -88,6 +88,24 @@ Start a fight by gripping on an enemy.
 The equipped item's real model and textures (its variation, so your saber is your saber: hilt, blade colour).
 `[Debug] WeaponGallery=1` in kvr.ini cycles through one weapon of every class every 3 s (for screenshots).
 
+## v2 combat (contact mode, the default)
+
+- Your blade is the attack: touch an enemy with a real swing (~2 m/s at the tip) and it lands - where on its body
+  doesn't matter, but a lazy touch does nothing and a full swing hits harder. The first contact starts the fight with
+  it; KotOR's rounds keep going underneath but only what your blade touched gets through.
+- Defence: when the chevron / diamond comes up, put the blade on the diamond. Held there = a block (costs guard; too
+  many in a row and the block breaks); swung into it = a parry (staggers the enemy, costs nothing).
+- Break an enemy's guard (parries, blocks it made against you, hits) and it staggers for 2 s: it can't attack and your
+  blows become critical threats. Rank-and-file break fast.
+- Blasters fired at you: a saber across the bolt's path deflects it; swing into it and it goes back at the shooter.
+  Without a saber, lean or duck out of the way as it lands.
+- Your blaster: where the barrel points is what you hit (head shots count extra); each trigger pull is one shot.
+- Force push hits the enemy your left palm points at.
+- `[Combat] Mode=rounds` brings back the v1 rules; `ParryZone` (0.38 m) is how forgiving the block spot is;
+  `AttackTokens` (2) is how many enemies may swing at you at once.
+- To judge: does contact feel reliable (hits you expect, none you don't)? Are parries learnable from the telegraph?
+  Does a guard break feel earned?
+
 ## v2 Phase A: combat feel (no rule changes)
 
 - Telegraphs from the moment an enemy rolls its attack on you: a chevron over the attacker with a ring that closes

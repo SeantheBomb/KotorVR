@@ -448,6 +448,8 @@ static float g_lastInvEye[16];
 static float g_weaponEye[2][16];
 static float g_weaponLen[2];
 static bool g_weaponValid[2];
+static float g_palmEye[16];  // the left controller in eye space (Force aim: its forward, -Z)
+static bool g_palmValid;
 static double g_lastFlash = -10;
 
 static double NowS() { return GetTickCount() / 1000.0; }
@@ -644,6 +646,15 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             wt[r] = worldView[r * 4 + 0] * dt[0] + worldView[r * 4 + 1] * dt[1] + worldView[r * 4 + 2] * dt[2];
         }
         Melee_SetBlade(h, wb, wt);
+    }
+    if (g_palmValid) {  // the left hand's aim for Force powers, in world coordinates
+        float e[3] = {g_palmEye[12], g_palmEye[13], g_palmEye[14]}, de[3] = {-g_palmEye[8], -g_palmEye[9], -g_palmEye[10]};
+        float d[3] = {e[0] - worldView[12], e[1] - worldView[13], e[2] - worldView[14]}, o[3], dw[3];
+        for (int r = 0; r < 3; r++) {
+            o[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
+            dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
+        }
+        Melee_SetPalm(o, dw);
     }
     bool anyBolt = false;
     for (const Bolt& b : g_bolts)
@@ -1069,6 +1080,13 @@ void Weapons_Draw(const float invEye[16]) {
     RefreshPoseAdj();
     g_muzzleValid = false;
     g_weaponValid[0] = g_weaponValid[1] = false;
+    g_palmValid = false;
+    if (in.gripValid & 1) {
+        float g[16];
+        PoseMatrix(in.grip[0].pos, in.grip[0].quat, g);
+        MulMat(invEye, g, g_palmEye);
+        g_palmValid = true;
+    }
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
         if (c == WC_NONE || !(in.gripValid & (1u << h))) continue;

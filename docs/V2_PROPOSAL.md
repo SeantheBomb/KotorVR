@@ -8,6 +8,25 @@ Reference: d2r-pcvr (github.com/bearstonem/d2r-pcvr) solved the same problem for
 shield blocks from real geometry, parries timed to measured enemy wind-ups, hand-launched projectiles. Its ideas map
 onto ours where noted.
 
+## Status (2026-10-27, branch v2)
+
+Built ([Combat] Mode=contact, the default; Mode=rounds restores v1):
+- Contact melee against per-bone capsules from each enemy's animated skeleton (melee.cpp, anim.cpp); a contact
+  starts your attack; only credited blows land, graded by swing speed; a credited d20 miss is blocked into posture.
+- Defence at the impact by blade geometry: block (guard meter) / parry (stagger + posture), bolt deflection and
+  return-to-shooter, dodges; roll-time telegraphs (Phase A).
+- Posture and openings (the enemy's combat round pauses, your blows become critical threats); attack tokens.
+- Ranged: the barrel decides (per-bone, head shots 1.5x); bolts stop at walls; incoming bolts dodged / deflected.
+- Reactions: per-creature hit-pause, torso flinch, NPCs looking at you, death camera.
+- Force: pushes aimed by the left palm (the enemy it points at becomes the target).
+
+Not built yet (each needs more reverse engineering or a larger system):
+- Force charge tiers / two-handed area powers, wrist radial and chest-cast buffs, Saber Throw with catch, Force point
+  refund on parries (the Force point field isn't located).
+- Fire modes (Rapid Shot / Power Blast / Sniper as aim mechanics), off-hand foregrip, thrown grenades.
+- Cover from the engine's line of sight; slow-motion "battle meditation" (no engine timescale - full pause only).
+- Death ragdoll (Jolt) and arm IK.
+
 ## Goals
 
 1. A hit lands because your blade touched the enemy - not because a round came up.

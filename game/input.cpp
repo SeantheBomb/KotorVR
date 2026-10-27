@@ -294,7 +294,16 @@ void Input_Update(HWND wnd) {
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         trigWas = trigNow;
-        if (Gestures_TakeForcePush() && fighting) { g_gestureKey = DIK_2; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // target slot 2: Force powers
+        if (Gestures_TakeForcePush() && fighting) {  // target slot 2: Force powers - on the enemy your palm points at
+            DWORD aimed = Melee_PalmTarget();
+            if (aimed) {
+                Weapon_SetTarget(aimed | 0x80000000);
+                Log("input: Force push aimed at %08lX", aimed);
+            }
+            g_gestureKey = DIK_2;
+            g_gestureKeyAt = now;
+            Cues_Fire(CUE_FORCE);
+        }
         if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // personal power slot
         if (g_gestureKeyAt >= 0) {
             if (now - g_gestureKeyAt < 0.1) keys[g_gestureKey] = 0x80;
