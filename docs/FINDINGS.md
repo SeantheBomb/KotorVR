@@ -132,3 +132,20 @@ Combat round clock: `CSWSCombatRound::IncrementTimer` `0x4D4C10` (Timer `+0x944`
 
 1 baton · 2 one-hand blades/sabers (saber when damageflags 4096) · 3 two-handed melee (staff, double blades,
 warblade, ghaffi stick) · 4 pistols · 5 rifles/carbines/bowcaster · 6 repeaters. Full row map in game/weapons.cpp.
+
+## Client animation nodes (v2 spike, 2026-10-27)
+
+Names from Lane's K1 Ghidra labels (GOG build; every address checked so far is identical on Steam). Verified at runtime
+by `[Debug] AnimProbe=1` (game/animprobe.cpp): all 51 drawn skeleton nodes of the player model matched the GL-recorded
+bones to < 1 mm; only undrawn hooks (LightsaberHook, headconjure, camerahook...) differ.
+
+| What | Where |
+|---|---|
+| Player client creature | `CClientExoApp::GetPlayerCreature` `0x5ED540` (ecx = `[app+4]`) |
+| Body model (Gob) | `CSWCCreature::GetModel(part 0xFF, create 0)` `0x6179C0` -> `[creature+0x68]` anim base `vtbl[2]` |
+| Gob root Part | `[gob + 0x6C]`; `Gob::Animate(dt)` `0x486670`, `Gob::PlayAnimation(name, speed, flags, start)` `0x485BD0`, `Gob::BeginLookAtAnimate` `0x487190` |
+| Part | `+0x04` MdlNode, `+0x08` local pos, `+0x14` local quat (w,x,y,z), `+0x24` scale, `+0x30/+0x34` children array/count, `+0x3C` parent, `+0x40` gob (world pos `+0x78`, quat `+0x84`, scale `+0x1B4`) |
+| Part methods | `GetWorld(pos*, quat*)` `0x43E4A0`, `GetLocal` `0x43E6A0`, `Name()` `0x440200` (fastcall) |
+
+Body nodes are the `*_g` bones (pelvis_g, torso_g, torsoUpr_g, r/lbicep_g, R/Lforearm_g, R/Lhand_g, fingers, thighs,
+shins, feet) plus hooks: rhand / lhand (weapon roots), headhook, Impact, LightsaberHook, DeflectHook, camerahook.

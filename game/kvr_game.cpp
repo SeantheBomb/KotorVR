@@ -27,6 +27,7 @@
 #include "movie.h"
 #include "ownsig.h"
 #include "compat.h"
+#include "animprobe.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -399,6 +400,7 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
         if (g_trace) { g_tracing = true; g_traceCount = 0; }
     }
     f10Down = f10;
+    AnimProbe_OnSwap();
     VR_OnSwap(dc);
     g_mvDepth = 0;
     g_hideDepth = -1;

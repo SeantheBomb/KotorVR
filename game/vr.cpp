@@ -689,6 +689,12 @@ void VR_OnSwap(HDC dc) {
     g_camState = 0;
 }
 
+int VR_OwnNodesThisFrame(float (*out)[3], int max) {
+    int n = g_ownNodeCount[g_ownNodeCur] < max ? g_ownNodeCount[g_ownNodeCur] : max;
+    memcpy(out, g_ownNodes[g_ownNodeCur], n * 12);
+    return n;
+}
+
 void VR_OwnNode(const float world[3]) {
     int& n = g_ownNodeCount[g_ownNodeCur];
     if (n < 128) memcpy(g_ownNodes[g_ownNodeCur][n++], world, 12);
