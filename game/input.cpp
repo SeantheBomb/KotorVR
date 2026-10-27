@@ -265,7 +265,7 @@ void Input_Update(HWND wnd) {
         static double lastRangedPick = -10;
         bool rangedHeld = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
         static double trigDownAt = -10, lastShotAt = -10;
-        if (trigNow && !trigWas && inWorld && rangedHeld && !ringWasOpen && !Dialogue_Active()) {
+        if (trigNow && !trigWas && inWorld && rangedHeld && !ringWasOpen && !Dialogue_Active() && !Force_MenuHovered()) {
             // a gun fires when you pull its trigger: bolt, flash, recoil and sound right away; where the barrel points
             // decides what it hits (v2). Fire modes: a steady second before the pull = Sniper Shot, a quick second pull
             // = Rapid Shot, a trigger held ~1 s and let go = Power Blast (an extra, heavier bolt).

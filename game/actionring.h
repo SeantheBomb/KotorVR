@@ -1,6 +1,11 @@
 // Target actions in the world: KotOR's target action menu (attack moves, Force powers, security / bash, grenades, ...)
 // as a panel along your hand that you point at and pick with the trigger (see actionring.cpp).
 #pragma once
+
+#include <string>
+
+// The display name of an action by its icon resref (kvr\\actions.txt, else derived from the resref).
+std::string ActionRing_Name(const char* icon);
 #include <windows.h>
 
 struct KvrInput;

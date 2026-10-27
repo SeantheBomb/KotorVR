@@ -299,7 +299,16 @@ static void PublishInput() {
     for (int h = 0; h < 2; h++) {
         const HandPose& hp = g_hand[h];
         float q[4];
-        QuatYawPitch(hp.yaw, hp.pitch, q);  // roll ignored for now
+        QuatYawPitch(hp.yaw, hp.pitch, q);
+        if (hp.roll != 0) {  // then roll about the controller's own forward axis (-Z): q * r(+Z, roll)
+            double r = hp.roll * kPi / 360.0;
+            float rq[4] = {0, 0, (float)sin(r), (float)cos(r)}, o[4];
+            o[0] = q[3] * rq[0] + q[0] * rq[3] + q[1] * rq[2] - q[2] * rq[1];
+            o[1] = q[3] * rq[1] - q[0] * rq[2] + q[1] * rq[3] + q[2] * rq[0];
+            o[2] = q[3] * rq[2] + q[0] * rq[1] - q[1] * rq[0] + q[2] * rq[3];
+            o[3] = q[3] * rq[3] - q[0] * rq[0] - q[1] * rq[1] - q[2] * rq[2];
+            memcpy(q, o, sizeof o);
+        }
         in.grip[h].pos[0] = (float)hp.x; in.grip[h].pos[1] = (float)hp.y; in.grip[h].pos[2] = (float)hp.z;
         memcpy(in.grip[h].quat, q, sizeof q);
     }

@@ -4,12 +4,12 @@
 #include <stdint.h>
 
 // the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v13"
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v14"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 13
+#define KVR_VERSION 14
 
 #pragma pack(push, 8)
 
@@ -105,7 +105,7 @@ enum : uint32_t {
     KVR_ANCHOR_WORLD = 2,  // pose relative to the recenter origin (stays put)
     KVR_ANCHOR_LWRIST = 3, // pose relative to the left controller grip
 };
-#define KVR_TEXT_PANELS 4
+#define KVR_TEXT_PANELS 5  // 0 tutorial, 1 conversation, 2 action ring, 3 hover name, 4 wrist powers
 struct KvrTextPanel {
     volatile uint32_t serial;
     uint32_t anchor;       // KVR_ANCHOR_*

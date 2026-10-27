@@ -17,6 +17,8 @@
 // (CClientExoApp::SetLastTarget), the menu refreshes, the power's entry is selected in its column and the column's key
 // performs it - the same path as clicking it, so Force points, saves and animations are all the game's.
 // Parries refund a little Force (stats [creature+0xA74]: current +0x124, max via 0x4FD490).
+// Wrist power menu: while your left palm faces you, the self powers you know are listed along the forearm (text slot 4,
+// next to the wrist HUD); point the right laser at one and pull the trigger - the chest gesture now casts it first.
 // Grenades: squeeze the left grip at your hip (a click: one is in your hand), throw it - the release velocity flies an
 // arc to the floor; the enemy nearest the landing spot (4 m) gets the grenade from the target menu (an entry whose
 // icon names a grenade), so its blast, damage and saves are the game's.
@@ -27,7 +29,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
 
+#include "actionring.h"
 #include "combat.h"
 #include "cues.h"
 #include "gestures.h"
@@ -231,6 +236,98 @@ void FamilyCast(const int* tiers, int tier, DWORD target, const char* what) {
 
 }  // namespace
 
+// ---- the wrist power menu
+static const int kMenuSlot = 4;
+static int g_chestPower = -1;  // chosen on the wrist: the chest gesture casts it first
+static bool g_menuShown;
+static std::vector<int> g_menuIds;
+static std::vector<std::string> g_menuNames;
+static bool g_menuTrigWas;
+static bool g_menuHovered;
+
+// one personal slot's entry i (SEH only - no C++ objects here): its count, id and icon; false past the end
+static bool PersonalEntry(BYTE* mi, int slot, int i, int* id, char* icon) {
+    __try {
+        BYTE* ents = *(BYTE**)(mi + 0x74 + slot * 0xC);
+        int count = *(int*)(mi + 0x78 + slot * 0xC);
+        if (!ents || i >= count || i >= 32) return false;
+        *id = *(int*)(ents + i * 0x38 + 8);
+        memcpy(icon, ents + i * 0x38 + 0x20, 16);
+        icon[16] = 0;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+static void ReadPersonalPowers(std::vector<int>& ids, std::vector<std::string>& names) {
+    BYTE* blk = ActionBlock();
+    if (!blk) return;
+    BYTE* mi = blk - 0xBC;
+    for (int s = 0; s < 3; s++) {
+        int id;
+        char icon[17];
+        for (int i = 0; PersonalEntry(mi, s, i, &id, icon); i++) {
+            if ((id & 0xF0000000) != 0x20000000) continue;  // Force powers only
+            ids.push_back(id & 0xFFFF);
+            names.push_back(ActionRing_Name(icon));
+        }
+    }
+}
+
+static void MenuUpdate(const KvrInput& in) {
+    const KvrShared* shm = VR_Shared();
+    if (!shm || !(in.gripValid & 1)) return;
+    float head[3];
+    VR_HeadPos(head);
+    const float* q = in.grip[0].quat;  // x, y, z, w; the left palm faces +X
+    float px = 1 - 2 * (q[1] * q[1] + q[2] * q[2]), py = 2 * (q[0] * q[1] + q[3] * q[2]), pz = 2 * (q[0] * q[2] - q[3] * q[1]);
+    float tx = head[0] - in.grip[0].pos[0], ty = head[1] - in.grip[0].pos[1], tz = head[2] - in.grip[0].pos[2];
+    float tl = sqrtf(tx * tx + ty * ty + tz * tz) + 1e-5f;
+    float facing = (px * tx + py * ty + pz * tz) / tl;
+    // "check your watch": the palm toward your eyes AND turned up (a hand merely held to your left points its palm
+    // inward toward your head too)
+    bool want = g_menuShown ? facing > 0.35f && py > 0.2f : facing > 0.6f && py > 0.35f;
+    if (want && !g_menuShown) {
+        g_menuIds.clear();
+        g_menuNames.clear();
+        ReadPersonalPowers(g_menuIds, g_menuNames);
+        if (g_menuIds.empty()) want = false;
+    }
+    if (!want) {
+        if (g_menuShown) VR_HideText(kMenuSlot);
+        g_menuShown = false;
+        g_menuHovered = false;
+        return;
+    }
+    std::string text = "#Chest: ";
+    std::string chosen = "best you know";
+    for (size_t i = 0; i < g_menuIds.size(); i++)
+        if (g_menuIds[i] == g_chestPower) chosen = g_menuNames[i];
+    text += chosen;
+    for (auto& n : g_menuNames) text += "\n" + n;
+    // along the forearm beyond the wrist HUD, facing out of the palm: grip-local position (out of the palm 4 cm,
+    // 30 cm toward the elbow) and the rotation whose axes are (-Y, -Z, +X) of the grip
+    static const float pos[3] = {0.04f, 0.0f, 0.30f}, rot[4] = {-0.5f, 0.5f, -0.5f, 0.5f};
+    static std::string shown;
+    if (!g_menuShown || text != shown) {
+        VR_ShowText(kMenuSlot, KVR_ANCHOR_LWRIST, pos, rot, 0.2f, text.c_str(), -1);
+        VR_SetTextPickable(kMenuSlot, true);
+        shown = text;
+    }
+    g_menuShown = true;
+    int hover = shm->text[kMenuSlot].hover;
+    g_menuHovered = hover > 0;
+    bool trig = in.trigR > 0.6f;
+    if (trig && !g_menuTrigWas && hover > 0 && hover - 1 < (int)g_menuIds.size()) {
+        g_chestPower = g_menuIds[hover - 1];
+        VR_Haptic(1, 0.5f, 0.03f, 220);
+        Log("force: chest power set to %s (%d)", g_menuNames[hover - 1].c_str(), g_chestPower);
+    }
+    g_menuTrigWas = trig;
+}
+
+bool Force_MenuHovered() { return g_menuHovered; }
+
 bool Force_SaberThrown() { return g_thrown; }
 bool Force_GrenadeArmed() { return g_armed; }
 
@@ -255,6 +352,7 @@ void Force_OnParry() {
 BYTE Force_Update(const KvrInput& in, bool fighting) {
     double t = Now();
     BYTE key = 0;
+    MenuUpdate(in);
     // ---- the queued cast: wait for the menu to show the target's powers, select, press its column key
     if (g_pending.active) {
         BYTE* blk = ActionBlock();
@@ -413,9 +511,11 @@ BYTE Force_Update(const KvrInput& in, bool fighting) {
             if (pushed) FamilyCast(kSpeed, tier, 0, "Speed");
             else if (dy > 0.15f) FamilyCast(kArmour, tier, 0, "Armour");
             else {
-                // the best buff you know: Heal / Cure / Regeneration, else Aura / Shield / Armour, Speed, Mind
-                int list[8] = {28, 10, 39, 18, 24, 17, 37, 22};
-                CastSelf(list, 8, "Heal");
+                // the power chosen on the wrist, else the best buff you know: Heal / Cure / Regeneration, Aura / Shield
+                // / Armour, Speed, Mind
+                int list[9] = {g_chestPower, 28, 10, 39, 18, 24, 17, 37, 22};
+                if (g_chestPower >= 0) CastSelf(list, 9, "your chosen power");
+                else CastSelf(list + 1, 8, "Heal");
             }
             return key;
         }

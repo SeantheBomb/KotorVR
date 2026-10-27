@@ -112,6 +112,8 @@ void Close() {
 
 }  // namespace
 
+std::string ActionRing_Name(const char* icon) { return NameFor(icon); }
+
 void ActionRing_Init(const char* gameDir) {
     char path[MAX_PATH];
     sprintf_s(path, "%s\\kvr\\actions.txt", gameDir);

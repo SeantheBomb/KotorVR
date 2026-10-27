@@ -13,3 +13,5 @@ void Force_OnParry();
 bool Force_SaberThrown();
 // A grenade is in your left hand (armed at the hip, not yet thrown).
 bool Force_GrenadeArmed();
+// The right laser is on the wrist power menu: its trigger picks there (no shot).
+bool Force_MenuHovered();
