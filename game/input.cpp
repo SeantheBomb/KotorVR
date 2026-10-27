@@ -21,6 +21,7 @@
 #include "enginecam.h"
 #include "combat.h"
 #include "cues.h"
+#include "anim.h"
 #include "tutorial.h"
 #include "dialogue.h"
 #include "hud.h"
@@ -183,6 +184,7 @@ void Input_Update(HWND wnd) {
         Cues_Update();
         Tutorial_Update();
         Hud_Update();
+        Anim_Update();
         double now = Gestures_Now();
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key

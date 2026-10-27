@@ -11,6 +11,13 @@
 // models on its nodes, so they hold still with it.
 //
 // kvr.ini [Feel] HitPause=1 (default), HitPauseMs=60.
+//
+// The controlled character's own combat animation events are dropped: the hidden body still plays KotOR's attack
+// animations on the round's schedule, and their swing whooshes, clash / parry sounds and saber blur fired out of step
+// with what your hands do. Events reach a model through its virtual FireEvent (vtable +0x16C, thiscall (name, 0),
+// called from 0x4826B0 inside Gob::Animate); the creature registers SwingShort / SwingLong / SwingTwirl / Clash /
+// HitParry / blur_start / blur_end (0x61AB40). That slot is patched on the player body's model class and filters only
+// that one model; Contact (the hit landing), footsteps and doneattack (game logic) still run.
 #include "anim.h"
 
 #include <windows.h>
@@ -39,6 +46,45 @@ struct Pause {
     DWORD id;
 };
 Pause g_pause[4];
+
+typedef void(__fastcall* FireEventFn)(BYTE* gob, void* edx, const char* name, int arg);  // thiscall, ret 8
+FireEventFn g_fireOrig;
+DWORD* g_firePatchedVtbl;
+BYTE* volatile g_playerGob;
+
+bool Suppressed(const char* n) {
+    static const char* kDrop[] = {"SwingShort", "SwingLong", "SwingTwirl", "Clash", "HitParry", "blur_start", "blur_end"};
+    for (const char* d : kDrop)
+        if (_stricmp(n, d) == 0) return true;
+    return false;
+}
+
+void __fastcall FireEventHook(BYTE* gob, void* edx, const char* name, int arg) {
+    if (gob == g_playerGob && name) {
+        bool drop = false;
+        __try {
+            drop = Suppressed(name);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        if (drop) {
+            static int logged;
+            if (logged++ < 10) Log("anim: dropped the hidden body's '%s' event", name);
+            return;
+        }
+    }
+    g_fireOrig(gob, edx, name, arg);
+}
+
+BYTE* PlayerBodyGob() {
+    typedef void*(__fastcall * GetPlayerCreatureFn)(void* clientApp, void*);
+    typedef void*(__fastcall * GetModelFn)(void* creature, void*, int part, int create);
+    __try {
+        void* app = *(void**)0x7A39FC;
+        void* client = app ? *(void**)((char*)app + 4) : nullptr;
+        void* creature = client ? ((GetPlayerCreatureFn)0x5ED540)(client, nullptr) : nullptr;
+        return creature ? (BYTE*)((GetModelFn)0x6179C0)(creature, nullptr, 0xFF, 0) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
 
 double Now() {
     static LARGE_INTEGER f;
@@ -87,6 +133,27 @@ bool Anim_Install() {
         return false;
     }
     return Combat_Detour(kAnimateVA, kAnimateOrig, 8, (void*)AnimateStub, &g_animateTramp, "Gob::Animate");
+}
+
+void Anim_Update() {
+    if (!Features().modelCull) return;
+    BYTE* gob = PlayerBodyGob();
+    g_playerGob = gob;
+    if (!gob) return;
+    DWORD* vt = nullptr;
+    __try {
+        vt = *(DWORD**)gob;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    if (!vt || vt == g_firePatchedVtbl || (ULONG_PTR)vt < 0x700000 || (ULONG_PTR)vt > 0x7A0000) return;
+    if (g_firePatchedVtbl) return;  // one class patched; a different body class keeps its sounds (logged once)
+    DWORD* slot = vt + 0x16C / 4;
+    g_fireOrig = (FireEventFn)*slot;
+    DWORD old;
+    VirtualProtect(slot, 4, PAGE_READWRITE, &old);
+    *slot = (DWORD)(ULONG_PTR)FireEventHook;
+    VirtualProtect(slot, 4, old, &old);
+    g_firePatchedVtbl = vt;
+    Log("anim: the hidden body's combat events filtered (model vtable %p, FireEvent %p)", vt, g_fireOrig);
 }
 
 void Anim_HitPause(unsigned long targetId, float seconds) {

@@ -688,11 +688,33 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                 }
             }
         }
+        // the chevron: over the head when the attacker is a few metres off, at its chest when it is in your face (over
+        // the head was above your view - 2026-10-27 playtest)
+        float adx = havePlayer ? ap[0] - pp[0] : 9, ady = havePlayer ? ap[1] - pp[1] : 9;
+        bool close = adx * adx + ady * ady < 3.0f * 3.0f;
         wp[0] = ap[0];
         wp[1] = ap[1];
-        wp[2] = ap[2] + 2.1f;  // above the head (creature origin is at its feet)
+        wp[2] = ap[2] + (close ? 1.3f : 2.1f);  // creature origin is at its feet
         ToEye(worldView, wp, e);
-        if (e[2] > -0.3f) continue;  // behind / at the eye
+        // out of view (behind, or > 40 deg to the side / 35 deg up or down): an arrow at the edge of your view points
+        // the way to turn
+        bool offView = e[2] > -0.3f || fabsf(e[0]) > -e[2] * 0.84f || fabsf(e[1]) > -e[2] * 0.70f;
+        if (offView) {
+            float dx = e[0], dy = e[1];
+            if (e[2] > -0.3f && fabsf(dx) < 0.2f) dx = dx < 0 ? -1.0f : 1.0f;  // right behind you: point to a side
+            float dl = sqrtf(dx * dx + dy * dy) + 1e-5f;
+            dx /= dl;
+            dy /= dl;
+            float c[3] = {dx * 0.30f, dy * 0.20f - 0.03f, -0.8f}, sz = parry ? 0.05f : 0.035f;
+            float px = -dy, py = dx;  // perpendicular
+            p_glColor4f(rgb[0], rgb[1], rgb[2], 0.9f * fade);
+            p_glBegin(GL_TRIANGLES);
+            p_glVertex3f(c[0] + dx * sz * 1.4f, c[1] + dy * sz * 1.4f, c[2]);
+            p_glVertex3f(c[0] + px * sz, c[1] + py * sz, c[2]);
+            p_glVertex3f(c[0] - px * sz, c[1] - py * sz, c[2]);
+            p_glEnd();
+            continue;
+        }
         float s = parry ? 0.22f : 0.15f;
         if (left > 0) {  // timing ring: closes from 3.5x onto the chevron at the impact
             float rr = s * (1.0f + 2.5f * frac);
