@@ -35,6 +35,7 @@
 #include "cues.h"
 #include "features.h"
 #include "melee.h"
+#include "force.h"
 #include "gestures.h"
 #include "weapons.h"
 
@@ -493,6 +494,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
             Anim_HitPause(attacker, 0.2f);
             Anim_Flinch(attacker, zone);
             g_guard = g_guard + 15 > 100 ? 100 : g_guard + 15;
+            Force_OnParry();
             Cues_Fire(CUE_PERFECT_BLOCK);
             Log("combat: parried %08lX (blade %.1f m/s), %d damage stopped", attacker, speed, dealt);
         } else {

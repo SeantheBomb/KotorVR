@@ -24,6 +24,7 @@
 #include "anim.h"
 #include "hover.h"
 #include "melee.h"
+#include "force.h"
 #include "tutorial.h"
 #include "dialogue.h"
 #include "hud.h"
@@ -294,7 +295,12 @@ void Input_Update(HWND wnd) {
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         trigWas = trigNow;
-        if (Gestures_TakeForcePush() && fighting) {  // target slot 2: Force powers - on the enemy your palm points at
+        if (Combat_ContactMode()) {  // v2: gather with the left grip, release to cast (force.cpp)
+            if (BYTE k = Force_Update(in, fighting)) {
+                g_gestureKey = k;
+                g_gestureKeyAt = now;
+            }
+        } else if (Gestures_TakeForcePush() && fighting) {  // target slot 2: Force powers - on the enemy your palm points at
             DWORD aimed = Melee_PalmTarget();
             if (aimed) {
                 Weapon_SetTarget(aimed | 0x80000000);
@@ -304,7 +310,7 @@ void Input_Update(HWND wnd) {
             g_gestureKeyAt = now;
             Cues_Fire(CUE_FORCE);
         }
-        if (Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // personal power slot
+        if (!Combat_ContactMode() && Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // personal power slot
         if (g_gestureKeyAt >= 0) {
             if (now - g_gestureKeyAt < 0.1) keys[g_gestureKey] = 0x80;
             else g_gestureKeyAt = -1;

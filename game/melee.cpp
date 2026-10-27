@@ -142,6 +142,11 @@ void Melee_SetBlade(int hand, const float base[3], const float tip[3]) {
     b.valid = true;
 }
 
+float Melee_BladeSpeed(int hand) {
+    if (hand < 0 || hand > 1 || !g_blade[hand].valid || Now() - g_blade[hand].t > 0.2) return 0;
+    return g_blade[hand].speed;
+}
+
 void Melee_ClearBlade(int hand) {
     if (hand >= 0 && hand <= 1) g_blade[hand].valid = false;
 }
@@ -320,9 +325,22 @@ void Melee_SetPalm(const float origin[3], const float dir[3]) {
 }
 
 DWORD Melee_PalmTarget() {
+    {  // diagnostics (rate-limited): what the palm aim sees
+        static double last;
+        if (Now() - last > 1.0) {
+            last = Now();
+            Log("melee: palm age %.2f s, origin (%.1f %.1f %.1f) dir (%.2f %.2f %.2f)", Now() - g_palmAt, g_palmO[0], g_palmO[1],
+                g_palmO[2], g_palmD[0], g_palmD[1], g_palmD[2]);
+            for (auto& kv : g_fighters) {
+                float p[3];
+                if (Melee_IsEnemy(kv.first) && CreaturePos(kv.first, p))
+                    Log("melee:   enemy %08lX at (%.1f %.1f %.1f)", kv.first, p[0], p[1], p[2]);
+            }
+        }
+    }
     if (Now() - g_palmAt > 0.3) return 0;
     DWORD best = 0;
-    float bestCos = cosf(25.0f * 3.14159265f / 180.0f);
+    float bestCos = cosf(35.0f * 3.14159265f / 180.0f);
     for (auto& kv : g_fighters) {
         if (!Melee_IsEnemy(kv.first)) continue;
         float p[3];
@@ -335,6 +353,23 @@ DWORD Melee_PalmTarget() {
             bestCos = c;
             best = kv.first;
         }
+    }
+    if (best) return best;
+    // forgiving fallbacks: the enemy the right hand points at, else the nearest enemy in front of the palm (horizontal
+    // 60 deg, 8 m)
+    DWORD hover;
+    if (Weapon_HoverClientId(&hover) && Melee_IsEnemy(hover & 0x7FFFFFFF)) return hover & 0x7FFFFFFF;
+    float bestD = 8.0f;
+    float hl = sqrtf(g_palmD[0] * g_palmD[0] + g_palmD[1] * g_palmD[1]) + 1e-5f;
+    for (auto& kv : g_fighters) {
+        if (!Melee_IsEnemy(kv.first)) continue;
+        float p[3];
+        if (!CreaturePos(kv.first, p)) continue;
+        float vx = p[0] - g_palmO[0], vy = p[1] - g_palmO[1], l = sqrtf(vx * vx + vy * vy);
+        if (l < 0.3f || l > bestD) continue;
+        if ((vx * g_palmD[0] + vy * g_palmD[1]) / (l * hl) < 0.5f) continue;
+        bestD = l;
+        best = kv.first;
     }
     return best;
 }

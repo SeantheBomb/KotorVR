@@ -27,6 +27,7 @@
 #include "cues.h"
 #include "dialogue.h"
 #include "melee.h"
+#include "force.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -1090,6 +1091,7 @@ void Weapons_Draw(const float invEye[16]) {
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
         if (c == WC_NONE || !(in.gripValid & (1u << h))) continue;
+        if (h == 1 && Force_SaberThrown()) continue;  // the saber is in the air (Saber Throw) until caught
         if (Weapon_Profile(c).twoHanded && kProfiles[c].melee && h == 1 && TwoHandMatrix(in, hand)) {
             // held between both hands
         } else if (!kProfiles[c].melee) {
