@@ -23,6 +23,7 @@
 #include "cues.h"
 #include "tutorial.h"
 #include "dialogue.h"
+#include "hud.h"
 #include "actionring.h"
 
 #pragma comment(lib, "dxguid.lib")
@@ -181,6 +182,7 @@ void Input_Update(HWND wnd) {
         Combat_Update();
         Cues_Update();
         Tutorial_Update();
+        Hud_Update();
         double now = Gestures_Now();
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key
@@ -290,7 +292,9 @@ void Input_Update(HWND wnd) {
         if (!lDown) lOwner = 0;
         else if (!lOwner) lOwner = in.pointerMode == KVR_POINTER_HUD_LEFT ? 1 : 2;
         mouse[0] = ((rOwner == 2 && in.pointerMode == KVR_POINTER_PANEL) ||
-                    (lOwner == 1 && in.pointerMode == KVR_POINTER_HUD_LEFT)) && !Dialogue_Active();
+                    (lOwner == 1 && in.pointerMode == KVR_POINTER_HUD_LEFT) ||
+                    (in.pointerMode == KVR_POINTER_PANEL && in.poke)) &&  // a fingertip poke on the wrist panel
+                   !Dialogue_Active();
         // World grip: no mouse click at all (KotOR draws the target's action menu right at the target, so a click there
         // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
         // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes

@@ -127,13 +127,13 @@ static SharedTex g_shared[3] = {{KVR_TEX_NAME_EYE0}, {KVR_TEX_NAME_EYE1}, {KVR_T
 static uint32_t g_sharedW, g_sharedH, g_sharedGen;
 
 static const char* kShader = R"(
-cbuffer P : register(b0) { float2 uvScale; float decodeSrgb; float guiKey; };
+cbuffer P : register(b0) { float2 uvScale; float decodeSrgb; float guiKey; float2 uvOffset; float2 pad; };
 Texture2D t : register(t0);
 SamplerState s : register(s0);
 void vs(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEXCOORD0) {
     float2 c = float2((id << 1) & 2, id & 2);
     pos = float4(c * float2(2, -2) + float2(-1, 1), 0, 1);
-    uv = float2(c.x, 1 - c.y) * uvScale;   // GL images are bottom-up
+    uv = float2(c.x, 1 - c.y) * uvScale + uvOffset;   // GL images are bottom-up
 }
 float4 ps(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float3 c = t.Sample(s, uv).rgb;
@@ -182,7 +182,7 @@ static bool InitD3D(LUID luid) {
     sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     g_dev->CreateSamplerState(&sd, &g_samp);
-    D3D11_BUFFER_DESC bd{16, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE};
+    D3D11_BUFFER_DESC bd{32, D3D11_USAGE_DYNAMIC, D3D11_BIND_CONSTANT_BUFFER, D3D11_CPU_ACCESS_WRITE};
     g_dev->CreateBuffer(&bd, nullptr, &g_cb);
     return true;
 }
@@ -437,6 +437,7 @@ static XrPath g_handPath[2];
 static XrSpace g_aimSpace[2], g_gripSpace[2];
 static Swapchain g_beamSc, g_dotSc;
 static Swapchain g_flashSc;  // the rim flash (KvrFlash)
+static Swapchain g_wristSc;  // the wrist panel (docs/DIEGETIC_HUD.md)
 static uint32_t g_prevButtons;
 
 static XrPath MakePath(const char* s) {
@@ -522,7 +523,8 @@ static bool InitControls() {
     ai.actionSets = &g_actSet;
     CHECK_XR(xrAttachSessionActionSets(g_session, &ai));
 
-    if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16) || !CreateSwapchain(g_flashSc, 128, 128))
+    if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16) || !CreateSwapchain(g_flashSc, 128, 128) ||
+        !CreateSwapchain(g_wristSc, 1024, 512))
         return false;
     if (!InitText()) printf("text panels unavailable (DirectWrite / Direct2D init failed)\n");
     printf("controls ready\n");
@@ -1081,16 +1083,20 @@ template <class T> static void SafeRelease(T*& p) {
     p = nullptr;
 }
 
-// Draw the valid region of a pulled texture into a render target viewport.
-static void DrawTex(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, SharedTex& src, uint32_t validW, uint32_t validH,
-                    bool guiKey, bool decodeSrgb) {
+// Draw a sub-rectangle of a pulled texture (GL texture coordinates: scale and offset of the 0..1 square, bottom-up)
+// into a render target viewport.
+static void DrawTexRect(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, SharedTex& src, const float scale[2],
+                        const float offset[2], bool guiKey, bool decodeSrgb) {
     D3D11_MAPPED_SUBRESOURCE m;
     if (SUCCEEDED(g_ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
         float* p = (float*)m.pData;
-        p[0] = (float)validW / g_sharedW;
-        p[1] = (float)validH / g_sharedH;
+        p[0] = scale[0];
+        p[1] = scale[1];
         p[2] = decodeSrgb ? 1.0f : 0.0f;
         p[3] = guiKey ? 1.0f : 0.0f;
+        p[4] = offset[0];
+        p[5] = offset[1];
+        p[6] = p[7] = 0;
         g_ctx->Unmap(g_cb, 0);
     }
     g_ctx->OMSetRenderTargets(1, &rtv, nullptr);
@@ -1107,6 +1113,13 @@ static void DrawTex(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, Share
     ID3D11ShaderResourceView* nullSrv = nullptr;
     g_ctx->PSSetShaderResources(0, 1, &nullSrv);
     g_ctx->Flush();
+}
+
+// Draw the valid region of a pulled texture into a render target viewport.
+static void DrawTex(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, SharedTex& src, uint32_t validW, uint32_t validH,
+                    bool guiKey, bool decodeSrgb) {
+    const float scale[2] = {(float)validW / g_sharedW, (float)validH / g_sharedH}, offset[2] = {0, 0};
+    DrawTexRect(rtv, vp, src, scale, offset, guiKey, decodeSrgb);
 }
 
 // Draw a pulled texture into the acquired swapchain image.
@@ -1601,6 +1614,7 @@ static void AddFlashLayer(std::vector<XrCompositionLayerBaseHeader*>& layers) {
         p[0] = p[1] = 1;
         p[2] = g_scSrgb ? 1.0f : 0.0f;
         p[3] = 2;  // alpha from the texture
+        p[4] = p[5] = p[6] = p[7] = 0;
         g_ctx->Unmap(g_cb, 0);
     }
     D3D11_VIEWPORT vp{0, 0, (float)N, (float)N, 0, 1};
@@ -1626,6 +1640,227 @@ static void AddFlashLayer(std::vector<XrCompositionLayerBaseHeader*>& layers) {
     q.subImage.imageRect = {{0, 0}, {N, N}};
     q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
     layers.push_back((XrCompositionLayerBaseHeader*)&q);
+}
+
+// ---------------------------------------------------------------- wrist panel (docs/DIEGETIC_HUD.md)
+// The flat HUD's pieces (menu row, minimap, party, quick slots, toggles - rectangles from the game, KvrHudLayout)
+// cropped out of the GUI frame onto a panel along the left forearm. It shows while the left palm faces the eyes; the
+// right index fingertip hovers and pokes it, which the game receives as the cursor on (and a click of) the real,
+// hidden HUD control. No trigger involved.
+static const int kWristW = 1024, kWristH = 512;
+struct WristZone {
+    float dst[4];  // wrist texture px: x, y, w, h (where the crop is drawn)
+    int src[4];    // panel px, top-left origin: x, y, w, h (the HUD piece)
+};
+static WristZone g_wristZones[KVR_HUD_REGIONS];
+static int g_wristZoneCount;
+static ID3D11BlendState* g_blendKey;  // GUI crops keyed over the wrist's dark plate
+static ID3D11Device1* g_blendKeyDev;
+struct WristState {
+    bool shown = false;
+    double since = 0;      // when the palm started / stopped facing the eyes
+    XrPosef pose{};        // LOCAL
+    float w = 0.26f, h = 0.13f;
+    bool hover = false;
+    float u = 0, v = 0;    // panel texture coordinates (0..1, top-left) under the fingertip
+    bool poke = false;
+    XrVector3f tip{};      // LOCAL, for the cursor dot
+};
+static WristState g_wrist;
+
+static float IniFloat(const char* section, const char* key, float def) {
+    char dir[260], ini[MAX_PATH], val[32];
+    memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
+    dir[sizeof dir - 1] = 0;
+    if (!dir[0]) return def;
+    sprintf_s(ini, "%s\\kvr\\kvr.ini", dir);
+    GetPrivateProfileStringA(section, key, "", val, sizeof val, ini);
+    return val[0] ? (float)atof(val) : def;
+}
+
+// Where each HUD piece goes on the wrist texture: menu row on top, minimap + party in the middle, quick slots and the
+// toggles at the bottom; each crop letterboxed into its zone.
+static void LayoutWrist() {
+    static const float zones[KVR_HUD_REGIONS][4] = {
+        {12, 8, 1000, 84},     // menu row
+        {12, 104, 300, 300},   // minimap
+        {324, 104, 688, 300},  // party
+        {12, 416, 640, 88},    // quick slots
+        {664, 416, 348, 88},   // pause / solo / stealth
+    };
+    g_wristZoneCount = 0;
+    for (int i = 0; i < KVR_HUD_REGIONS; i++) {
+        const int32_t* r = g_shm->hud.rect[i];
+        if (r[2] <= 0 || r[3] <= 0) continue;
+        WristZone& z = g_wristZones[g_wristZoneCount++];
+        memcpy(z.src, r, sizeof z.src);
+        float zw = zones[i][2], zh = zones[i][3], a = (float)r[2] / r[3];
+        float w = zw, h = zw / a;
+        if (h > zh) { h = zh; w = zh * a; }
+        z.dst[0] = zones[i][0] + (zw - w) / 2;
+        z.dst[1] = zones[i][1] + (zh - h) / 2;
+        z.dst[2] = w;
+        z.dst[3] = h;
+    }
+}
+
+static void DrawWrist() {
+    if (!g_wristSc.handle || !g_shared[2].have || !g_sharedW) return;
+    if (g_blendKeyDev != g_dev) {
+        SafeRelease(g_blendKey);
+        D3D11_BLEND_DESC bd{};
+        bd.RenderTarget[0].BlendEnable = TRUE;
+        bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+        bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+        bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+        bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+        bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_MAX;
+        bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        g_dev->CreateBlendState(&bd, &g_blendKey);
+        g_blendKeyDev = g_dev;
+    }
+    uint32_t idx = AcquireImage(g_wristSc);
+    const float plate[4] = {0.01f, 0.03f, 0.07f, 0.88f};
+    g_ctx->ClearRenderTargetView(g_wristSc.rtvs[idx], plate);
+    const float f[4] = {0, 0, 0, 0};
+    g_ctx->OMSetBlendState(g_blendKey, f, 0xFFFFFFFF);
+    float H = (float)g_sharedH;
+    for (int i = 0; i < g_wristZoneCount; i++) {
+        const WristZone& z = g_wristZones[i];
+        D3D11_VIEWPORT vp{z.dst[0], z.dst[1], z.dst[2], z.dst[3], 0, 1};
+        // the crop in GL (bottom-up) texture coordinates
+        float scale[2] = {z.src[2] / (float)g_sharedW, z.src[3] / H};
+        float offset[2] = {z.src[0] / (float)g_sharedW, (H - z.src[1] - z.src[3]) / H};
+        DrawTexRect(g_wristSc.rtvs[idx], vp, g_shared[2], scale, offset, true, g_scSrgb);
+    }
+    g_ctx->OMSetBlendState(nullptr, f, 0xFFFFFFFF);
+    ReleaseImage(g_wristSc);
+}
+
+// The right index fingertip (LOCAL): the tracked hand's tip joint, else a point just past the controller's tip.
+static bool FingerTip(const PointerResult& pr, XrVector3f* out) {
+    const KvrHands& hs = g_shm->hands;
+    if (hs.valid & 2) {
+        const KvrPose& j = hs.joint[1][10];  // XR_HAND_JOINT_INDEX_TIP_EXT
+        XrPosef p = PoseMul(g_origin, XrPosef{{j.quat[0], j.quat[1], j.quat[2], j.quat[3]}, {j.pos[0], j.pos[1], j.pos[2]}});
+        *out = p.position;
+        return true;
+    }
+    if (!pr.aimValid) return false;
+    Quat q{pr.aimLocal.orientation.x, pr.aimLocal.orientation.y, pr.aimLocal.orientation.z, pr.aimLocal.orientation.w};
+    Vec3 tip = Add(V(pr.aimLocal.position), Mul(qrot(q, {0, 0, -1}), 0.02f));
+    *out = {tip.x, tip.y, tip.z};
+    return true;
+}
+
+// Once per frame after the controls are synced: show / hide, place, and hit-test the fingertip. Returns the layer.
+static XrCompositionLayerQuad* UpdateWrist(const XrPosef& head, const PointerResult& pr, bool world) {
+    static XrCompositionLayerQuad q{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    g_wrist.hover = false;
+    const KvrInput& in = g_shm->input;
+    static uint32_t layoutSerial = 0xFFFFFFFF;
+    if (g_shm->hud.serial != layoutSerial) {
+        layoutSerial = g_shm->hud.serial;
+        LayoutWrist();
+    }
+    bool can = world && (in.gripValid & 1) && g_wristZoneCount > 0;
+    XrPosef grip{};
+    float facing = -1;
+    if (can) {
+        XrPosef rel{{in.grip[0].quat[0], in.grip[0].quat[1], in.grip[0].quat[2], in.grip[0].quat[3]},
+                    {in.grip[0].pos[0], in.grip[0].pos[1], in.grip[0].pos[2]}};
+        grip = PoseMul(g_origin, rel);
+        Quat gq{grip.orientation.x, grip.orientation.y, grip.orientation.z, grip.orientation.w};
+        Vec3 palm = qrot(gq, {1, 0, 0});  // left hand: +X points out of the palm
+        Vec3 toHead = Norm(Sub(V(head.position), V(grip.position)));
+        facing = Dot(palm, toHead);
+    }
+    // the "check your watch" gesture, with hysteresis
+    double now = GetTickCount64() / 1000.0;
+    bool want = g_wrist.shown ? facing > 0.35f : facing > 0.6f;
+    if (want != g_wrist.shown) {
+        if (g_wrist.since == 0) g_wrist.since = now;
+        if (now - g_wrist.since > (want ? 0.15 : 0.3)) {
+            g_wrist.shown = want;
+            g_wrist.since = 0;
+        }
+    } else {
+        g_wrist.since = 0;
+    }
+    if (!g_wrist.shown || !can) {
+        if (!can) g_wrist.shown = false;
+        g_wrist.poke = false;
+        return nullptr;
+    }
+    // along the forearm just above the wrist, facing out of the palm, its top toward the fingers
+    Quat gq{grip.orientation.x, grip.orientation.y, grip.orientation.z, grip.orientation.w};
+    Vec3 X = qrot(gq, {1, 0, 0}), Z = qrot(gq, {0, 0, 1});
+    Vec3 c = Add(Add(V(grip.position), Mul(Z, 0.10f)), Mul(X, 0.035f));
+    Vec3 qz = X, qy = Mul(Z, -1.0f), qx = Cross(qy, qz);
+    g_wrist.pose.orientation = QuatFromBasis(qx, qy, qz);
+    g_wrist.pose.position = {c.x, c.y, c.z};
+    // the fingertip
+    XrVector3f tip;
+    if (FingerTip(pr, &tip)) {
+        Vec3 d = Sub(V(tip), c);
+        float px = Dot(d, qx), py = Dot(d, qy), pz = Dot(d, qz);
+        float u = px / g_wrist.w + 0.5f, v = 0.5f - py / g_wrist.h;
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && pz > -0.03f && pz < 0.025f) {
+            float wx = u * kWristW, wy = v * kWristH;
+            for (int i = 0; i < g_wristZoneCount; i++) {
+                const WristZone& z = g_wristZones[i];
+                if (wx < z.dst[0] || wy < z.dst[1] || wx > z.dst[0] + z.dst[2] || wy > z.dst[1] + z.dst[3]) continue;
+                float sx = z.src[0] + (wx - z.dst[0]) / z.dst[2] * z.src[2];
+                float sy = z.src[1] + (wy - z.dst[1]) / z.dst[3] * z.src[3];
+                g_wrist.hover = true;
+                g_wrist.u = sx / g_sharedW;
+                g_wrist.v = sy / g_sharedH;
+                break;
+            }
+            g_wrist.tip = tip;
+            // push through the surface = press; back out past 1.2 cm = release
+            bool was = g_wrist.poke;
+            g_wrist.poke = g_wrist.hover && (was ? pz < 0.012f : pz < 0.004f);
+            if (g_wrist.poke && !was) {  // a tick in the poking hand
+                KvrHaptic& hp = g_shm->haptic[1];
+                hp.amplitude = 0.5f;
+                hp.duration = 0.025f;
+                hp.frequency = 220;
+                MemoryBarrier();
+                hp.serial = hp.serial + 1;
+            }
+        } else {
+            g_wrist.poke = false;
+        }
+    }
+    DrawWrist();
+    q.space = g_local;
+    q.pose = g_wrist.pose;
+    q.size = {g_wrist.w, g_wrist.h};
+    q.subImage.swapchain = g_wristSc.handle;
+    q.subImage.imageRect = {{0, 0}, {kWristW, kWristH}};
+    q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+    // the wrist is what the fingertip is on: the game's cursor goes there, a poke is its click
+    if (g_wrist.hover) {
+        KvrInput& w = g_shm->input;
+        w.seq++;
+        MemoryBarrier();
+        w.pointerMode = KVR_POINTER_PANEL;
+        w.panelU = g_wrist.u;
+        w.panelV = g_wrist.v;
+        w.poke = g_wrist.poke ? 1 : 0;
+        MemoryBarrier();
+        w.seq++;
+    } else if (g_shm->input.poke) {
+        KvrInput& w = g_shm->input;
+        w.seq++;
+        MemoryBarrier();
+        w.poke = 0;
+        MemoryBarrier();
+        w.seq++;
+    }
+    return &q;
 }
 
 static void Frame() {
@@ -1693,7 +1928,16 @@ static void Frame() {
         bool pickableUp = false;
         for (int i = 0; i < KVR_TEXT_PANELS; i++)
             pickableUp |= g_shm->text[i].pickable && g_shm->text[i].anchor != KVR_ANCHOR_HIDDEN;
-        bool panelVisible = movie || !world || (hud && !g_shm->showPanel && !pickableUp);
+        // The flat HUD stays hidden in the world (its pieces are on the wrist); [Features] FlatHud=1 in kvr.ini shows
+        // it as before. Y flips whichever is the default.
+        static DWORD flatCheck;
+        static bool flatDefault;
+        if (GetTickCount() - flatCheck > 2000) {
+            flatCheck = GetTickCount();
+            flatDefault = IniFloat("Features", "FlatHud", 0) != 0;
+        }
+        bool flatHud = flatDefault ? !g_shm->showPanel : g_shm->showPanel != 0;
+        bool panelVisible = movie || !world || (hud && flatHud && !pickableUp);
         static DWORD lastHudLog;
         if (GetTickCount() - lastHudLog > 3000) {
             lastHudLog = GetTickCount();
@@ -1753,6 +1997,9 @@ static void Frame() {
         PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
         g_lastAimValid = pr.aimValid;
         g_lastAim = pr.aimLocal;
+        static XrCompositionLayerQuad* wristLayer;
+        wristLayer = tracked ? UpdateWrist(views[0].pose, pr, world && !flatHud) : nullptr;
+        if (wristLayer) layers.push_back((XrCompositionLayerBaseHeader*)wristLayer);
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
         // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback
         if (tracked && pr.hitPanel) {
@@ -1838,6 +2085,9 @@ static void Teardown() {
     ResetSwapchain(g_beamSc);
     ResetSwapchain(g_dotSc);
     ResetSwapchain(g_flashSc);
+    ResetSwapchain(g_wristSc);
+    SafeRelease(g_blendKey);
+    g_blendKeyDev = nullptr;
     SafeRelease(g_flashSrv);
     SafeRelease(g_flashTex);
     g_flashDev = nullptr;

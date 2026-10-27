@@ -4,12 +4,12 @@
 #include <stdint.h>
 
 // the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v11"
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v12"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 11
+#define KVR_VERSION 12
 
 #pragma pack(push, 8)
 
@@ -74,6 +74,7 @@ struct KvrInput {
     KvrPose grip[2];              // left/right grip poses relative to the recenter origin (-Z through the fist)
     uint32_t gripValid;           // bit 0 left, bit 1 right
     double time;                  // host clock (s) when these poses were sampled, for velocities
+    uint32_t poke;                // 1 while the right fingertip is pushed into a wrist-panel control (a click)
 };
 
 // Game -> host haptic pulse request for one hand. The game fills the fields, then bumps serial; the host plays one
@@ -127,6 +128,14 @@ struct KvrFlash {
     float duration;  // seconds
 };
 
+// Game -> host: screen rectangles (x, y, w, h in panel-texture pixels, top-left origin; w = 0: none) of the flat
+// HUD's pieces, for the wrist panel (docs/DIEGETIC_HUD.md). Bumps serial on change.
+enum { KVR_HUD_MENU, KVR_HUD_MINIMAP, KVR_HUD_PARTY, KVR_HUD_SLOTS, KVR_HUD_TOGGLES, KVR_HUD_REGIONS };
+struct KvrHudLayout {
+    volatile uint32_t serial;
+    int32_t rect[KVR_HUD_REGIONS][4];
+};
+
 struct KvrShared {
     uint32_t magic;
     uint32_t version;
@@ -147,6 +156,7 @@ struct KvrShared {
     KvrTextPanel text[KVR_TEXT_PANELS];  // game -> host
     KvrFlash flash;                      // game -> host
     char gameDir[260];                   // game -> host: the game folder (ANSI), for kvr\icons
+    KvrHudLayout hud;                    // game -> host
 };
 
 #pragma pack(pop)
