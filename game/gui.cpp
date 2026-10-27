@@ -21,13 +21,18 @@ const DWORD kHudFns[] = {0x68D3B0, 0x624900};  // main interface, its persistent
 // Dialog family vtables (constructors 0x6A8B40 cinematic, 0x6A8930 letterbox, 0x6A78C0 top bar, 0x6A85B0 base).
 const DWORD kDialogVtbls[] = {0x755800, 0x755A78, 0x755790, 0x7559E0};
 
-bool IsWorldPanel(void* p) {
-    DWORD vt = *(DWORD*)p, fn = **(DWORD**)p;
-    for (DWORD f : kHudFns)
-        if (fn == f) return true;
+bool IsDialogPanel(void* p) {
+    DWORD vt = *(DWORD*)p;
     for (DWORD v : kDialogVtbls)
         if (vt == v) return true;
     return false;
+}
+
+bool IsWorldPanel(void* p) {
+    DWORD fn = **(DWORD**)p;
+    for (DWORD f : kHudFns)
+        if (fn == f) return true;
+    return IsDialogPanel(p);
 }
 
 bool Read(GuiState* s, DWORD* sig) {
@@ -43,6 +48,7 @@ bool Read(GuiState* s, DWORD* sig) {
         for (int i = 0; i < n; i++) {
             if (!data[i]) continue;
             *sig = *sig * 31 + *(DWORD*)data[i];
+            if (IsDialogPanel(data[i])) s->dialogPanels++;
             if (!IsWorldPanel(data[i])) {
                 s->menuPanels++;
                 s->menuVtbl = *(DWORD*)data[i];

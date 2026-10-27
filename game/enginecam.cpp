@@ -97,9 +97,12 @@ void QuatFromRows(const float m[9], float q[4]) {
     }
 }
 
-// cutscene shots: two hidden probe frames per shot decide first person (you can see what the shot shows) or the
-// game's cut (you can't): first from the shot camera itself, for the point it looks at (its view centre), then from
-// the eye toward that point.
+// Cutscene shots (2026-10-27 rules, after "cut away less" overshot and kept even Carth's communicator call first person):
+//   1. a reverse shot - the shot camera faces back at you (> 110 deg from your facing) or looks straight at you from
+//      close by - never cuts: those are the over-the-shoulder / "camera looking at the player" shots;
+//   2. otherwise the shot's subject (two hidden probe frames: the shot camera's view centre, then the eye toward it):
+//      more than 70 deg off your facing -> the game's shot; ahead of you -> first person if you can see it, the
+//      game's shot if something hides it.
 float g_shotPos[3], g_shotQ[4];
 float g_subject[3];  // the point the current shot looks at
 // 0 none, 1 first person, 2 cut, 3 subject probe this frame, 4 waiting for it, 5 eye probe this frame, 6 waiting
@@ -234,6 +237,23 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             memcpy(g_shotPos, g_origPos, sizeof g_shotPos);
             memcpy(g_shotQ, g_origQ, sizeof g_shotQ);
             g_shotMode = Features().cutsceneFirstPerson ? 1 : 3;
+            if (g_shotMode == 3) {
+                float M0[9];
+                QuatWxyzToRows(g_shotQ, M0);
+                float sf[3] = {-M0[2], -M0[5], -M0[8]};  // the shot's forward (-Z column)
+                float rel = fabsf(WrapPi(atan2f(sf[1], sf[0]) - g_viewYaw));  // yaw = atan2(forward y, forward x)
+                float cp2[3], toMe[3] = {0, 0, 0}, dm = 1e9f, lookAtMe = -1;
+                if (g_haveEyeOffset && CreaturePos(cp2)) {
+                    for (int i = 0; i < 3; i++) toMe[i] = cp2[i] + g_eyeOffset[i] - g_shotPos[i];
+                    dm = sqrtf(toMe[0] * toMe[0] + toMe[1] * toMe[1] + toMe[2] * toMe[2]);
+                    if (dm > 0.01f) lookAtMe = (toMe[0] * sf[0] + toMe[1] * sf[1] + toMe[2] * sf[2]) / dm;
+                }
+                if (rel > 1.92f || (lookAtMe > 0.906f && dm < 8.0f)) {  // > 110 deg / within 25 deg of you
+                    g_shotMode = 1;
+                    Log("cutscene: reverse shot (%.0f deg from your facing%s) -> stay first person", rel * 57.29578f,
+                        lookAtMe > 0.906f && dm < 8.0f ? ", looking at you" : "");
+                }
+            }
         }
         // the character's eye (follows them if the scene walks them somewhere)
         const float* headPos = g_playPos;
@@ -274,13 +294,14 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             QuatLookAlong(f, probeQ);
             basePos = headPos;
             baseQ = probeQ;
-            if (g_shotMode == 5 && dist > 10.0f) {
-                // far away (down a corridor, across a room): stay with your own eyes even if something is in
-                // between - 14 of 16 cuts in the 2026-10-27 playtest were these, and none were wanted. This frame
-                // is already the normal first-person view (no probe).
-                g_shotMode = 1;
-                baseQ = g_playQ;
-                Log("cutscene: shot subject %.1f m away -> far, stay first person", dist);
+            // the subject's bearing against your facing (forward of the view yaw)
+            float off = fabsf(WrapPi(atan2f(f[1], f[0]) - g_viewYaw));
+            if (g_shotMode == 5 && off > 1.22f) {  // > 70 deg to the side / behind: the game's shot (e.g. a comm call)
+                g_shotMode = 2;
+                basePos = g_origPos;
+                baseQ = g_origQ;
+                Log("cutscene: shot subject %.1f m away, %.0f deg off your facing -> the game's shot", dist,
+                    off * 57.29578f);
             } else {
                 eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
                 eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;

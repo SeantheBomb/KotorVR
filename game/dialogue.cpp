@@ -18,8 +18,8 @@
 // working too.
 //
 // Lines without replies (NPC lines, cutscene subtitles) come from the cinematic panel, not the reply panel: the panel
-// shows while either is up, so every line is captioned. A / B skips the current line: a left click, which the dialog
-// panel's input handler (0x6A7230) turns into its skip while a line plays with no replies up. Computer terminals (CSWGuiDialogComputer) are not mirrored: their own screen is
+// shows while any dialog panel is up (GUI manager), so every line is captioned. A / B skips the voiced line (Enter,
+// the dialog panel input handler 0x6A7230 skip while the line plays). Computer terminals (CSWGuiDialogComputer) are not mirrored: their own screen is
 // shown on the flat panel with the laser (gui.cpp).
 #include "dialogue.h"
 
@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "../common/kvr_shared.h"
+#include "gui.h"
 #include "vr.h"
 
 extern void Log(const char* fmt, ...);
@@ -104,13 +105,14 @@ bool IsComputer(void* panel) {  // CSWGuiDialogComputer (constructor 0x6A8EB0) a
 extern "C" void __cdecl Dialogue_MessagePre(void* panel, const void* exo) {
     if (IsComputer(panel)) return;
     std::string m = exo ? ReadExo(exo) : std::string();
+    if (m.find_first_not_of(" \t\r\n") == std::string::npos) m.clear();  // blank lines (the opening's) are no caption
+    Log("dialogue: message (panel %p) t=%lu: %.40s", panel, GetTickCount(), m.c_str());
     EnterCriticalSection(&g_lock);
     g_panel = panel;
     g_message.swap(m);
     g_replies.clear();
     g_dirty = true;
     LeaveCriticalSection(&g_lock);
-    Log("dialogue: message (panel %p) t=%lu", panel, GetTickCount());
 }
 
 extern "C" void __cdecl Dialogue_ResetPre(void* panel) {
@@ -239,6 +241,15 @@ bool Dialogue_Active() {
     return g_showing && shm && shm->text[kSlot].hover >= 0;
 }
 
+// The dialog panel's line state (+0x1DF8): bit 1 = the line is playing, bit 2 = it can't be skipped. -1 unreadable.
+static int LineFlags(void* p) {
+    if (!p) return -1;
+    __try {
+        return *(int*)((BYTE*)p + 0x1DF8);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return -1;
+}
+
 static bool PanelOpen(void* p) {
     if (!p) return false;
     __try {
@@ -268,7 +279,9 @@ BYTE Dialogue_Update(const KvrInput& in) {
     if (!shm) return 0;
     // shown only while the game's panel is up: it opens a moment after the first line arrives, and the closing node's
     // last updates land as it closes
-    bool open = PanelOpen(g_replyPanel) || PanelOpen(g_panel);
+    // while a conversation / cutscene panel is shown (GUI manager list; the reply panel's own open flag is only set
+    // while replies are up, so lines between reply rounds went uncaptioned)
+    bool open = Gui_State().dialogPanels > 0 || PanelOpen(g_replyPanel);
     if (g_showing && !open) {
         Log("dialogue: over");
         VR_HideText(kSlot);
@@ -318,18 +331,25 @@ BYTE Dialogue_Update(const KvrInput& in) {
         }
     }
     g_trigWas = trig;
-    // skip the line being spoken (no replies up yet): A or B -> a short left click (Dialogue_SkipClick)
+    // skip the line being spoken: A or B -> Enter, which the panel's input handler (0x6A7230) turns into its skip
+    // while the line plays (panel flags +0x1DF8: bit 1 set, bit 2 clear). Once the line is over Enter would pick the
+    // highlighted reply instead, so it is only sent while the line plays.
     static bool skipWas;
     bool skip = (in.buttons & (KVR_BTN_A | KVR_BTN_B)) != 0;
-    if (g_showing && skip && !skipWas && g_shownReplies == 0) {
-        g_skipAt = GetTickCount();
-        Log("dialogue: line skipped");
+    if (g_showing && skip && !skipWas && !key) {
+        int flags = LineFlags(g_replyPanel ? g_replyPanel : g_panel);
+        if (flags >= 0 && (flags & 1) && !(flags & 2)) {
+            key = 0x1C;  // DIK_RETURN
+            Log("dialogue: line skipped");
+        } else {
+            Log("dialogue: skip ignored (the line is over, flags %d)", flags);
+        }
     }
     skipWas = skip;
     return key;
 }
 
-bool Dialogue_SkipClick() { return g_skipAt && GetTickCount() - g_skipAt < 80; }
+bool Dialogue_SkipClick() { return false; }
 
 bool Dialogue_Showing() { return g_showing;
 }
