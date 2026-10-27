@@ -48,3 +48,15 @@ wait 6
 shot conv2
 wait 6
 shot conv3
+head yaw=90 pitch=0 over=0.5      # look around during the conversation: culled geometry shows as holes
+wait 1
+shot look90
+head yaw=180 pitch=0 over=0.5
+wait 1
+shot look180
+head yaw=-90 pitch=0 over=0.5
+wait 1
+shot look270
+head yaw=0 pitch=-30 over=0.5
+wait 1
+shot lookdown

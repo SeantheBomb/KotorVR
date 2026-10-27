@@ -138,8 +138,18 @@ void QuatMul(const float a[4], const float b[4], float out[4]) {
 
 }  // namespace
 
+// Cutscene / dialogue cameras keep the game's narrow cinematic FOV (~55 deg), and the engine culls the world against
+// it: in first person (or looking around a cut) whole walls and floors outside that cone popped in and out. While
+// we drive such a camera its FOV is widened to the gameplay 170 deg for culling (the projection is ours anyway) and
+// handed back at the start of the next frame, so the game's own state never sees the change.
+static BYTE* g_fovCam;
+static float g_fovSaved;
+static bool g_fovPatched;
+
 extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     g_applied = false;
+    if (g_fovPatched && cam == g_fovCam && *(float*)(cam + 0x1D0) == kGameplayFov) *(float*)(cam + 0x1D0) = g_fovSaved;
+    g_fovPatched = false;
     float fov = *(float*)(cam + 0x1D0);
     if (fov < 25.0f || !VR_IsActive()) return;  // GUI scenes (portraits, menu model) use ~22.7
     float* pos = (float*)(cam + 0x7C);
@@ -268,6 +278,10 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             basePos = headPos;
             baseQ = g_playQ;
         }
+        g_fovSaved = fov;  // cull with the gameplay cone (see above)
+        *(float*)(cam + 0x1D0) = kGameplayFov;
+        g_fovCam = cam;
+        g_fovPatched = true;
     }
     if (gameplay) g_shotMode = 0;
     VR_SetCinematic(!gameplay);
