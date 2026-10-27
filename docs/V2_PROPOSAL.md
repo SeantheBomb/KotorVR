@@ -20,12 +20,13 @@ Built ([Combat] Mode=contact, the default; Mode=rounds restores v1):
 - Reactions: per-creature hit-pause, torso flinch, NPCs looking at you, death camera.
 - Force: pushes aimed by the left palm (the enemy it points at becomes the target).
 
-Not built yet (each needs more reverse engineering or a larger system):
-- Force charge tiers / two-handed area powers, wrist radial and chest-cast buffs, Saber Throw with catch, Force point
-  refund on parries (the Force point field isn't located).
-- Fire modes (Rapid Shot / Power Blast / Sniper as aim mechanics), off-hand foregrip, thrown grenades.
-- Cover from the engine's line of sight; slow-motion "battle meditation" (no engine timescale - full pause only).
-- Death ragdoll (Jolt) and arm IK.
+- Force by gesture (force.cpp): gather with the left grip, the release picks the family (shove / lift / hold / left
+  trigger), the hold the tier, two hands the area power; chest-cast buffs and a wrist power menu; Saber Throw by
+  letting go mid-swing (catch by squeezing again); parries refund Force. Cast through the game's own action menus.
+- Blasters: spread (hand motion, foregrip, steadiness), Sniper / Rapid / Power Blast fire modes, thrown grenades with a
+  simulated arc, cover from the game's line of sight.
+
+Left out by decision (2026-10-27): death ragdoll, arm IK, slow-motion battle meditation.
 
 ## Goals
 

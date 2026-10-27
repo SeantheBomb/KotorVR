@@ -100,7 +100,19 @@ The equipped item's real model and textures (its variation, so your saber is you
 - Blasters fired at you: a saber across the bolt's path deflects it; swing into it and it goes back at the shooter.
   Without a saber, lean or duck out of the way as it lands.
 - Your blaster: where the barrel points is what you hit (head shots count extra); each trigger pull is one shot.
-- Force push hits the enemy your left palm points at.
+- Force: hold the left grip to gather (the hum rises; longer = a stronger rank), then let go:
+  - shove forward = Push (longer: Whirlwind; both hands shoving: Wave), lift = Choke (Kill, Death Field),
+    hold still = Slow / Stun / Hold, squeeze the left trigger while gathering = Shock / Lightning / Storm;
+  - aimed where your left palm points (forgiving: else what your right hand points at, else the nearest enemy ahead);
+  - with your left hand on your chest: a power on yourself - hold = your chosen power (or the best you know), push
+    out = Speed, lift = Armour. Choose it on the wrist: palm up toward your face, the powers you know are listed along
+    the forearm; laser + trigger picks one.
+- Saber Throw: let go of the right grip in the middle of a fast swing; squeeze again to catch it.
+- Grenades: squeeze the left grip at your hip (a click, an orb in your hand), throw and let go; the enemy nearest
+  where it lands gets it (needs grenades in your inventory).
+- Blasters: shots spread a little - less with your left hand on the barrel or after holding still a second (that
+  also makes it a Sniper Shot); two quick pulls = Rapid Shot; hold the trigger ~1 s and let go = Power Blast.
+- Behind cover (the shooter can't see your head or chest) bolts hit the wall. Parries give back a little Force.
 - `[Combat] Mode=rounds` brings back the v1 rules; `ParryZone` (0.38 m) is how forgiving the block spot is;
   `AttackTokens` (2) is how many enemies may swing at you at once.
 - To judge: does contact feel reliable (hits you expect, none you don't)? Are parries learnable from the telegraph?
