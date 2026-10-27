@@ -1,6 +1,9 @@
 // Drives the engine's own scene camera from the headset (render + culling), see enginecam.cpp.
 #pragma once
 
+// The headset eye in KotOR world coordinates this frame (false before the first applied camera).
+bool EngineCam_EyeWorld(float out[3]);
+
 bool EngineCam_Install();
 // true while the current frame's world camera was replaced at the engine level
 bool EngineCam_Applied();

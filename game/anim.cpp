@@ -26,6 +26,8 @@
 #include <cstring>
 
 #include "combat.h"
+#include "dialogue.h"
+#include "enginecam.h"
 #include "features.h"
 #include "weapons.h"
 
@@ -46,6 +48,7 @@ struct Pause {
     DWORD id;
 };
 Pause g_pause[4];
+bool g_lookAtYou = true;  // [Feel] LookAtYou
 
 typedef void(__fastcall* FireEventFn)(BYTE* gob, void* edx, const char* name, int arg);  // thiscall, ret 8
 FireEventFn g_fireOrig;
@@ -111,6 +114,9 @@ extern "C" void __cdecl Anim_AnimatePre(BYTE* gob, float* dt) {
     }
 }
 
+// After a model's animation is sampled: procedural node overrides (NPCs looking at you).
+extern "C" void __cdecl Anim_AnimatePost(BYTE* gob);
+
 __declspec(naked) static void AnimateStub() {
     __asm {
         push ecx
@@ -120,7 +126,14 @@ __declspec(naked) static void AnimateStub() {
         call Anim_AnimatePre
         add esp, 8
         pop ecx
-        jmp dword ptr [g_animateTramp]
+        push ecx                      // keep the Gob for the post step
+        push dword ptr [esp + 8]      // dt (as possibly scaled by the pre step)
+        call dword ptr [g_animateTramp]  // thiscall, pops dt
+        pop ecx
+        push ecx
+        call Anim_AnimatePost
+        add esp, 4
+        ret 4
     }
 }
 
@@ -128,11 +141,135 @@ bool Anim_Install() {
     const char* ini = Features_IniPath();
     g_enabled = GetPrivateProfileIntA("Feel", "HitPause", 1, ini) != 0;
     g_defaultPause = GetPrivateProfileIntA("Feel", "HitPauseMs", 60, ini) / 1000.0f;
+    g_lookAtYou = GetPrivateProfileIntA("Feel", "LookAtYou", 1, ini) != 0;
     if (!g_enabled) {
         Log("anim: hit-pause off ([Feel] HitPause=0)");
         return false;
     }
     return Combat_Detour(kAnimateVA, kAnimateOrig, 8, (void*)AnimateStub, &g_animateTramp, "Gob::Animate");
+}
+
+// ---------------------------------------------------------------- NPCs look at you
+// The head node of a creature model: "headhook" (the head model hangs on it), found by name in its Part tree.
+typedef const char*(__fastcall* PartNameFn)(void* part, void*);
+typedef void(__fastcall* PartGetWorldFn)(void* part, void*, float* pos, float* quat);
+
+void* FindPart(void* part, const char* name, int depth) {
+    if (!part || depth > 40) return nullptr;
+    const char* n = ((PartNameFn)0x440200)(part, nullptr);
+    if (n && _stricmp(n, name) == 0) return part;
+    void** kids = *(void***)((char*)part + 0x30);
+    int nk = *(int*)((char*)part + 0x34);
+    if (!kids || nk < 0 || nk > 64) return nullptr;
+    for (int i = 0; i < nk; i++)
+        if (void* f = FindPart(kids[i], name, depth + 1)) return f;
+    return nullptr;
+}
+
+// quaternions (w, x, y, z), as KotOR's Part stores them (+0x14)
+void QMul(const float* a, const float* b, float* o) {
+    float r[4] = {a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+                  a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1], a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]};
+    memcpy(o, r, sizeof r);
+}
+void QConj(const float* a, float* o) { o[0] = a[0]; o[1] = -a[1]; o[2] = -a[2]; o[3] = -a[3]; }
+void QRot(const float* q, const float* v, float* o) {  // q v q*
+    float p[4] = {0, v[0], v[1], v[2]}, c[4], t[4];
+    QConj(q, c);
+    QMul(q, p, t);
+    QMul(t, c, t);
+    o[0] = t[1]; o[1] = t[2]; o[2] = t[3];
+}
+
+// NPCs look at you in conversations (2026-10-27 playtest): after a creature model within 6 m is animated, its head
+// node ("headhook", the head model hangs on it; forward = +Y, measured on Trask) is turned toward your eye - at most
+// 55 deg of yaw and 20 deg of pitch, 85% of the way (the eyes do the rest), not when you stand behind them.
+// The node is not keyframed in most animations, so the engine does not reset it each frame: the turn is always
+// computed from the engine's own value (remembered until the engine writes a new one), never stacked on our last one.
+// kvr.ini [Feel] LookAtYou=0 off.
+struct HeadState {
+    void* head;
+    float base[4];     // the engine's local rotation
+    float written[4];  // what we last wrote
+    DWORD seen;
+};
+HeadState g_heads[16];
+
+void LookAt(BYTE* gob, void* head, const float eye[3]) {
+    float* lq = (float*)((char*)head + 0x14);
+    HeadState* hs = nullptr;
+    for (HeadState& h : g_heads)
+        if (h.head == head) hs = &h;
+    if (!hs) {  // the stalest slot
+        hs = &g_heads[0];
+        for (HeadState& h : g_heads)
+            if (h.seen < hs->seen) hs = &h;
+        hs->head = head;
+        memcpy(hs->base, lq, 16);
+        memset(hs->written, 0, 16);
+    } else if (memcmp(lq, hs->written, 16) != 0) {
+        memcpy(hs->base, lq, 16);  // the engine wrote a new value
+    }
+    hs->seen = GetTickCount();
+    float wp[3], wq[4];
+    ((PartGetWorldFn)0x43E4A0)(head, nullptr, wp, wq);
+    // the parent's world rotation P = W * local^-1 (W from the current local), then the head as the engine posed it
+    float lc[4], P[4], Pc[4], W[4];
+    QConj(lq, lc);
+    QMul(wq, lc, P);
+    QConj(P, Pc);
+    QMul(P, hs->base, W);
+    const float fy[3] = {0, 1, 0};
+    float F[3], T[3] = {eye[0] - wp[0], eye[1] - wp[1], eye[2] - wp[2]};
+    QRot(W, fy, F);
+    float fl = sqrtf(F[0] * F[0] + F[1] * F[1]), tl = sqrtf(T[0] * T[0] + T[1] * T[1]);
+    if (fl < 0.2f || tl < 0.05f) {
+        memcpy(lq, hs->base, 16);
+        memcpy(hs->written, lq, 16);
+        return;
+    }
+    float yaw = atan2f(F[0] * T[1] - F[1] * T[0], F[0] * T[0] + F[1] * T[1]);  // signed, F -> T about +Z
+    float out[4];
+    if (fabsf(yaw) > 1.75f) {  // you are behind them (> 100 deg): leave the head alone
+        memcpy(out, hs->base, 16);
+    } else {
+        float turn = yaw * 0.85f;
+        turn = turn > 0.96f ? 0.96f : turn < -0.96f ? -0.96f : turn;  // 55 deg
+        float pitchNow = atan2f(F[2], fl), pitchTo = atan2f(T[2], tl);
+        float pt = (pitchTo - pitchNow) * 0.85f;
+        pt = pt > 0.35f ? 0.35f : pt < -0.35f ? -0.35f : pt;  // 20 deg
+        // pitch about the head's own sideways axis (horizontal, perpendicular to its facing), then yaw about world up
+        float side[3] = {F[1] / fl, -F[0] / fl, 0};
+        float dp[4] = {cosf(pt / 2), side[0] * sinf(pt / 2), side[1] * sinf(pt / 2), 0};  // + about F x up = tilt up
+        float dy[4] = {cosf(turn / 2), 0, 0, sinf(turn / 2)};
+        float d[4], t[4];
+        QMul(dy, dp, d);
+        // local' = P^-1 * D * P * base
+        QMul(d, P, t);
+        QMul(Pc, t, t);
+        QMul(t, hs->base, out);
+        float n = sqrtf(out[0] * out[0] + out[1] * out[1] + out[2] * out[2] + out[3] * out[3]);
+        if (!(n > 0.5f && n < 1.5f)) {
+            memcpy(out, hs->base, 16);
+        } else {
+            for (float& v : out) v /= n;
+        }
+    }
+    memcpy(lq, out, 16);
+    memcpy(hs->written, out, 16);
+}
+
+extern "C" void __cdecl Anim_AnimatePost(BYTE* gob) {
+    if (!g_lookAtYou || !Dialogue_Showing() || gob == g_playerGob) return;
+    float eye[3];
+    if (!EngineCam_EyeWorld(eye)) return;
+    __try {
+        const float* gp = (const float*)(gob + 0x78);
+        float dx = eye[0] - gp[0], dy = eye[1] - gp[1];
+        if (dx * dx + dy * dy > 6.0f * 6.0f) return;
+        void* head = FindPart(*(void**)(gob + 0x6C), "headhook", 0);
+        if (head) LookAt(gob, head, eye);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 void Anim_Update() {

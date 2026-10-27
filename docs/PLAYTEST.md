@@ -103,6 +103,23 @@ The equipped item's real model and textures (its variation, so your saber is you
 - To judge: are the telegraphs readable without being a crutch? Does the knock-off feel like resistance or like a
   glitch? Is the hit-pause noticeable, too long, too short?
 
+## 2026-10-27 fixes to check
+
+- Game screens (looting a footlocker, inventory, stores, computer terminals) come up on the flat panel with the
+  laser, as menus do; the wrist only shows the HUD pieces.
+- Every line in a conversation or cutscene is captioned. A or B skips the line being spoken.
+- Pointing in the world: a pulsing ring at the feet of what your right hand points at. Grip (use / talk / open) and
+  shots act on exactly that. Nothing walks you to a target: out of reach you get a double tick - step closer.
+- Shots no longer hitch (no camera pick); bolts stop at walls and bodies with a spark burst.
+- Cutscenes: shots that look back at you stay first person; a shot of something off to your side (Carth's comm
+  call) cuts to the game's camera.
+- Telegraph chevrons sit at the chest of close attackers; attackers out of view get an arrow at the edge of your view.
+- Your hidden body no longer plays its own swing / clash sounds or saber blur.
+- NPCs turn their heads to look at you in conversations (`[Feel] LookAtYou=0` turns it off).
+- Death: the camera eases out behind your body and you see it fall.
+- Wrist: from 10 cm away a short ray and a dot show where your fingertip is (gold on a button); poke it or pull the
+  right trigger.
+
 ## Wrist panel (no flat HUD)
 
 - Turn your left palm toward your face: menu buttons, party and quick slots appear along the forearm. Poke a button

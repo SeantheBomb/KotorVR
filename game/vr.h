@@ -25,6 +25,9 @@ bool VR_IsOurTexture(GLuint name);
 // character's pieces (hide only draws whose size matches - ownsig); 0: not theirs
 // A bone of the controlled character's (hidden) body this frame, in world coordinates (from the hook layer).
 void VR_OwnNode(const float world[3]);
+// Death camera: show the controlled character's own body (no own-model cull) and hide the VR hands / weapons.
+void VR_SetShowOwnBody(bool show);
+bool VR_ShowingOwnBody();
 // The bones recorded so far this frame (copied into out), for the animation probe.
 int VR_OwnNodesThisFrame(float (*out)[3], int max);
 int VR_IsOwnBody(const float t[3], int depth);  // depth: modelview stack depth of the multiply

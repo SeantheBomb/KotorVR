@@ -733,7 +733,12 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     return true;
 }
 
+static bool g_showOwnBody;  // dead: the body is the subject of the death camera
+void VR_SetShowOwnBody(bool show) { g_showOwnBody = show; }
+bool VR_ShowingOwnBody() { return g_showOwnBody; }
+
 int VR_IsOwnBody(const float t[3], int depth) {
+    if (g_showOwnBody) return 0;
     if (Features().modelCull) {
         // exact: the model hierarchy whose world transform sits on the controlled creature (its body, head, hair and
         // held items are all children of it); nothing else in the scene is touched

@@ -112,6 +112,20 @@ int g_shotMode;
 bool g_pickApplied, g_leftAimed;
 float g_aimedPos[3], g_aimedQ[4];
 
+// The eye's world position this frame (the composed camera, not during aim picks): what NPCs look at.
+float g_eyeWorld[3];
+bool g_eyeWorldValid;
+
+// The controlled creature is dead (CSWSCreature::GetDead 0x4EF820, fastcall on the server creature).
+bool PlayerDead() {
+    typedef int(__fastcall * GetDeadFn)(void* creature);
+    __try {
+        void* c = Weapon_PlayerCreature();
+        return c && ((GetDeadFn)0x4EF820)(c) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 // The controlled creature's world position ([creature + 0x90]), false if unavailable.
 bool CreaturePos(float out[3]) {
     __try {
@@ -321,6 +335,36 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         g_fovCam = cam;
         g_fovPatched = true;
     }
+    // Death: instead of the game's death camera (which flung the view up into the air), ease out of your head to a
+    // camera 2.4 m behind and 1.7 m above your body, looking at it, and show the body (and hide the VR hands) so you
+    // see your character fall. Head tracking still applies on top.
+    {
+        static double deadSince = -1;
+        static float startPos[3], deathPos[3], deathQ[4];
+        bool dead = PlayerDead();
+        float body[3];
+        if (dead && CreaturePos(body)) {
+            double now = GetTickCount() / 1000.0;
+            if (deadSince < 0) {
+                deadSince = now;
+                memcpy(startPos, basePos, sizeof startPos);
+                Log("enginecam: you died - camera out of your body");
+            }
+            float t = (float)((now - deadSince) / 1.5);
+            if (t > 1) t = 1;
+            t = t * t * (3 - 2 * t);  // smoothstep
+            float back[3] = {body[0] - cosf(g_viewYaw) * 2.4f, body[1] - sinf(g_viewYaw) * 2.4f, body[2] + 1.7f};
+            for (int i = 0; i < 3; i++) deathPos[i] = startPos[i] + (back[i] - startPos[i]) * t;
+            float f[3] = {body[0] - deathPos[0], body[1] - deathPos[1], body[2] + 0.5f - deathPos[2]};
+            QuatLookAlong(f, deathQ);
+            basePos = deathPos;
+            baseQ = deathQ;
+        } else if (!dead) {
+            if (deadSince >= 0) Log("enginecam: alive again - back in first person");
+            deadSince = -1;
+        }
+        VR_SetShowOwnBody(dead);
+    }
     if (gameplay) g_shotMode = 0;
     VR_SetCinematic(!gameplay);
 
@@ -339,7 +383,14 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     }
     g_cam = cam;
     g_applied = true;
+    if (!g_pickApplied) memcpy(g_eyeWorld, pos, sizeof g_eyeWorld), g_eyeWorldValid = true;
     VR_EngineCamApplied(basePos);
+}
+
+bool EngineCam_EyeWorld(float out[3]) {
+    if (!g_eyeWorldValid) return false;
+    memcpy(out, g_eyeWorld, sizeof g_eyeWorld);
+    return true;
 }
 
 extern "C" void __cdecl EngineCam_Post(BYTE* cam) {

@@ -1646,7 +1646,8 @@ static void AddFlashLayer(std::vector<XrCompositionLayerBaseHeader*>& layers) {
 // The flat HUD's pieces (menu row, minimap, party, quick slots, toggles - rectangles from the game, KvrHudLayout)
 // cropped out of the GUI frame onto a panel along the left forearm. It shows while the left palm faces the eyes; the
 // right index fingertip hovers and pokes it, which the game receives as the cursor on (and a click of) the real,
-// hidden HUD control. No trigger involved.
+// hidden HUD control. From 10 cm out a short ray from the fingertip and a dot show where it is over (the dot turns
+// gold on a button); then a poke, or the right trigger, presses it (2026-10-27: pokes alone were too hit and miss).
 static const int kWristW = 1024, kWristH = 512;
 struct WristZone {
     float dst[4];  // wrist texture px: x, y, w, h (where the crop is drawn)
@@ -1665,6 +1666,8 @@ struct WristState {
     float u = 0, v = 0;    // panel texture coordinates (0..1, top-left) under the fingertip
     bool poke = false;
     XrVector3f tip{};      // LOCAL, for the cursor dot
+    bool nearTip = false;  // the fingertip is within reach of the panel: draw the touch ray
+    XrVector3f proj{};     // LOCAL, the fingertip projected onto the panel
 };
 static WristState g_wrist;
 
@@ -1758,6 +1761,7 @@ static bool FingerTip(const PointerResult& pr, XrVector3f* out) {
 static XrCompositionLayerQuad* UpdateWrist(const XrPosef& head, const PointerResult& pr, bool world) {
     static XrCompositionLayerQuad q{XR_TYPE_COMPOSITION_LAYER_QUAD};
     g_wrist.hover = false;
+    g_wrist.nearTip = false;
     const KvrInput& in = g_shm->input;
     static uint32_t layoutSerial = 0xFFFFFFFF;
     if (g_shm->hud.serial != layoutSerial) {
@@ -1806,7 +1810,10 @@ static XrCompositionLayerQuad* UpdateWrist(const XrPosef& head, const PointerRes
         Vec3 d = Sub(V(tip), c);
         float px = Dot(d, qx), py = Dot(d, qy), pz = Dot(d, qz);
         float u = px / g_wrist.w + 0.5f, v = 0.5f - py / g_wrist.h;
-        if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && pz > -0.03f && pz < 0.025f) {
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && pz > -0.03f && pz < 0.10f) {
+            g_wrist.nearTip = true;
+            Vec3 pp = Add(Add(c, Mul(qx, px)), Mul(qy, py));
+            g_wrist.proj = {pp.x, pp.y, pp.z};
             float wx = u * kWristW, wy = v * kWristH;
             for (int i = 0; i < g_wristZoneCount; i++) {
                 const WristZone& z = g_wristZones[i];
@@ -2005,6 +2012,40 @@ static void Frame() {
         if (wristLayer) layers.push_back((XrCompositionLayerBaseHeader*)wristLayer);
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
         // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback
+        static XrCompositionLayerQuad wbeam{XR_TYPE_COMPOSITION_LAYER_QUAD}, wdot{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        if (tracked && wristLayer && g_wrist.nearTip) {  // the wrist touch ray: fingertip -> where it is over
+            const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, gold[4] = {1.0f, 0.85f, 0.3f, 1.0f}, white[4] = {1, 1, 1, 1};
+            Vec3 o = V(g_wrist.tip), p = V(g_wrist.proj);
+            Vec3 d = Sub(p, o);
+            float len = sqrtf(Dot(d, d));
+            if (len > 0.003f) {
+                d = Mul(d, 1.0f / len);
+                FillSwapchain(g_beamSc, cyan);
+                Vec3 c = Add(o, Mul(d, len * 0.5f));
+                Vec3 toHead = Sub(V(views[0].pose.position), c);
+                Vec3 z = Norm(Sub(toHead, Mul(d, Dot(toHead, d))));
+                Vec3 x = Cross(d, z);
+                wbeam.space = g_local;
+                wbeam.pose.orientation = QuatFromBasis(x, d, z);
+                wbeam.pose.position = {c.x, c.y, c.z};
+                wbeam.size = {0.002f, len};
+                wbeam.subImage.swapchain = g_beamSc.handle;
+                wbeam.subImage.imageRect = {{0, 0}, {g_beamSc.w, g_beamSc.h}};
+                layers.push_back((XrCompositionLayerBaseHeader*)&wbeam);
+            }
+            FillSwapchain(g_dotSc, g_wrist.hover ? gold : white);
+            Quat wq{g_wrist.pose.orientation.x, g_wrist.pose.orientation.y, g_wrist.pose.orientation.z, g_wrist.pose.orientation.w};
+            Vec3 n = qrot(wq, {0, 0, 1});
+            Vec3 dp = Add(p, Mul(n, 0.002f));
+            wdot.space = g_local;
+            wdot.pose.orientation = g_wrist.pose.orientation;
+            wdot.pose.position = {dp.x, dp.y, dp.z};
+            float ds = g_wrist.poke ? 0.006f : 0.009f;
+            wdot.size = {ds, ds};
+            wdot.subImage.swapchain = g_dotSc.handle;
+            wdot.subImage.imageRect = {{0, 0}, {g_dotSc.w, g_dotSc.h}};
+            layers.push_back((XrCompositionLayerBaseHeader*)&wdot);
+        }
         if (tracked && pr.hitPanel) {
             const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, white[4] = {1, 1, 1, 1};
             FillSwapchain(g_beamSc, cyan);

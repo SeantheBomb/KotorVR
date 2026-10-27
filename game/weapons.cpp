@@ -972,7 +972,7 @@ static void RefreshPoseAdj() {
 
 void Weapons_Draw(const float invEye[16]) {
     const KvrShared* shm = VR_Shared();
-    if (!shm || !LoadGl()) return;
+    if (!shm || !LoadGl() || VR_ShowingOwnBody()) return;  // dead: the body is shown, not floating hands
     KvrInput in;
     memcpy(&in, (const void*)&shm->input, sizeof in);  // a torn read only costs one frame of pose
     if (!in.active || !(in.gripValid & 3)) return;
