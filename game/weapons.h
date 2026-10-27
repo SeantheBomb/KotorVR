@@ -31,6 +31,8 @@ WeaponClass Weapon_Right();
 WeaponClass Weapon_Left();
 // Server-side player creature (party leader), or null; refreshed by Weapons_Update.
 void* Weapon_PlayerCreature();
+// The controlled character's world position (server object +0x90).
+bool Weapon_PlayerPos(float out[3]);
 // The player's combat round is running (KotOR is in combat with something).
 bool Weapon_PlayerInCombat();
 

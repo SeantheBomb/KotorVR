@@ -12,6 +12,8 @@ bool Combat_InPerfectWindow();
 // The controlled character is already attacking (rolled within the last 3.5 s): KotOR repeats the attack every
 // round by itself, so gestures only count for timing; pressing attack again just fills its action queue.
 bool Combat_PlayerAttacking();
+// The player's queued attack was cleared: the next swing starts a new one.
+void Combat_ResetAttacking();
 
 // An enemy attack on the player that lands within the warning lead (or just landed).
 struct CombatWarning {

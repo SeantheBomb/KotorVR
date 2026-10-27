@@ -407,6 +407,14 @@ static void EmitMesh(const WMesh& me, float blade) {
     p_glEnd();
 }
 
+bool WeaponModels_ResRef(int row, int variation, char* out, size_t size) {
+    auto pre = g_prefix.find(row);
+    if (pre == g_prefix.end()) return false;
+    sprintf_s(out, size, "%s_%03d", pre->second.c_str(), variation > 0 ? variation : 1);
+    if (!GetModel(out).ok) sprintf_s(out, size, "%s_001", pre->second.c_str());
+    return true;
+}
+
 float WeaponModels_Length(int row, int variation) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end()) return 0;

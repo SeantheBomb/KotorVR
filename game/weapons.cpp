@@ -22,6 +22,7 @@
 #include "vr.h"
 #include "weaponmodels.h"
 #include "features.h"
+#include "ownsig.h"
 #include "combat.h"
 #include "cues.h"
 
@@ -415,6 +416,12 @@ void Weapons_Update() {
             Log("weapons: body appearance %d letter %c texvar %d -> hands %s / %s", app, 'a' + letter, tv,
                 g_handModel.c_str(), g_handTexture.c_str());
         }
+        // the model cull's picture of this character: body, head (by appearance), held weapons
+        char wr[64] = "", wl[64] = "";
+        if (g_rightRow >= 0) WeaponModels_ResRef(g_rightRow, g_rightVar, wr, sizeof wr);
+        if (g_leftRow >= 0) WeaponModels_ResRef(g_leftRow, g_leftVar, wl, sizeof wl);
+        const char* held[2] = {wr, wl};
+        OwnSig_SetCharacter(g_appearance, g_handModel.c_str(), held, 2);
     }
 }
 
@@ -453,6 +460,16 @@ void Weapons_FireBolt(const float targetWorld[3], float delay) {
     memcpy(b.to, targetWorld, sizeof b.to);
     g_bolts.push_back(b);
     if (g_bolts.size() > 8) g_bolts.erase(g_bolts.begin());
+}
+
+bool Weapon_PlayerPos(float out[3]) {
+    void* p = Weapon_PlayerCreature();
+    if (!p) return false;
+    __try {
+        memcpy(out, (BYTE*)p + 0x90, 12);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
 }
 
 void* Weapon_CreatureById(DWORD id) {

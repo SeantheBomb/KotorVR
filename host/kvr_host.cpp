@@ -1347,6 +1347,202 @@ static bool HudSolidAt(float u, float v) {
     return lastSolid;
 }
 
+// ---------------------------------------------------------------- recording ([Debug] Record=1 in kvr.ini)
+// What the headset shows (left eye with the HUD keyed over it, or the menu / movie panel), 960x720 at 30 fps, piped
+// to ffmpeg (on PATH) as H.264 into <game>\kvr\recordings\. For reviewing sessions (pop-in, glitches) and for trailer
+// footage. A writer thread feeds ffmpeg so the XR loop never waits on it; frames are dropped if it falls behind.
+static const int kRecW = 960, kRecH = 720;
+static ID3D11Device1* g_recDev;
+static ID3D11Texture2D* g_recRt;
+static ID3D11RenderTargetView* g_recRtv;
+static ID3D11Texture2D* g_recStage[2];
+static bool g_recPending[2];
+static int g_recCur;
+static ID3D11BlendState* g_recBlend;
+static HANDLE g_recWrite, g_recProc, g_recThread, g_recEvent;
+static CRITICAL_SECTION g_recLock;
+static std::vector<std::vector<uint8_t>> g_recQueue;
+static volatile bool g_recStop;
+static double g_recStart;
+static uint64_t g_recFrames;
+
+static DWORD WINAPI RecWriter(LPVOID) {
+    for (;;) {
+        WaitForSingleObject(g_recEvent, 200);
+        std::vector<std::vector<uint8_t>> batch;
+        EnterCriticalSection(&g_recLock);
+        batch.swap(g_recQueue);
+        bool stop = g_recStop;
+        LeaveCriticalSection(&g_recLock);
+        for (auto& f : batch) {
+            DWORD n = 0;
+            if (!WriteFile(g_recWrite, f.data(), (DWORD)f.size(), &n, nullptr)) { stop = true; break; }
+        }
+        if (stop) return 0;
+    }
+}
+
+static bool RecStart() {
+    char dir[260];
+    memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
+    dir[sizeof dir - 1] = 0;
+    if (!dir[0]) return false;
+    char folder[MAX_PATH], path[MAX_PATH], cmd[1024];
+    sprintf_s(folder, "%s\\kvr\\recordings", dir);
+    CreateDirectoryA(folder, nullptr);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    sprintf_s(path, "%s\\kvr_%04d%02d%02d_%02d%02d%02d.mp4", folder, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute,
+              st.wSecond);
+    sprintf_s(cmd, "ffmpeg -loglevel error -y -f rawvideo -pix_fmt bgra -s %dx%d -r 30 -i - -c:v libx264 -preset veryfast "
+              "-crf 20 -pix_fmt yuv420p \"%s\"", kRecW, kRecH, path);
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 8 << 20)) return false;
+    SetHandleInformation(wr, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOA si{sizeof si};
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = rd;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessA(nullptr, cmd, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        printf("record: could not start ffmpeg (is it on PATH?)\n");
+        CloseHandle(rd);
+        CloseHandle(wr);
+        return false;
+    }
+    CloseHandle(rd);
+    CloseHandle(pi.hThread);
+    g_recProc = pi.hProcess;
+    g_recWrite = wr;
+    static bool lockInit;
+    if (!lockInit) { InitializeCriticalSection(&g_recLock); lockInit = true; }
+    g_recStop = false;
+    g_recEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    g_recThread = CreateThread(nullptr, 0, RecWriter, nullptr, 0, nullptr);
+    g_recStart = GetTickCount64() / 1000.0;
+    g_recFrames = 0;
+    printf("record: recording to %s\n", path);
+    return true;
+}
+
+static void RecStop() {
+    if (!g_recProc) return;
+    EnterCriticalSection(&g_recLock);
+    g_recStop = true;
+    LeaveCriticalSection(&g_recLock);
+    SetEvent(g_recEvent);
+    WaitForSingleObject(g_recThread, 3000);
+    CloseHandle(g_recThread);
+    CloseHandle(g_recEvent);
+    CloseHandle(g_recWrite);  // ffmpeg sees the end of its input and finishes the file
+    WaitForSingleObject(g_recProc, 10000);
+    CloseHandle(g_recProc);
+    g_recProc = g_recWrite = g_recThread = g_recEvent = nullptr;
+    printf("record: stopped (%llu frames)\n", (unsigned long long)g_recFrames);
+}
+
+static void RecRelease() {
+    SafeRelease(g_recRtv);
+    SafeRelease(g_recRt);
+    SafeRelease(g_recStage[0]);
+    SafeRelease(g_recStage[1]);
+    SafeRelease(g_recBlend);
+    g_recPending[0] = g_recPending[1] = false;
+    g_recDev = nullptr;
+}
+
+static void RecordFrame(bool world, bool hud, bool panelShown, float panelAspect) {
+    // the switch: kvr.ini [Debug] Record, re-read every 2 s
+    static DWORD lastCheck;
+    static bool want;
+    if (GetTickCount() - lastCheck > 2000) {
+        lastCheck = GetTickCount();
+        char dir[260], ini[MAX_PATH];
+        memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
+        dir[sizeof dir - 1] = 0;
+        sprintf_s(ini, "%s\\kvr\\kvr.ini", dir);
+        want = dir[0] && GetPrivateProfileIntA("Debug", "Record", 0, ini) != 0;
+        if (want && !g_recProc && !RecStart()) want = false;
+        if (!want && g_recProc) RecStop();
+    }
+    if (!g_recProc || !g_dev) return;
+    double now = GetTickCount64() / 1000.0;
+    uint64_t due = (uint64_t)((now - g_recStart) * 30.0);
+    if (g_recFrames >= due) return;
+    if (g_recDev != g_dev) {
+        RecRelease();
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = kRecW;
+        d.Height = kRecH;
+        d.MipLevels = d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.BindFlags = D3D11_BIND_RENDER_TARGET;
+        g_dev->CreateTexture2D(&d, nullptr, &g_recRt);
+        if (g_recRt) g_dev->CreateRenderTargetView(g_recRt, nullptr, &g_recRtv);
+        d.BindFlags = 0;
+        d.Usage = D3D11_USAGE_STAGING;
+        d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        g_dev->CreateTexture2D(&d, nullptr, &g_recStage[0]);
+        g_dev->CreateTexture2D(&d, nullptr, &g_recStage[1]);
+        D3D11_BLEND_DESC bd{};
+        bd.RenderTarget[0].BlendEnable = TRUE;
+        bd.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+        bd.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+        bd.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+        bd.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+        bd.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        g_dev->CreateBlendState(&bd, &g_recBlend);
+        g_recDev = g_dev;
+    }
+    if (!g_recRtv || !g_recStage[0] || !g_recStage[1]) return;
+    // compose this frame
+    const float black[4] = {0, 0, 0, 1};
+    g_ctx->ClearRenderTargetView(g_recRtv, black);
+    float aspect = world ? (float)g_shared[0].meta.width / std::max(1u, g_shared[0].meta.height) : panelAspect;
+    float w = (float)kRecW, h = (float)kRecH, vw = w, vh = w / aspect;
+    if (vh > h) { vh = h; vw = h * aspect; }
+    D3D11_VIEWPORT vp{(w - vw) / 2, (h - vh) / 2, vw, vh, 0, 1};
+    if (world && g_shared[0].have) {
+        DrawTex(g_recRtv, vp, g_shared[0], g_shared[0].meta.width, g_shared[0].meta.height, false, false);
+        if (hud && panelShown && g_shared[2].have) {
+            const float f[4] = {0, 0, 0, 0};
+            g_ctx->OMSetBlendState(g_recBlend, f, 0xFFFFFFFF);
+            DrawTex(g_recRtv, vp, g_shared[2], g_shared[2].meta.width, g_shared[2].meta.height, true, false);
+            g_ctx->OMSetBlendState(nullptr, f, 0xFFFFFFFF);
+        }
+    } else if (panelShown && g_shared[2].have) {
+        DrawTex(g_recRtv, vp, g_shared[2], g_shared[2].meta.width, g_shared[2].meta.height, false, false);
+    }
+    g_ctx->CopyResource(g_recStage[g_recCur], g_recRt);
+    g_recPending[g_recCur] = true;
+    // read back the previous one (a frame of latency, no stall)
+    int prev = g_recCur ^ 1;
+    if (g_recPending[prev]) {
+        D3D11_MAPPED_SUBRESOURCE m;
+        if (SUCCEEDED(g_ctx->Map(g_recStage[prev], 0, D3D11_MAP_READ, 0, &m))) {
+            std::vector<uint8_t> px((size_t)kRecW * kRecH * 4);
+            for (int y = 0; y < kRecH; y++)
+                memcpy(&px[(size_t)y * kRecW * 4], (const uint8_t*)m.pData + (size_t)y * m.RowPitch, (size_t)kRecW * 4);
+            g_ctx->Unmap(g_recStage[prev], 0);
+            EnterCriticalSection(&g_recLock);
+            // keep up with real time: repeat the frame for any 30 fps slots we missed (at most a second's worth)
+            uint64_t n = std::min<uint64_t>(due - g_recFrames, 30);
+            if (g_recQueue.size() < 60)
+                for (uint64_t i = 0; i < n; i++) g_recQueue.push_back(px);
+            LeaveCriticalSection(&g_recLock);
+            g_recFrames += n;
+            SetEvent(g_recEvent);
+        }
+        g_recPending[prev] = false;
+    }
+    g_recCur = prev;
+}
+
 // ---------------------------------------------------------------- rim flash (hits taken, blocks)
 // A head-locked quad just in front of the eyes, transparent in the middle and tinted toward the edges, fading out.
 static ID3D11Texture2D* g_flashTex;
@@ -1551,6 +1747,7 @@ static void Frame() {
         }
 
         MirrorFrame(world, hud, panelVisible, panelAspect);
+        RecordFrame(world, hud, panelVisible, panelAspect);
 
         // controllers: publish state, then draw the right-hand laser and the panel cursor
         PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
@@ -1673,6 +1870,7 @@ static void Teardown() {
     SafeRelease(g_samp);
     SafeRelease(g_cb);
     MirrorRelease();
+    RecRelease();
     SafeRelease(g_ctx);
     SafeRelease(g_dev);
     g_teardownDone = 1;
@@ -1682,6 +1880,7 @@ static BOOL WINAPI OnConsoleClose(DWORD) {
     // Ctrl+C or the terminal tab closing: tell the game the host is gone so it stops exporting
     if (g_shm) g_shm->host.running = 0;
     g_quit = true;
+    RecStop();  // finish the recording's file before the console goes away
     Sleep(200);
     return FALSE;
 }
@@ -1753,6 +1952,7 @@ int main(int argc, char** argv) {
         Sleep(2000);
     }
     }
+    RecStop();
     g_shm->host.running = 0;
     return 0;
 }

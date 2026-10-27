@@ -464,6 +464,69 @@ static void LogText() {
     }
 }
 
+// ---------------------------------------------------------------- recording ("record on" / "record off")
+// The headset's left eye in the world, else the panel (menus, movies), 15 fps through ffmpeg into <out>\rec_N.mp4,
+// for reviewing runs (pop-in) frame by frame. Frames are written as the GL images come (bottom-up), ffmpeg flips.
+static HANDLE g_recPipe, g_recProc;
+static double g_recLast;
+static int g_recCount;
+static std::vector<BYTE> g_recBuf;
+
+static void RecordStart() {
+    if (g_recProc || !g_shm->texWidth) return;
+    char cmd[1024];
+    sprintf_s(cmd, "ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgba -s %ux%u -r 15 -i - -vf vflip,scale=960:-2 "
+              "-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p \"%s\\rec_%d.mp4\"",
+              g_shm->texWidth, g_shm->texHeight, g_out.c_str(), ++g_recCount);
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+    HANDLE rd = nullptr, wr = nullptr;
+    if (!CreatePipe(&rd, &wr, &sa, 32 << 20)) return;
+    SetHandleInformation(wr, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOA si{sizeof si};
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = rd;
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessA(nullptr, cmd, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        printf("[%.1f]   record: ffmpeg did not start\n", Now());
+        CloseHandle(rd);
+        CloseHandle(wr);
+        return;
+    }
+    CloseHandle(rd);
+    CloseHandle(pi.hThread);
+    g_recProc = pi.hProcess;
+    g_recPipe = wr;
+    g_recLast = 0;
+    g_recBuf.assign((size_t)g_shm->texWidth * g_shm->texHeight * 4, 0);
+    printf("[%.1f]   record: rec_%d.mp4\n", Now(), g_recCount);
+}
+
+static void RecordStop() {
+    if (!g_recProc) return;
+    CloseHandle(g_recPipe);
+    WaitForSingleObject(g_recProc, 15000);
+    CloseHandle(g_recProc);
+    g_recProc = g_recPipe = nullptr;
+}
+
+static void RecordTick() {
+    if (!g_recProc || Now() - g_recLast < 1.0 / 15) return;
+    g_recLast = Now();
+    SharedTex& s = InWorld() ? g_shared[0] : g_shared[2];
+    if (!s.have || !s.staging) return;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (FAILED(g_ctx->Map(s.staging, 0, D3D11_MAP_READ, 0, &m))) return;
+    UINT W = g_shm->texWidth, H = g_shm->texHeight;
+    UINT w = std::min(s.meta.width ? s.meta.width : W, W), h = std::min(s.meta.height ? s.meta.height : H, H);
+    std::fill(g_recBuf.begin(), g_recBuf.end(), 0);
+    for (UINT y = 0; y < h; y++) memcpy(&g_recBuf[(size_t)y * W * 4], (const BYTE*)m.pData + (size_t)y * m.RowPitch, (size_t)w * 4);
+    g_ctx->Unmap(s.staging, 0);
+    DWORD n = 0;
+    if (!WriteFile(g_recPipe, g_recBuf.data(), (DWORD)g_recBuf.size(), &n, nullptr)) RecordStop();
+}
+
 static void Tick() {
     PublishHead();
     PublishInput();
@@ -471,6 +534,7 @@ static void Tick() {
     TrackCalm();
     LogHaptics();
     LogText();
+    RecordTick();
     static double lastCsv;
     double now = Now();
     if (g_csv && now - lastCsv >= 0.1) {
@@ -686,6 +750,9 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.1);
+        } else if (cmd == "record") {  // "record on" / "record off": video of the run (see RecordTick)
+            if (!args.empty() && args[0] == "off") RecordStop();
+            else RecordStart();
         } else if (cmd == "keepfocus") {
             g_keepFocusOff = !args.empty() && args[0] == "off";
             g_keepFocus = g_keepFocus && !g_keepFocusOff;
@@ -790,6 +857,7 @@ int main(int argc, char** argv) {
     g_shm->input.active = 0;
     g_shm->host.running = 0;
     if (g_csv) fclose(g_csv);
+    RecordStop();
     printf("kvr_simhost: %s (frames pulled: eye0 %u, eye1 %u, panel %u)\n", result == 0 ? "script completed" : "script FAILED",
            g_pulls[0], g_pulls[1], g_pulls[2]);
     return result;

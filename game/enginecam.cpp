@@ -274,9 +274,18 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             QuatLookAlong(f, probeQ);
             basePos = headPos;
             baseQ = probeQ;
-            eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
-            eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;
-            eye.quat[3] = 1;
+            if (g_shotMode == 5 && dist > 10.0f) {
+                // far away (down a corridor, across a room): stay with your own eyes even if something is in
+                // between - 14 of 16 cuts in the 2026-10-27 playtest were these, and none were wanted. This frame
+                // is already the normal first-person view (no probe).
+                g_shotMode = 1;
+                baseQ = g_playQ;
+                Log("cutscene: shot subject %.1f m away -> far, stay first person", dist);
+            } else {
+                eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
+                eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;
+                eye.quat[3] = 1;
+            }
             if (g_shotMode == 5) {
                 VR_RequestLosProbe(dist);
                 g_shotMode = 6;

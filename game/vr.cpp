@@ -19,6 +19,7 @@
 #include "combat.h"
 #include "features.h"
 #include "mirror.h"
+#include "ownsig.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -714,22 +715,31 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     return true;
 }
 
-bool VR_IsOwnBody(const float t[3], int depth) {
+int VR_IsOwnBody(const float t[3], int depth) {
     if (Features().modelCull) {
         // exact: the model hierarchy whose world transform sits on the controlled creature (its body, head, hair and
         // held items are all children of it); nothing else in the scene is touched
-        if (!g_vrActive || !g_inWorldPass || !g_playerPosValid) return false;
+        if (!g_vrActive || !g_inWorldPass || !g_playerPosValid) return 0;
         float dx = t[0] - g_playerPos[0], dy = t[1] - g_playerPos[1], dz = t[2] - g_playerPos[2];
         float d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < g_nearestOwn) g_nearestOwn = d2;
         float h2 = dx * dx + dy * dy;
-        if (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f) {  // the body hierarchy's root (feet)
+        if (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f) {  // the body hierarchy's root (feet): hide it whole
             g_rootDepth = depth;
-            return true;
+            return 2;
         }
+        if (OwnSig_Ready()) {
+            // Everything else near you is only a candidate: its draws are hidden when their mesh sizes are the
+            // character's own (body, head, held weapons - ownsig). Scenery that happens to stand close (crates,
+            // consoles, door frames) stays, and a weapon swung far out in an attack is still caught.
+            if (depth == g_rootDepth && h2 < 1.6f * 1.6f && dz > -0.6f && dz < 2.4f) return 1;
+            if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return 1;  // the head, a separate model at the neck
+            return 0;
+        }
+        // no signatures (tools/sig_export.py not run): the old radius rules
         // running / combat moves can put the drawn root a bit away from the server position for a frame: at the
         // model-root depth (whole objects only) accept up to 0.6 m, which only a creature standing inside you reaches
-        if (depth == g_rootDepth && h2 < 0.6f * 0.6f && fabsf(dz) < 0.6f) return true;
+        if (depth == g_rootDepth && h2 < 0.6f * 0.6f && fabsf(dz) < 0.6f) return 2;
         if (depth == g_rootDepth && h2 < 1.2f * 1.2f && fabsf(dz) < 1.0f) {  // near miss: log (popping diagnosis)
             static DWORD last;
             if (GetTickCount() - last > 1000) {
@@ -738,16 +748,16 @@ bool VR_IsOwnBody(const float t[3], int depth) {
             }
         }
         // the head is a separate model attached at the neck: its origin sits right above the feet at head height
-        if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return true;
+        if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return 2;
         // held weapons are separate models at the hand: other model roots (same stack depth as the body's root) that
         // sit within arm's reach. Only whole roots: parts of a nearby NPC are deeper in its own hierarchy.
-        return depth == g_rootDepth && h2 < 0.75f * 0.75f && dz > 0.1f && dz < 1.9f;
+        return depth == g_rootDepth && h2 < 0.75f * 0.75f && dz > 0.1f && dz < 1.9f ? 2 : 0;
     }
-    if (!g_camPosValid || !g_vrActive) return false;
+    if (!g_camPosValid || !g_vrActive) return 0;
     float dx = t[0] - g_camPos[0], dy = t[1] - g_camPos[1], dz = t[2] - g_camPos[2];
     // KotOR world is Z-up; the camera sits at the character's camera hook, the body is a column below it
     // 0.7 m: covers the head/hair and held items swinging forward in the walk cycle
-    return dx * dx + dy * dy < 0.7f * 0.7f && dz > -2.2f && dz < 0.8f;
+    return dx * dx + dy * dy < 0.7f * 0.7f && dz > -2.2f && dz < 0.8f ? 2 : 0;
 }
 
 void VR_EngineCamApplied(const float basePos[3]) {

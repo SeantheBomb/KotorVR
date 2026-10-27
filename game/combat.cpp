@@ -429,6 +429,7 @@ void Combat_Update() {
 bool Combat_InPerfectWindow() { return g_windowOpen; }
 
 bool Combat_PlayerAttacking() { return Now() - g_playerRolls[1] < 3.5; }
+void Combat_ResetAttacking() { g_playerRolls[0] = g_playerRolls[1] = -100; }
 
 int Combat_IncomingWarnings(CombatWarning* out, int max) {
     double t = Now();

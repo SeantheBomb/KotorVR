@@ -12,3 +12,6 @@ bool ActionRing_Open(const KvrInput& in);
 bool ActionRing_Active();
 // Once per frame (game thread). Returns a DirectInput key to tap (the picked action's column key) or 0.
 BYTE ActionRing_Update(const KvrInput& in);
+// Clear the controlled character's action queue - what the HUD's "clear all actions" button does (0x6887D0 on the
+// in-game interface). False if the interface is not up.
+bool ActionRing_ClearQueue();

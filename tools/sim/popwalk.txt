@@ -1,0 +1,31 @@
+# Pop-in review: record a walk with turns and head sweeps (tools/popscan.py finds the suspicious frames).
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
+click u=0.410 v=0.431      # Game 1
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+record on
+head yaw=60 pitch=0 over=1.5
+head yaw=-60 pitch=0 over=3
+head yaw=0 pitch=-25 over=1.5
+head yaw=0 pitch=0 over=1
+stick ly=1 for=3
+stick rx=1 for=1.5
+stick ly=1 for=3
+stick rx=-1 for=0.8
+stick ly=1 for=2
+head yaw=90 pitch=0 over=1.5
+stick ly=1 for=2
+head yaw=0 pitch=0 over=1
+stick rx=1 for=3
+stick ly=1 for=3
+wait 1
+record off
+

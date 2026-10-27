@@ -30,7 +30,12 @@
 extern void Log(const char* fmt, ...);
 
 // ---------------------------------------------------------------- desired state (computed per frame)
-static BYTE g_wantKeys[256];   // DIK_* -> 0x80 when held
+static BYTE g_wantKeys[256];
+static double g_attackWatchAt = -10;  // an attack we just started (swing / shot): see the movement rules in Input_Update
+static float g_attackFrom[3];
+static void WatchAttack(double now) {
+    if (Weapon_PlayerPos(g_attackFrom)) g_attackWatchAt = now;
+}   // DIK_* -> 0x80 when held
 static bool g_wantMouse[2];    // left, right
 static LONG g_pendDx, g_pendDy;  // mouse delta not yet delivered to the game
 static CRITICAL_SECTION g_cs;
@@ -194,12 +199,38 @@ void Input_Update(HWND wnd) {
         bool worldCtx = in.pointerMode == KVR_POINTER_WORLD || in.pointerMode == KVR_POINTER_HUD_LEFT;
         bool inWorld = worldCtx && Features().gestures;
         bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
+        // Movement stays yours. (1) Pushing the stick while the game is still running an attack for you clears it
+        // (the HUD's clear-queue button): an attack on a target that can't be reached used to leave the character
+        // unable to walk after a fight. (2) An attack we start from a swing or shot must not walk you to the target:
+        // if the character travels > 0.8 m with the stick idle in the next 2.5 s, that walk is cancelled.
+        {
+            static bool stickWas;
+            bool stickNow = mag > 0.5f;
+            if (stickNow && !stickWas && Combat_PlayerAttacking() && ActionRing_ClearQueue()) {
+                Combat_ResetAttacking();
+                g_attackWatchAt = -10;
+                Log("input: stick -> queued attack cleared (movement is yours)");
+            }
+            stickWas = stickNow;
+            if (now - g_attackWatchAt < 2.5) {
+                float pp[3];
+                if (Weapon_PlayerPos(pp)) {
+                    float dx = pp[0] - g_attackFrom[0], dy = pp[1] - g_attackFrom[1];
+                    if (mag < 0.3f && dx * dx + dy * dy > 0.8f * 0.8f && ActionRing_ClearQueue()) {
+                        Combat_ResetAttacking();
+                        g_attackWatchAt = -10;
+                        Log("input: attack would walk you to the target -> cancelled (swing when in reach)");
+                    }
+                }
+            }
+        }
         if (Gestures_TakeSwing(&swingQ) && fighting) {
             if (Combat_PlayerAttacking()) {  // KotOR repeats the attack by itself: the swing only counts for timing
                 Log("input: swing (already attacking: timing only)");
             } else {
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
+                WatchAttack(now);
                 Log("input: swing -> attack current target");
             }
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
@@ -228,6 +259,7 @@ void Input_Update(HWND wnd) {
             } else if (!Combat_PlayerAttacking()) {
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
+                WatchAttack(now);
             }
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
@@ -324,6 +356,7 @@ void Input_Update(HWND wnd) {
                 } else {
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
+                    if (!gripPick) WatchAttack(now);  // a shot's pick: an attack, not a use / talk
                 }
             }
             if (t > 330) g_pickStartMs = -1;
@@ -357,6 +390,15 @@ void Input_Update(HWND wnd) {
             static POINT lastScr = {-1, -1};
             static int settledFrames;  // frames since the cursor last moved
             WPARAM held = (g_msgButtons[0] ? MK_LBUTTON : 0) | (g_msgButtons[1] ? MK_RBUTTON : 0);
+            // During an aim pick the cursor sits still at the screen centre while the camera turns down the hand's
+            // ray: nudge it a pixel every frame so the game re-resolves what is under it with the aimed camera.
+            // (A single move on the pick's first frame was resolved against the old view - often the NPC in front
+            // of you: grips on doors started conversations with Trask.)
+            if (g_pickStartMs >= 0) {
+                scr.x += (GetTickCount() / 16) & 1;
+                client = scr;
+                ScreenToClient(dst, &client);
+            }
             if (scr.x != lastScr.x || scr.y != lastScr.y) {
                 SetCursorPos(scr.x, scr.y);
                 PostMessageA(dst, WM_MOUSEMOVE, held, MAKELPARAM(client.x, client.y));

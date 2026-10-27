@@ -25,6 +25,7 @@
 #include "dialogue.h"
 #include "actionring.h"
 #include "movie.h"
+#include "ownsig.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -41,6 +42,7 @@ static GLenum g_mode = GL_MODELVIEW;
 // own-body hiding: modelview push depth, and the depth at which a hidden node was entered (-1 = none)
 static int g_mvDepth;
 static int g_hideDepth = -1;
+static int g_candDepth = -1;  // inside a hierarchy whose own-mesh draws are skipped (VR_IsOwnBody == 1)
 
 void Log(const char* fmt, ...) {
     if (!g_log) return;
@@ -124,7 +126,11 @@ static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
     T("glMultMatrixf [%s] %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f",
       ModeName(g_mode), m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     if (VR_OnMultMatrixf(g_mode, m)) { T("  -> VR eye view"); return; }
-    if (g_mode == GL_MODELVIEW && g_hideDepth < 0 && VR_IsOwnBody(m + 12, g_mvDepth)) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
+    if (g_mode == GL_MODELVIEW && g_hideDepth < 0) {
+        int own = VR_IsOwnBody(m + 12, g_mvDepth);
+        if (own == 2) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
+        else if (own == 1 && g_candDepth < 0) { g_candDepth = g_mvDepth; T("  -> near the player: own meshes hidden"); }
+    }
     r_glMultMatrixf(m);
 }
 static void APIENTRY h_glMatrixMode(GLenum m) { FIRST("glMatrixMode"); g_mode = m; T("glMatrixMode %s", ModeName(m)); r_glMatrixMode(m); }
@@ -137,10 +143,10 @@ static void APIENTRY h_glTranslatef(GLfloat x, GLfloat y, GLfloat z) { FIRST("gl
 static void APIENTRY h_glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { FIRST("glRotatef"); T("glRotatef [%s] %.3f (%.3f %.3f %.3f)", ModeName(g_mode), a, x, y, z); r_glRotatef(a, x, y, z); }
 static void APIENTRY h_glScalef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glScalef"); T("glScalef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); r_glScalef(x, y, z); }
 static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) g_mvDepth++; r_glPushMatrix(); }
-static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; } r_glPopMatrix(); }
+static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; if (g_candDepth >= 0 && g_mvDepth < g_candDepth) g_candDepth = -1; } r_glPopMatrix(); }
 static void APIENTRY h_glClear(GLbitfield b) { FIRST("glClear"); T("glClear 0x%x", b); r_glClear(b); }
 static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(b); }
-static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0 || VR_ShouldSkipDraw() || VR_ShouldSkipElements(c, t, i)) return; if (g_tracing) g_traceCount++; if (g_tracing) { float oc[3]; VR_DrawOrigin(oc); T("  glDrawElements mode=%u count=%d  origin_cam (%.2f %.2f %.2f)", m, c, oc[0], oc[1], oc[2]); } r_glDrawElements(m, c, t, i); }
+static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0 || (g_candDepth >= 0 && OwnSig_Match(c)) || VR_ShouldSkipDraw() || VR_ShouldSkipElements(c, t, i)) return; if (g_tracing) g_traceCount++; if (g_tracing) { float oc[3]; VR_DrawOrigin(oc); T("  glDrawElements mode=%u count=%d  origin_cam (%.2f %.2f %.2f)", m, c, oc[0], oc[1], oc[2]); } r_glDrawElements(m, c, t, i); }
 static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_hideDepth >= 0 || VR_ShouldSkipDraw()) return; if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
 // Immediate-mode draws can't be skipped (the glVertex calls that follow would error), so an own-body glBegin
 // block draws with colour and depth writes masked off until its glEnd.
@@ -375,6 +381,7 @@ static BOOL WINAPI h_SwapBuffers(HDC dc) {
     VR_OnSwap(dc);
     g_mvDepth = 0;
     g_hideDepth = -1;
+    g_candDepth = -1;
     Input_Update(WindowFromDC(dc));
     static DWORD lastChurn;
     if (GetTickCount() - lastChurn > 1000) {
@@ -537,6 +544,7 @@ static void Install() {
     Dialogue_Install();
     ActionRing_Init(g_dir);
     Movie_Install();
+    OwnSig_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
     if (Features().combat) Combat_Install();
 }

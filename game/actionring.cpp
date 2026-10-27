@@ -99,6 +99,11 @@ int ReadEntries(BYTE* blk, Entry* out, int cap) {
     return n;
 }
 
+BYTE* MainInterface() {
+    BYTE* blk = ActionBlock();
+    return blk ? blk - 0xBC : nullptr;
+}
+
 void Close() {
     if (g_open) VR_HideText(kSlot);
     g_open = false;
@@ -170,6 +175,17 @@ bool ActionRing_Open(const KvrInput& in) {
 }
 
 bool ActionRing_Active() { return g_open; }
+
+bool ActionRing_ClearQueue() {
+    typedef void(__fastcall * ClearFn)(void* self, void* edx);  // thiscall, no arguments
+    BYTE* mi = MainInterface();
+    if (!mi) return false;
+    __try {
+        ((ClearFn)0x6887D0)(mi, nullptr);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
 
 BYTE ActionRing_Update(const KvrInput& in) {
     bool trig = in.trigR > 0.6f, grip = in.gripR > 0.7f;
