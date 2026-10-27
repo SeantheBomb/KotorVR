@@ -26,11 +26,13 @@ double Gestures_LastAttackAgo();
 // Special moves read from the attack gestures (mapped to KotOR's combat feats by combat.cpp):
 //   melee  power = big overhead downward swing, critical = forward thrust, flurry = 2+ swings within 1 s
 //   ranged power = shot after holding the aim steady 1.2 s, rapid = 2+ shots within 1 s
-enum GestureMove { MOVE_NONE, MOVE_POWER, MOVE_CRITICAL, MOVE_FLURRY, MOVE_POWER_SHOT, MOVE_RAPID };
+enum GestureMove { MOVE_NONE, MOVE_POWER, MOVE_CRITICAL, MOVE_FLURRY, MOVE_POWER_SHOT, MOVE_RAPID, MOVE_SNIPER };
 // The last special move within `seconds`, consumed once read.
 GestureMove Gestures_TakeMove(double seconds);
 
-bool Gestures_TakeForcePush();  // off hand thrust forward
+bool Gestures_TakeForcePush();
+// A special move chosen by something other than a swing gesture (the blaster's fire modes).
+void Gestures_QueueMove(GestureMove m);  // off hand thrust forward
 bool Gestures_TakeForcePull();  // off hand yanked back
 
 double Gestures_Now();

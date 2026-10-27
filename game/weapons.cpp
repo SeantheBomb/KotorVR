@@ -437,6 +437,7 @@ struct Bolt {
     bool fromSet;
     bool alongBarrel;   // fired by the trigger: flies down the barrel to what it hits (else 30 m)
     bool impact;        // it ends on a surface / creature: a burst of sparks there
+    bool charged;       // a Power Blast: a heavier bolt
 };
 static double g_lastBarrelShot = -10;
 static std::vector<Bolt> g_bolts;
@@ -450,15 +451,29 @@ static float g_weaponEye[2][16];
 static float g_weaponLen[2];
 static bool g_weaponValid[2];
 static float g_palmEye[16];  // the left controller in eye space (Force aim: its forward, -Z)
+// Blaster handling (v2 ranged): shots leave the barrel with a random spread - 2.5 deg, more while the gun hand moves
+// fast, less with the off hand on the barrel (foregrip) or after holding still a second (Sniper Shot's steadiness)
+static float g_spreadDeg = 2.5f;
+static double g_steadySince = -1;
+static float g_prevGun[3];
+static double g_prevGunT = -1;
+static bool g_foregrip;
+static bool g_nextCharged;
 static bool g_palmValid;
 static double g_lastFlash = -10;
 
 static double NowS() { return GetTickCount() / 1000.0; }
 
+float Weapon_SpreadDeg() { return g_spreadDeg; }
+bool Weapon_Steady() { return g_steadySince >= 0 && NowS() - g_steadySince > 1.0; }
+void Weapons_ChargeNextShot() { g_nextCharged = true; }
+
 void Weapons_FireAlongBarrel() {
     Bolt b{};
     b.t0 = NowS();
     b.alongBarrel = true;
+    b.charged = g_nextCharged;
+    g_nextCharged = false;
     g_bolts.push_back(b);
     if (g_bolts.size() > 8) g_bolts.erase(g_bolts.begin());
     g_lastBarrelShot = b.t0;
@@ -608,10 +623,20 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         for (int r = 0; r < 3; r++) b.from[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
         if (b.alongBarrel) {  // the barrel (-Z of the weapon) in eye space -> world: to what it hits, else 30 m out
             float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]}, dw[3];
-            for (int r = 0; r < 3; r++) {
+            for (int r = 0; r < 3; r++)
                 dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
-                b.to[r] = b.from[r] + dw[r] * 30.0f;
+            {  // spread: a random deviation inside the current cone (the bolt you see is the shot that counts)
+                float s = (b.charged ? 0.5f : 1.0f) * g_spreadDeg * 3.14159265f / 180.0f;
+                float r1 = (rand() / (float)RAND_MAX) * 2 - 1, r2 = (rand() / (float)RAND_MAX) * 2 - 1;
+                float up[3] = {0, 0, 1}, side[3] = {dw[1] * up[2] - dw[2] * up[1], dw[2] * up[0] - dw[0] * up[2], dw[0] * up[1] - dw[1] * up[0]};
+                float sl = sqrtf(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]) + 1e-5f;
+                for (float& v : side) v /= sl;
+                float up2[3] = {side[1] * dw[2] - side[2] * dw[1], side[2] * dw[0] - side[0] * dw[2], side[0] * dw[1] - side[1] * dw[0]};
+                for (int r = 0; r < 3; r++) dw[r] += side[r] * r1 * s + up2[r] * r2 * s;
+                float l = sqrtf(dw[0] * dw[0] + dw[1] * dw[1] + dw[2] * dw[2]) + 1e-5f;
+                for (float& v : dw) v /= l;
             }
+            for (int r = 0; r < 3; r++) b.to[r] = b.from[r] + dw[r] * 30.0f;
             Melee_Shot(b.from, dw);  // v2: where the barrel points decides what the shot hits
             // the cursor follows the hand, so the game's own mouse-over point is where this shot meets a wall or a
             // body (no more bolts flying through walls); used when it lies along the barrel
@@ -731,7 +756,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         // a camera-facing ribbon: offset perpendicular to the streak in eye space
         float sx = pe[1][0] - pe[0][0], sy = pe[1][1] - pe[0][1];
         float sl = sqrtf(sx * sx + sy * sy) + 1e-5f;
-        float ox = -sy / sl * 0.018f, oy = sx / sl * 0.018f;
+        float thick = b.charged ? 0.04f : 0.018f;
+        float ox = -sy / sl * thick, oy = sx / sl * thick;
         for (int pass = 0; pass < 2; pass++) {
             float k = pass ? 1.0f : 3.0f, a = pass ? 1.0f : 0.25f;
             p_glColor4f(1.0f, pass ? 0.75f : 0.25f, pass ? 0.65f : 0.15f, a);
@@ -1081,6 +1107,39 @@ void Weapons_Draw(const float invEye[16]) {
     RefreshPoseAdj();
     g_muzzleValid = false;
     g_weaponValid[0] = g_weaponValid[1] = false;
+    // gun handling: hand speed, steadiness, the off hand on the barrel
+    if ((in.gripValid & 2) && !kProfiles[g_right].melee && g_right != WC_NONE) {
+        const float* rp = in.grip[1].pos;
+        double dt = g_prevGunT > 0 ? in.time - g_prevGunT : 0;
+        float sp = 0;
+        if (dt > 0.001 && dt < 0.2) {
+            float dx = rp[0] - g_prevGun[0], dy = rp[1] - g_prevGun[1], dz = rp[2] - g_prevGun[2];
+            sp = sqrtf(dx * dx + dy * dy + dz * dz) / (float)dt;
+        }
+        if (dt > 0.001 || g_prevGunT < 0) {
+            memcpy(g_prevGun, rp, 12);
+            g_prevGunT = in.time;
+        }
+        double now = NowS();
+        if (sp > 0.15f || g_steadySince < 0) g_steadySince = now;
+        // foregrip: the left hand within 12 cm of the barrel line (0..0.6 m along the aim from the gun hand)
+        g_foregrip = false;
+        if (in.gripValid & 1) {
+            const float* q = in.aim.quat;
+            float f[3] = {-(2 * (q[0] * q[2] + q[3] * q[1])), -(2 * (q[1] * q[2] - q[3] * q[0])), -(1 - 2 * (q[0] * q[0] + q[1] * q[1]))};
+            const float* lp = in.grip[0].pos;
+            float v[3] = {lp[0] - rp[0], lp[1] - rp[1], lp[2] - rp[2]};
+            float along = v[0] * f[0] + v[1] * f[1] + v[2] * f[2];
+            if (along > 0.05f && along < 0.6f) {
+                float px = v[0] - f[0] * along, py = v[1] - f[1] * along, pz = v[2] - f[2] * along;
+                g_foregrip = px * px + py * py + pz * pz < 0.12f * 0.12f;
+            }
+        }
+        float k = sp > 0.6f ? 1.8f : 1.0f;
+        if (g_foregrip) k *= 0.45f;
+        if (now - g_steadySince > 1.0) k *= 0.3f;
+        g_spreadDeg = 2.5f * k;
+    }
     g_palmValid = false;
     if (in.gripValid & 1) {
         float g[16];

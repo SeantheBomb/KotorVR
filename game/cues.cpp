@@ -362,9 +362,9 @@ void Cues_GlowColor(int hand, float rgb[3]) {
 
 void Cues_Move(int move) {
     if (!Features().cues) return;
-    static const float kColor[6][3] = {{1, 1, 1}, {1.0f, 0.5f, 0.1f}, {1.0f, 0.15f, 0.1f}, {0.3f, 0.6f, 1.0f},
-                                       {1.0f, 0.5f, 0.1f}, {0.3f, 0.6f, 1.0f}};
-    if (move < 1 || move > 5) return;
+    static const float kColor[7][3] = {{1, 1, 1}, {1.0f, 0.5f, 0.1f}, {1.0f, 0.15f, 0.1f}, {0.3f, 0.6f, 1.0f},
+                                       {1.0f, 0.5f, 0.1f}, {0.3f, 0.6f, 1.0f}, {0.9f, 0.95f, 1.0f}};
+    if (move < 1 || move > 6) return;
     memcpy(g_tint, kColor[move], sizeof g_tint);
     g_tintUntil = Now() + 0.8;
     if (move == 1) g_powerAt = Now();  // Power Attack: heavier blade
@@ -376,7 +376,7 @@ void Cues_Move(int move) {
         case 3: case 5:  // flurry / rapid: quick triple
             Haptic(0, 1, 0.8f, 0.05f, 200); Haptic(0.09, 1, 0.8f, 0.05f, 200); Haptic(0.18, 1, 0.8f, 0.05f, 200); break;
     }
-    static const char* names[6] = {"", "power", "critical", "flurry", "power shot", "rapid"};
+    static const char* names[7] = {"", "power", "critical", "flurry", "power shot", "rapid", "sniper"};
     Log("cue: move %s", names[move]);
 }
 

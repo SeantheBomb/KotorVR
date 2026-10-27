@@ -50,6 +50,11 @@ void* Weapon_CreatureById(DWORD id);
 bool Weapon_HoverClientId(DWORD* id);
 // Make a client object the current target (the default action R then acts on it), without a click.
 void Weapon_SetTarget(DWORD clientId);
+// Blaster handling: the current spread cone (deg), whether the gun hand has held still a second, and a Power Blast
+// for the next trigger shot.
+float Weapon_SpreadDeg();
+bool Weapon_Steady();
+void Weapons_ChargeNextShot();
 // The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
 // with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
 void Weapons_FireBolt(const float targetWorld[3], float delay);

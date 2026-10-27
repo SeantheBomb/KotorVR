@@ -221,6 +221,7 @@ void ApplySpecialMove(void* creature) {
         {91, 11, 0},   // flurry: improved, base
         {82, 18, 29},  // power blast
         {92, 30, 0},   // rapid shot: improved, base
+        {77, 20, 31},  // sniper shot: master, improved, base
     };
     typedef bool(__thiscall * CanUseFeat_t)(void*, unsigned short);
     const CanUseFeat_t CanUseFeat = (CanUseFeat_t)0x5A6680;

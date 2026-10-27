@@ -226,6 +226,11 @@ GestureMove Gestures_TakeMove(double seconds) {
     return m;
 }
 
+void Gestures_QueueMove(GestureMove m) {
+    g_move = m;
+    g_moveAt = g_now;
+}
+
 bool Gestures_Guarding(double seconds) { return g_now - g_lastGuardAt <= seconds; }
 bool Gestures_Dodged(double seconds) { return g_now - g_lastDodgeAt <= seconds; }
 double Gestures_GuardHeldFor() { return g_now - g_lastGuardAt <= 0.05 ? g_now - g_guardOnAt : -1; }

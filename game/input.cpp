@@ -264,11 +264,26 @@ void Input_Update(HWND wnd) {
         static bool rangedPickWanted;
         static double lastRangedPick = -10;
         bool rangedHeld = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
+        static double trigDownAt = -10, lastShotAt = -10;
         if (trigNow && !trigWas && inWorld && rangedHeld && !ringWasOpen && !Dialogue_Active()) {
-            // a gun fires when you pull its trigger: bolt, flash, recoil and sound right away; KotOR's d20 still
-            // decides hits and damage on its own schedule (outside a fight the shot is only that)
+            // a gun fires when you pull its trigger: bolt, flash, recoil and sound right away; where the barrel points
+            // decides what it hits (v2). Fire modes: a steady second before the pull = Sniper Shot, a quick second pull
+            // = Rapid Shot, a trigger held ~1 s and let go = Power Blast (an extra, heavier bolt).
+            if (Weapon_Steady()) Gestures_QueueMove(MOVE_SNIPER);
+            else if (now - lastShotAt < 0.45) Gestures_QueueMove(MOVE_RAPID);
             Weapons_FireAlongBarrel();
             Cues_Shot();
+            trigDownAt = now;
+            lastShotAt = now;
+        }
+        if (!trigNow && trigWas && inWorld && rangedHeld && trigDownAt > 0 && now - trigDownAt >= 0.8) {
+            Gestures_QueueMove(MOVE_POWER_SHOT);
+            Weapons_ChargeNextShot();
+            Weapons_FireAlongBarrel();
+            Cues_Shot();
+            VR_Haptic(1, 1.0f, 0.12f, 70);
+            Log("input: Power Blast");
+            trigDownAt = -10;
         }
         if (trigNow && !trigWas && fighting && !ringWasOpen) {
             bool ranged = rangedHeld;
