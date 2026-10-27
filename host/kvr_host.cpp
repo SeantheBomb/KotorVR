@@ -801,6 +801,8 @@ struct PointerResult {
     XrPosef aimLocal{};
     bool hitPanel = false;
     float u = 0, v = 0, dist = 0;
+    int panelHand = 1;       // the hand whose ray is tested against the panel (0 left: the HUD in the world)
+    XrPosef panelAim{};      // that hand's aim pose (LOCAL)
 };
 
 // Sync controllers, publish them to the game, and work out where the right-hand laser points.
@@ -846,9 +848,21 @@ static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& 
         pr.aimValid = true;
         pr.aimLocal = loc.pose;
     }
-    if (pr.aimValid && panelVisible) {
+    // Which hand points at the panel: the right one in menus; in the world (the HUD) only the left one, so the right
+    // hand's trigger always stays with the weapon (shots through the HUD used to click medpacs).
+    pr.panelHand = hud ? 0 : 1;
+    bool panelAimValid = pr.aimValid;
+    pr.panelAim = pr.aimLocal;
+    if (pr.panelHand == 0) {
+        XrSpaceLocation ll{XR_TYPE_SPACE_LOCATION};
+        panelAimValid = synced && XR_SUCCEEDED(xrLocateSpace(g_aimSpace[0], g_local, t, &ll)) &&
+                        (ll.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) &&
+                        (ll.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT);
+        if (panelAimValid) pr.panelAim = ll.pose;
+    }
+    if (panelAimValid && panelVisible) {
         XrPosef inv = PoseInv(panelPose);
-        XrPosef o = PoseMul(inv, pr.aimLocal);  // aim in panel space
+        XrPosef o = PoseMul(inv, pr.panelAim);  // aim in panel space
         Quat q{o.orientation.x, o.orientation.y, o.orientation.z, o.orientation.w};
         Vec3 d = qrot(q, {0, 0, -1});
         if (d.z < -1e-4f || d.z > 1e-4f) {
@@ -908,15 +922,17 @@ static PointerResult UpdateControls(XrTime t, bool panelVisible, const XrPosef& 
         }
     }
     in.time = (double)t * 1e-9;
+    if (pr.aimValid) {  // the right hand's aim, whatever the pointer is doing (shots and picks use it)
+        XrPosef rel = PoseMul(PoseInv(g_origin), pr.aimLocal);
+        memcpy(in.aim.pos, &rel.position, 12);
+        memcpy(in.aim.quat, &rel.orientation, 16);
+    }
     if (pr.hitPanel) {
-        in.pointerMode = KVR_POINTER_PANEL;
+        in.pointerMode = pr.panelHand == 0 ? KVR_POINTER_HUD_LEFT : KVR_POINTER_PANEL;
         in.panelU = pr.u;
         in.panelV = pr.v;
     } else if (pr.aimValid && world) {
         in.pointerMode = KVR_POINTER_WORLD;
-        XrPosef rel = PoseMul(PoseInv(g_origin), pr.aimLocal);
-        memcpy(in.aim.pos, &rel.position, 12);
-        memcpy(in.aim.quat, &rel.orientation, 16);
     } else {
         in.pointerMode = KVR_POINTER_NONE;
     }
@@ -1366,11 +1382,11 @@ static void Frame() {
         g_lastAim = pr.aimLocal;
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
         // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback
-        if (pr.aimValid && tracked && pr.hitPanel) {
+        if (tracked && pr.hitPanel) {
             const float cyan[4] = {0.2f, 0.8f, 1.0f, 1.0f}, white[4] = {1, 1, 1, 1};
             FillSwapchain(g_beamSc, cyan);
-            Quat aq{pr.aimLocal.orientation.x, pr.aimLocal.orientation.y, pr.aimLocal.orientation.z, pr.aimLocal.orientation.w};
-            Vec3 o = V(pr.aimLocal.position), d = qrot(aq, {0, 0, -1});
+            Quat aq{pr.panelAim.orientation.x, pr.panelAim.orientation.y, pr.panelAim.orientation.z, pr.panelAim.orientation.w};
+            Vec3 o = V(pr.panelAim.position), d = qrot(aq, {0, 0, -1});
             float len = pr.hitPanel ? pr.dist : 3.0f;
             Vec3 c = Add(o, Mul(d, len * 0.5f));
             Vec3 head = V(views[0].pose.position);

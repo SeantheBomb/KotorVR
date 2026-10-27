@@ -189,7 +189,10 @@ void Input_Update(HWND wnd) {
         float swingQ;
         // Attacks go through KotOR's Default Action (R) on the current target: clicking would make the character
         // walk to the floor when the swing / shot isn't over an enemy. Grip selects / uses what the hand points at.
-        bool inWorld = in.pointerMode == KVR_POINTER_WORLD && Features().gestures;
+        // the world context: the right hand points into the world, or the left hand is on the HUD (the right hand
+        // and its trigger still belong to the weapon then)
+        bool worldCtx = in.pointerMode == KVR_POINTER_WORLD || in.pointerMode == KVR_POINTER_HUD_LEFT;
+        bool inWorld = worldCtx && Features().gestures;
         bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
         if (Gestures_TakeSwing(&swingQ) && fighting) {
             if (Combat_PlayerAttacking()) {  // KotOR repeats the attack by itself: the swing only counts for timing
@@ -235,10 +238,20 @@ void Input_Update(HWND wnd) {
         if (!(in.buttons & KVR_BTN_B)) eatB = false;
         if ((in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) && !eatB) keys[DIK_ESCAPE] = 0x80;   // menu / back
         if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
-        // click: trigger on the HUD; in the world either trigger or a grip squeeze uses / talks to / attacks the
-        // object your right hand points at (the game highlights it through its own hover feedback)
-        bool world = in.pointerMode == KVR_POINTER_WORLD;
-        mouse[0] = !world && in.trigR > 0.6f && !Dialogue_Active();
+        // click: in menus the right trigger on the panel; in the world the HUD only answers the LEFT hand's trigger, so
+        // the right trigger always stays the weapon. Each press keeps the owner it started with until released (a shot
+        // that drifts onto a panel never becomes a click, and the other way round).
+        bool world = worldCtx;
+        static int rOwner;  // right trigger press: 0 none, 1 world / weapon, 2 panel click
+        bool rDown = in.trigR > 0.6f;
+        if (!rDown) rOwner = 0;
+        else if (!rOwner) rOwner = in.pointerMode == KVR_POINTER_PANEL ? 2 : 1;
+        static int lOwner;  // left trigger press: 0 none, 1 HUD click, 2 other (right mouse button in menus)
+        bool lDown = in.trigL > 0.6f;
+        if (!lDown) lOwner = 0;
+        else if (!lOwner) lOwner = in.pointerMode == KVR_POINTER_HUD_LEFT ? 1 : 2;
+        mouse[0] = ((rOwner == 2 && in.pointerMode == KVR_POINTER_PANEL) ||
+                    (lOwner == 1 && in.pointerMode == KVR_POINTER_HUD_LEFT)) && !Dialogue_Active();
         // World grip: no mouse click at all (KotOR draws the target's action menu right at the target, so a click there
         // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
         // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes
@@ -282,12 +295,12 @@ void Input_Update(HWND wnd) {
             }
         }
         gripWas = gripNow;
-        mouse[1] = in.trigL > 0.6f;
+        mouse[1] = lOwner == 2 && !world;  // the left trigger is the right mouse button in menus only
 
         // cursor steering toward the pointer target
         float tx, ty;
         bool haveTarget = false;
-        if (in.pointerMode == KVR_POINTER_PANEL) {
+        if (in.pointerMode == KVR_POINTER_PANEL || in.pointerMode == KVR_POINTER_HUD_LEFT) {
             int w, h;
             VR_ClientSize(&w, &h);
             tx = in.panelU * w;

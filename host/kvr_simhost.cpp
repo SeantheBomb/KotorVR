@@ -747,7 +747,21 @@ int main(int argc, char** argv) {
             RunFor(0.1);
         } else if (cmd == "pointer") {
             // "pointer none" stops pointing; "pointer world" points the right hand where the head looks
+            // "pointer hud u= v=": the LEFT hand on the HUD in the world (the left trigger clicks it)
             g_ctl.pointer = (!args.empty() && args[0] == "world") ? KVR_POINTER_WORLD : KVR_POINTER_NONE;
+            if (!args.empty() && args[0] == "hud") {
+                double u = 0.5, vv = 0.5;
+                Arg(args, "u", u);
+                Arg(args, "v", vv);
+                g_ctl.pointer = KVR_POINTER_HUD_LEFT;
+                g_ctl.u = (float)u;
+                g_ctl.v = (float)vv;
+            }
+        } else if (cmd == "triggerl") {  // left trigger tap
+            g_ctl.trigL = 1;
+            RunFor(0.15);
+            g_ctl.trigL = 0;
+            RunFor(0.1);
         } else if (cmd == "shot") {
             std::string name = args.empty() ? "shot" : args[0];
             RunFor(0.3);  // a few fresh frames of both eyes at the current pose

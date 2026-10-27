@@ -57,7 +57,9 @@ enum : uint32_t {
     KVR_BTN_RSTICK = 1u << 6,
 };
 
-enum : uint32_t { KVR_POINTER_NONE = 0, KVR_POINTER_PANEL = 1, KVR_POINTER_WORLD = 2 };
+// HUD_LEFT: in the world only the left hand points at the HUD (left trigger clicks it); the right hand and trigger
+// stay with the weapon / world (aim is still the right hand).
+enum : uint32_t { KVR_POINTER_NONE = 0, KVR_POINTER_PANEL = 1, KVR_POINTER_WORLD = 2, KVR_POINTER_HUD_LEFT = 3 };
 
 // Host -> game controller state. Written under a seqlock like KvrHostState.
 struct KvrInput {
