@@ -1,6 +1,6 @@
 # KotOR VR v2 proposal: real-time, physical combat
 
-Status: proposal only (2026-10-27). Nothing here is implemented. v1 keeps KotOR's d20 rounds with VR gestures,
+Status: in progress on branch v2 - see "Status" below. v1 keeps KotOR's d20 rounds with VR gestures,
 timing bonuses and impact-time blocks layered on top; v2 makes what your hands physically do decide what happens,
 with the d20 kept as the damage and defence model underneath.
 
