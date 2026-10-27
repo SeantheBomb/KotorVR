@@ -78,8 +78,30 @@ Order: barrel hits + bone reactions, then telegraphed bolts + dodge / cover, the
   low-health heartbeat.
 
 ### 5. Force powers by gesture (M)
-- v1 maps push / pull gestures to action slots. v2: aim with the hand (target = what the palm faces), power
-  chosen by gesture shape (push, lift, lightning = fingers spread), charge by holding.
+K1 has ~15 power families with up to 3 tiers (40-odd powers). A small gesture vocabulary with depth inside each
+gesture, not more gestures - a misread gesture is a new way to fail (Until You Fall).
+- Gesture = family: push (palm-out shove; JKXR classifier: > 2.09 m/s, > 0.15 m travel, palm direction), pull
+  (palm-in yank; also Saber Throw's catch), grip / choke (close the hand on a target, lift), lightning (fingers
+  spread, held), stasis / stun (palm out, held still).
+- How you do it = tier: one hand = single target (Push, Lightning, Stun); both hands together = area (Whirlwind ->
+  Wave, Storm, Stasis Field, Death Field); holding longer charges up to the highest tier known (B&S More Star Wars
+  Repulse). The bigger, two-handed version is the stronger one.
+- Aim with the palm, lock before release (Half-Life: Alyx highlight -> lock -> confirm): the faced target is
+  highlighted and the power fires only on a locked target - no misfires into walls or companions.
+- The rest on the wrist panel: self-buffs, mind and droid powers (Speed, Valor / Armor, Heal, Affect Mind, Destroy
+  Droid, Drain Life) on a hand-hover radial (Skyrim VR Spell Wheel); opening it can use KotOR's own pause. Self-buffs
+  cast with hand-to-chest (hold = Heal, touch and push out = Speed). The radial also chooses what the "held still"
+  and "spread" gestures cast (Stun vs Slow etc.).
+- Perfect parries and deflects refund a little Force (Fallen Order), so mixing saber and Force is the efficient play.
+- Juice: hand glow tinted by alignment, haptic hum rising while charging, release burst, short hit-pause on the
+  target, the engine's own force-pushed / choke / stun reactions; a resisted Will save shows a shimmer.
+- Rules stay KotOR's: Force point cost, Will save vs the power's DC, tiers gated by what you know; each family gets a
+  short recovery instead of a round lock.
+- Risk: cast latency - casting queues KotOR's cast action, whose animation plays before the effect lands. Measure
+  first; fallback is applying the effect directly (force-pushed, stun) while charging FP and rolling the save
+  ourselves.
+- Order: push / pull with palm lock, charge tiers + two-handed AoE, wrist radial + chest-cast buffs, Saber Throw
+  with catch.
 
 ## Risks
 
