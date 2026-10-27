@@ -25,7 +25,8 @@ One-time (already done on this PC), from your own game files:
 | **Conversations** — point at a reply + right trigger | pick it (panel floats in front of you: the speaker's line on top, replies below; the laser shows while you point at it) |
 | **In combat** — melee swing | attack the current target (once attacking, swings only count for timing) |
 | **In combat** — overhead chop / forward thrust / 2 quick swings | Power Attack / Critical Strike / Flurry (best rank you have) |
-| **In combat** — right trigger | attack the current target (ranged: steady aim = better shot) |
+| Right trigger with a blaster (anywhere in the world) | fires at once: bolt down the barrel, muzzle flash, recoil, the gun's own sound |
+| **In combat** — right trigger | also attacks the target you point at (KotOR's roll decides hits; steady aim = better shot) |
 | **In combat** — shot after 1.2 s steady aim / 2 quick shots | Power Blast / Rapid Shot (best rank you have) |
 | **In combat** — left hand thrust forward | target action slot 2 (Force powers) |
 | **In combat** — left hand yank back | personal power slot (heal, speed, …) |

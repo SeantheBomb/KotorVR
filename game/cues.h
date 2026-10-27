@@ -38,4 +38,6 @@ void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the
 // hum's state plus the blade tip speed (m/s), which bends its pitch and volume and triggers swing whooshes.
 void Cues_SaberIgnite(bool on);
+// A blaster shot leaves the barrel (the trigger was pulled): the weapon's own fire sound, right away.
+void Cues_Shot();
 void Cues_SaberHum(bool on, float tipSpeed);

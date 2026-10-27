@@ -363,6 +363,13 @@ float Cues_ForceGlow(int hand) {
     return age < 0.5 ? (float)(1.0 - age / 0.5) : 0;
 }
 
+void Cues_Shot() {
+    if (!Features().cues) return;
+    WeaponClass c = Weapon_Right();
+    const char* snd = c == WC_REPEATER ? "cb_sh_hvybl1" : c == WC_RIFLE ? "cb_sh_medbl1" : "cb_sh_blast1";
+    PlayResref(snd, 1.0f, 0.97f + (rand() % 7) * 0.01f);  // a touch of pitch variety
+}
+
 float Cues_Sparks(double* age, float rgb[3]) {
     *age = Now() - g_sparkAt;
     rgb[0] = g_sparkBlock ? 0.6f : 1.0f;

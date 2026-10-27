@@ -208,8 +208,15 @@ void Input_Update(HWND wnd) {
         bool trigNow = in.trigR > 0.6f;
         static bool rangedPickWanted;
         static double lastRangedPick = -10;
+        bool rangedHeld = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
+        if (trigNow && !trigWas && inWorld && rangedHeld && !ringWasOpen && !Dialogue_Active()) {
+            // a gun fires when you pull its trigger: bolt, flash, recoil and sound right away; KotOR's d20 still
+            // decides hits and damage on its own schedule (outside a fight the shot is only that)
+            Weapons_FireAlongBarrel();
+            Cues_Shot();
+        }
         if (trigNow && !trigWas && fighting && !ringWasOpen) {
-            bool ranged = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
+            bool ranged = rangedHeld;
             if (ranged) {
                 Gestures_OnShot();
                 // shoot what you point at: pick along the hand (target) + attack; at most once a second (KotOR

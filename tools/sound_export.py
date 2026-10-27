@@ -24,6 +24,8 @@ DEFAULTS = [
     "cb_ls_powerup", "cb_ls_powerdown", "cb_ls_humgood", "cb_ls_swingshrt1", "cb_ls_swingshrt2", "cb_ls_swingshrt3",
     # on-beat hit landing (saber)
     "cb_ls_hithard1", "cb_ls_hithard2",
+    # blaster fire on the trigger pull: pistol, rifle, heavy
+    "cb_sh_blast1", "cb_sh_medbl1", "cb_sh_hvybl1",
 ]
 
 

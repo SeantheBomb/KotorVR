@@ -47,3 +47,6 @@ void* Weapon_CreatureById(DWORD id);
 // The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
 // with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
 void Weapons_FireBolt(const float targetWorld[3], float delay);
+// The trigger was pulled on a ranged weapon: a bolt leaves the barrel right now, along it (with the muzzle flash and
+// recoil). KotOR's own shot for the attack it then rolls is not drawn again within 0.8 s.
+void Weapons_FireAlongBarrel();

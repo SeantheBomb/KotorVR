@@ -425,7 +425,9 @@ struct Bolt {
     float to[3];        // world target
     float from[3];      // world muzzle, set on the first frame after t0
     bool fromSet;
+    bool alongBarrel;   // fired by the trigger: flies 30 m down the barrel instead of at a target
 };
+static double g_lastBarrelShot = -10;
 static std::vector<Bolt> g_bolts;
 static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix in eye space (tip along -Z)
 static float g_muzzleLen;
@@ -435,7 +437,17 @@ static double g_lastFlash = -10;
 
 static double NowS() { return GetTickCount() / 1000.0; }
 
+void Weapons_FireAlongBarrel() {
+    Bolt b{};
+    b.t0 = NowS();
+    b.alongBarrel = true;
+    g_bolts.push_back(b);
+    if (g_bolts.size() > 8) g_bolts.erase(g_bolts.begin());
+    g_lastBarrelShot = b.t0;
+}
+
 void Weapons_FireBolt(const float targetWorld[3], float delay) {
+    if (NowS() - g_lastBarrelShot < 0.8) return;  // the trigger pull already showed this shot
     Bolt b{};
     b.t0 = NowS() + delay;
     memcpy(b.to, targetWorld, sizeof b.to);
@@ -467,6 +479,13 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                        g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
         float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
         for (int r = 0; r < 3; r++) b.from[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
+        if (b.alongBarrel) {  // the barrel (-Z of the weapon) in eye space -> world, 30 m out
+            float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]};
+            for (int r = 0; r < 3; r++) {
+                float dw = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
+                b.to[r] = b.from[r] + dw * 30.0f;
+            }
+        }
         b.fromSet = true;
         g_lastFlash = tnow;
         VR_Haptic(1, 0.9f, 0.06f, 140);  // recoil kick
