@@ -35,6 +35,9 @@ One-time (already done on this PC), from your own game files:
 | X | switch character (Tab) |
 | Y | hide / show the HUD |
 
+Cutscenes stay in first person whenever you can see what the shot shows (a hidden probe finds the shot's subject,
+then checks your line of sight to it); `[Comfort] CutsceneFirstPerson=1` in kvr.ini never cuts away.
+
 Attack gestures only fire while KotOR is in combat (outside it, KotOR's Default Action would *use* the target).
 Start a fight by gripping on an enemy.
 

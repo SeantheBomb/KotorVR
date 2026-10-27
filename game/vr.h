@@ -48,6 +48,8 @@ bool VR_AimPick(KvrPose* out);
 // is not shown. Result next frame: 1 = clear, 0 = blocked, -1 = none pending.
 void VR_RequestLosProbe(float distance);
 int VR_LosProbeResult();
+// distance (m) to the first surface at the probe frame's view centre (1e6: nothing), valid with a result
+float VR_LosProbeDepth();
 // Ask the host for one controller rumble pulse (hand 0 left, 1 right); amplitude 0..1, seconds, Hz (0 = default).
 void VR_Haptic(int hand, float amplitude, float duration, float frequency);
 // Host text panels (KvrTextPanel): slot 0..3, anchor KVR_ANCHOR_*, pose in the anchor frame, width in meters,

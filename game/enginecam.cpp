@@ -97,9 +97,13 @@ void QuatFromRows(const float m[9], float q[4]) {
     }
 }
 
-// cutscene shots: one hidden line-of-sight probe per shot decides first person (clear) or the game's cut (blocked)
+// cutscene shots: two hidden probe frames per shot decide first person (you can see what the shot shows) or the
+// game's cut (you can't): first from the shot camera itself, for the point it looks at (its view centre), then from
+// the eye toward that point.
 float g_shotPos[3], g_shotQ[4];
-int g_shotMode;  // 0 none, 1 first person, 2 cut, 3 probe this frame, 4 waiting for the result
+float g_subject[3];  // the point the current shot looks at
+// 0 none, 1 first person, 2 cut, 3 subject probe this frame, 4 waiting for it, 5 eye probe this frame, 6 waiting
+int g_shotMode;
 
 // aim picks (VR_BeginAimPick): the camera looks along the hand and is left that way for the game's own mouse picking
 bool g_pickApplied, g_leftAimed;
@@ -202,15 +206,16 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             }
         }
     } else if (g_havePlay) {
-        // Dialogue / cutscene camera: stay in the character's head unless the shot is out of their line of sight.
-        // Each new shot (the scripted camera jumps) gets one hidden probe frame rendered from the eye toward the
-        // scripted camera; if nothing is in between, the shot shows something you could see: stay first person.
+        // Dialogue / cutscene camera: stay in the character's head unless what the shot shows is out of their line
+        // of sight ([Comfort] CutsceneFirstPerson=1: always stay). Each new shot (the scripted camera jumps) gets two
+        // hidden probe frames: the shot camera's own view for its subject (the surface at its centre), then the eye
+        // toward that subject.
         float sdx = g_origPos[0] - g_shotPos[0], sdy = g_origPos[1] - g_shotPos[1], sdz = g_origPos[2] - g_shotPos[2];
         float qd = fabsf(g_origQ[0] * g_shotQ[0] + g_origQ[1] * g_shotQ[1] + g_origQ[2] * g_shotQ[2] + g_origQ[3] * g_shotQ[3]);
         if (g_shotMode == 0 || sdx * sdx + sdy * sdy + sdz * sdz > 0.5f * 0.5f || qd < 0.996f) {  // a cut (> ~10 deg)
             memcpy(g_shotPos, g_origPos, sizeof g_shotPos);
             memcpy(g_shotQ, g_origQ, sizeof g_shotQ);
-            g_shotMode = 3;
+            g_shotMode = Features().cutsceneFirstPerson ? 1 : 3;
         }
         // the character's eye (follows them if the scene walks them somewhere)
         const float* headPos = g_playPos;
@@ -219,12 +224,33 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             for (int i = 0; i < 3; i++) g_followPos[i] = cp[i] + g_eyeOffset[i];
             headPos = g_followPos;
         }
-        if (g_shotMode == 4) {
-            int r = VR_LosProbeResult();
-            if (r >= 0) g_shotMode = r ? 1 : 2;
+        if (g_shotMode == 4 && VR_LosProbeResult() >= 0) {
+            // the shot's subject: its view centre, or 8 m out when it looks at nothing (sky, a far skybox)
+            float depth = VR_LosProbeDepth();
+            if (depth > 60.0f) depth = 8.0f;
+            float M0[9];
+            QuatWxyzToRows(g_shotQ, M0);
+            for (int i = 0; i < 3; i++) g_subject[i] = g_shotPos[i] - M0[i * 3 + 2] * depth;  // forward = -Z column
+            g_shotMode = 5;
         }
-        if (g_shotMode == 3 || g_shotMode == 4) {  // probe frame: from the eye straight at the scripted camera
-            float f[3] = {g_origPos[0] - headPos[0], g_origPos[1] - headPos[1], g_origPos[2] - headPos[2]};
+        if (g_shotMode == 6) {
+            int r = VR_LosProbeResult();
+            if (r >= 0) {
+                g_shotMode = r ? 1 : 2;
+                Log("cutscene: eye -> subject: first hit at %.1f m -> %s", VR_LosProbeDepth(),
+                    r ? "visible, stay first person" : "hidden, cut to the game's shot");
+            }
+        }
+        if (g_shotMode == 3 || g_shotMode == 4) {  // probe 1: the shot camera's own view (hidden)
+            eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
+            eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;
+            eye.quat[3] = 1;
+            if (g_shotMode == 3) {
+                VR_RequestLosProbe(1e6f);
+                g_shotMode = 4;
+            }
+        } else if (g_shotMode == 5 || g_shotMode == 6) {  // probe 2: from the eye at the subject (hidden)
+            float f[3] = {g_subject[0] - headPos[0], g_subject[1] - headPos[1], g_subject[2] - headPos[2]};
             float dist = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
             static float probeQ[4];
             QuatLookAlong(f, probeQ);
@@ -233,9 +259,10 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             eye.pos[0] = eye.pos[1] = eye.pos[2] = 0;
             eye.quat[0] = eye.quat[1] = eye.quat[2] = 0;
             eye.quat[3] = 1;
-            if (g_shotMode == 3) {
+            if (g_shotMode == 5) {
                 VR_RequestLosProbe(dist);
-                g_shotMode = 4;
+                g_shotMode = 6;
+                Log("cutscene: shot subject %.1f m from the eye", dist);
             }
         } else if (g_shotMode == 1) {
             basePos = headPos;

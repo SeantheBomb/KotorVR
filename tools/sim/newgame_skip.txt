@@ -42,3 +42,9 @@ shot skipped
 wait_world 180
 wait 8
 shot room
+wait 6
+shot conv1
+wait 6
+shot conv2
+wait 6
+shot conv3

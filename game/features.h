@@ -15,6 +15,7 @@ struct FeatureFlags {
     bool snapTurn;       // [Comfort] SnapTurn=1: right stick turns in SnapAngle steps instead of smoothly
     float snapAngle;     // [Comfort] SnapAngle (degrees, default 30)
     float turnSpeed;     // [Comfort] TurnSpeed (degrees per second at full stick, default 120)
+    bool cutsceneFirstPerson;  // [Comfort] CutsceneFirstPerson=1: never cut away from first person in cutscenes
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };
 

@@ -376,6 +376,7 @@ static double g_pickUntilMs;  // aim pick active until (NowMs)
 static int g_probeState;         // 0 idle, 1 probing this frame, 2 result ready
 static float g_probeDist;
 static bool g_probeClear;
+static float g_probeDepth;
 static KvrPose g_pickPose;
 
 static bool g_eyeChosen;
@@ -579,9 +580,10 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
         p_rp(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
         double zn = g_zn, zf = g_zf, ndc = 2.0 * d - 1.0;
         double eyeZ = 2.0 * zn * zf / (zf + zn - ndc * (zf - zn));
-        g_probeClear = d >= 0.99999f || eyeZ >= g_probeDist - 0.6;
-        g_log("cutscene: line of sight to the shot camera (%.1f m): first hit at %.1f m -> %s", g_probeDist, eyeZ,
-              g_probeClear ? "clear, stay first person" : "blocked, cut");
+        g_probeDepth = d >= 0.99999f ? 1e6f : (float)eyeZ;
+        // the target is a surface point (what the shot looks at): reaching its near side counts
+        double margin = g_probeDist * 0.15 > 1.0 ? g_probeDist * 0.15 : 1.0;
+        g_probeClear = d >= 0.99999f || eyeZ >= g_probeDist - margin;
         g_probeState = 2;
     } else if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
         DrawHandItems();
@@ -643,6 +645,7 @@ void VR_OnSwap(HDC dc) {
             if (g_probeState == 1) {
                 if (++probeFrames > 3) {
                     g_probeClear = true;
+                    g_probeDepth = 1e6f;
                     g_probeState = 2;
                     g_log("cutscene: line-of-sight probe not answered, staying first person");
                 }
@@ -754,6 +757,7 @@ void VR_RequestLosProbe(float distance) {
     g_probeState = 1;
 }
 
+float VR_LosProbeDepth() { return g_probeDepth; }
 int VR_LosProbeResult() {
     if (g_probeState != 2) return -1;
     g_probeState = 0;
