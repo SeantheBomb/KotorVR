@@ -1646,8 +1646,8 @@ static void AddFlashLayer(std::vector<XrCompositionLayerBaseHeader*>& layers) {
 // The flat HUD's pieces (menu row, minimap, party, quick slots, toggles - rectangles from the game, KvrHudLayout)
 // cropped out of the GUI frame onto a panel along the left forearm. It shows while the left palm faces the eyes; the
 // right index fingertip hovers and pokes it, which the game receives as the cursor on (and a click of) the real,
-// hidden HUD control. From 10 cm out a short ray from the fingertip and a dot show where it is over (the dot turns
-// gold on a button); then a poke, or the right trigger, presses it (2026-10-27: pokes alone were too hit and miss).
+// hidden HUD control. The right hand's laser points at it (a beam and a dot, gold on a button) and the right trigger
+// clicks (2026-10-27: fingertip pokes were too imprecise).
 static const int kWristW = 1024, kWristH = 512;
 struct WristZone {
     float dst[4];  // wrist texture px: x, y, w, h (where the crop is drawn)
@@ -1804,43 +1804,52 @@ static XrCompositionLayerQuad* UpdateWrist(const XrPosef& head, const PointerRes
     Vec3 qz = X, qy = Mul(Z, -1.0f), qx = Cross(qy, qz);
     g_wrist.pose.orientation = QuatFromBasis(qx, qy, qz);
     g_wrist.pose.position = {c.x, c.y, c.z};
-    // the fingertip
-    XrVector3f tip;
-    if (FingerTip(pr, &tip)) {
-        Vec3 d = Sub(V(tip), c);
-        float px = Dot(d, qx), py = Dot(d, qy), pz = Dot(d, qz);
-        float u = px / g_wrist.w + 0.5f, v = 0.5f - py / g_wrist.h;
-        if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && pz > -0.03f && pz < 0.10f) {
-            g_wrist.nearTip = true;
-            Vec3 pp = Add(Add(c, Mul(qx, px)), Mul(qy, py));
-            g_wrist.proj = {pp.x, pp.y, pp.z};
-            float wx = u * kWristW, wy = v * kWristH;
-            for (int i = 0; i < g_wristZoneCount; i++) {
-                const WristZone& z = g_wristZones[i];
-                if (wx < z.dst[0] || wy < z.dst[1] || wx > z.dst[0] + z.dst[2] || wy > z.dst[1] + z.dst[3]) continue;
-                float sx = z.src[0] + (wx - z.dst[0]) / z.dst[2] * z.src[2];
-                float sy = z.src[1] + (wy - z.dst[1]) / z.dst[3] * z.src[3];
-                g_wrist.hover = true;
-                g_wrist.u = sx / g_sharedW;
-                g_wrist.v = sy / g_sharedH;
-                break;
+    // the right hand's laser (2026-10-27: fingertip pokes were too imprecise on buttons this small): the aim ray
+    // against the panel; the trigger clicks what the dot is on (pointer mode "panel": the game's own click path)
+    if (pr.aimValid) {
+        Vec3 o = V(pr.aimLocal.position);
+        Quat aq{pr.aimLocal.orientation.x, pr.aimLocal.orientation.y, pr.aimLocal.orientation.z, pr.aimLocal.orientation.w};
+        Vec3 d = qrot(aq, {0, 0, -1});
+        float den = Dot(d, qz);
+        if (den < -0.05f) {  // facing the panel
+            float t = Dot(Sub(c, o), qz) / den;
+            if (t > 0.02f && t < 1.2f) {
+                Vec3 hit = Add(o, Mul(d, t));
+                Vec3 rel = Sub(hit, c);
+                float px = Dot(rel, qx), py = Dot(rel, qy);
+                float u = px / g_wrist.w + 0.5f, v = 0.5f - py / g_wrist.h;
+                if (u >= -0.05f && u <= 1.05f && v >= -0.1f && v <= 1.1f) {
+                    g_wrist.nearTip = true;
+                    g_wrist.tip = {o.x, o.y, o.z};
+                    g_wrist.proj = {hit.x, hit.y, hit.z};
+                    float wx = u * kWristW, wy = v * kWristH;
+                    static int lastZone = -1;
+                    int zone = -1;
+                    for (int i = 0; i < g_wristZoneCount; i++) {
+                        const WristZone& z = g_wristZones[i];
+                        if (wx < z.dst[0] || wy < z.dst[1] || wx > z.dst[0] + z.dst[2] || wy > z.dst[1] + z.dst[3]) continue;
+                        float sx = z.src[0] + (wx - z.dst[0]) / z.dst[2] * z.src[2];
+                        float sy = z.src[1] + (wy - z.dst[1]) / z.dst[3] * z.src[3];
+                        g_wrist.hover = true;
+                        g_wrist.u = sx / g_sharedW;
+                        g_wrist.v = sy / g_sharedH;
+                        zone = i;
+                        break;
+                    }
+                    if (zone >= 0 && zone != lastZone) {  // a light tick entering a piece of the HUD
+                        KvrHaptic& hp = g_shm->haptic[1];
+                        hp.amplitude = 0.25f;
+                        hp.duration = 0.015f;
+                        hp.frequency = 200;
+                        MemoryBarrier();
+                        hp.serial = hp.serial + 1;
+                    }
+                    lastZone = zone;
+                }
             }
-            g_wrist.tip = tip;
-            // push through the surface = press; back out past 1.2 cm = release
-            bool was = g_wrist.poke;
-            g_wrist.poke = g_wrist.hover && (was ? pz < 0.012f : pz < 0.004f);
-            if (g_wrist.poke && !was) {  // a tick in the poking hand
-                KvrHaptic& hp = g_shm->haptic[1];
-                hp.amplitude = 0.5f;
-                hp.duration = 0.025f;
-                hp.frequency = 220;
-                MemoryBarrier();
-                hp.serial = hp.serial + 1;
-            }
-        } else {
-            g_wrist.poke = false;
         }
     }
+    g_wrist.poke = false;
     DrawWrist();
     q.space = g_local;
     q.pose = g_wrist.pose;
@@ -2028,7 +2037,7 @@ static void Frame() {
                 wbeam.space = g_local;
                 wbeam.pose.orientation = QuatFromBasis(x, d, z);
                 wbeam.pose.position = {c.x, c.y, c.z};
-                wbeam.size = {0.002f, len};
+                wbeam.size = {0.003f, len};
                 wbeam.subImage.swapchain = g_beamSc.handle;
                 wbeam.subImage.imageRect = {{0, 0}, {g_beamSc.w, g_beamSc.h}};
                 layers.push_back((XrCompositionLayerBaseHeader*)&wbeam);
@@ -2040,7 +2049,7 @@ static void Frame() {
             wdot.space = g_local;
             wdot.pose.orientation = g_wrist.pose.orientation;
             wdot.pose.position = {dp.x, dp.y, dp.z};
-            float ds = g_wrist.poke ? 0.006f : 0.009f;
+            float ds = 0.008f;
             wdot.size = {ds, ds};
             wdot.subImage.swapchain = g_dotSc.handle;
             wdot.subImage.imageRect = {{0, 0}, {g_dotSc.w, g_dotSc.h}};

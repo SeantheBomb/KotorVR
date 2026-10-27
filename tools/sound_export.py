@@ -48,8 +48,15 @@ def main():
         except KeyError:
             print(f"not in the game files: {r}")
             continue
-        with open(os.path.join(out, r + ".wav"), "wb") as f:
+        path = os.path.join(out, r + ".wav")
+        with open(path, "wb") as f:
             f.write(data)
+        # the mod's mixer plays PCM only: some sounds (the blaster shots) are IMA ADPCM -> convert with ffmpeg
+        if len(data) > 22 and data[20:22] != b"\x01\x00":
+            import subprocess
+            tmp = path + ".pcm.wav"
+            subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", path, "-acodec", "pcm_s16le", tmp], check=True)
+            os.replace(tmp, path)
         done += 1
     print(f"{done} sounds -> {out}")
 

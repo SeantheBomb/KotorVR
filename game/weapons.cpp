@@ -627,7 +627,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                   g_bolts.end());
     float hover[3];
     const KvrShared* hshm = VR_Shared();
-    bool showHover = hshm && hshm->input.pointerMode == KVR_POINTER_WORLD && !Dialogue_Showing() && HoverPos(hover);
+    bool showHover = hshm && hshm->input.pointerMode == KVR_POINTER_WORLD && !hshm->cinematic && !hshm->menuOpen &&
+                     !Dialogue_Showing() && HoverPos(hover);
     if (n == 0 && !anyBolt && !showHover) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
@@ -772,7 +773,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         bool close = adx * adx + ady * ady < 3.0f * 3.0f;
         wp[0] = ap[0];
         wp[1] = ap[1];
-        wp[2] = ap[2] + (close ? 1.3f : 2.1f);  // creature origin is at its feet
+        (void)close;
+        wp[2] = ap[2] + 2.15f;  // over the head (creature origin is at its feet); above your view -> the edge arrow
         ToEye(worldView, wp, e);
         // out of view (behind, or > 40 deg to the side / 35 deg up or down): an arrow at the edge of your view points
         // the way to turn
@@ -793,7 +795,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
             continue;
         }
-        float s = parry ? 0.22f : 0.15f;
+        float s = parry ? 0.16f : 0.11f;
         if (left > 0) {  // timing ring: closes from 3.5x onto the chevron at the impact
             float rr = s * (1.0f + 2.5f * frac);
             if (p_glLineWidth) p_glLineWidth(3.0f);
@@ -819,12 +821,12 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
         }
     }
-    if (showHover) {  // a gently pulsing ring on the floor around what the hand points at
-        float pulse = 0.45f + 0.04f * sinf((float)tnow * 6.0f);
-        if (p_glLineWidth) p_glLineWidth(4.0f);
-        for (int pass = 0; pass < 2; pass++) {
-            float rr = pass ? pulse : pulse + 0.03f;
-            p_glColor4f(0.75f, 0.95f, 1.0f, pass ? 0.9f : 0.3f);
+    if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
+        float pulse = 0.42f;
+        if (p_glLineWidth) p_glLineWidth(1.5f);
+        for (int pass = 1; pass < 2; pass++) {
+            float rr = pulse;
+            p_glColor4f(0.75f, 0.92f, 1.0f, 0.28f);
             p_glBegin(GL_LINE_LOOP);
             for (int k = 0; k < 40; k++) {
                 float an = k * (6.2831853f / 40), p[3] = {hover[0] + rr * cosf(an), hover[1] + rr * sinf(an), hover[2] + 0.04f}, e[3];

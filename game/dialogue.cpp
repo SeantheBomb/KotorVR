@@ -63,7 +63,8 @@ void* volatile g_replyPanel;  // the panel holding the replies (NPC conversation
 bool g_showing;
 int g_shownReplies;
 bool g_trigWas;
-DWORD g_skipAt;  // A / B skip pressed (GetTickCount), 0 = never
+DWORD g_skipAt;  // B skip pressed (GetTickCount), 0 = never
+DWORD g_endedAt;  // the last conversation ended (GetTickCount), 0 = never
 
 std::string ToUtf8(const char* s, int len) {
     if (!s || len <= 0) return std::string();
@@ -107,6 +108,9 @@ extern "C" void __cdecl Dialogue_MessagePre(void* panel, const void* exo) {
     std::string m = exo ? ReadExo(exo) : std::string();
     if (m.find_first_not_of(" \t\r\n") == std::string::npos) m.clear();  // blank lines (the opening's) are no caption
     Log("dialogue: message (panel %p) t=%lu: %.40s", panel, GetTickCount(), m.c_str());
+    // An empty message is a panel clearing its subtitle - often the other dialog panel, 16 ms after the real line
+    // arrived (2026-10-27 log): it used to wipe the caption and its replies. Keep the last line until the next one.
+    if (m.empty()) return;
     EnterCriticalSection(&g_lock);
     g_panel = panel;
     g_message.swap(m);
@@ -286,6 +290,7 @@ BYTE Dialogue_Update(const KvrInput& in) {
         Log("dialogue: over");
         VR_HideText(kSlot);
         g_showing = false;
+        g_endedAt = GetTickCount();
     }
     if (g_dirty && open) {
         EnterCriticalSection(&g_lock);
@@ -335,7 +340,7 @@ BYTE Dialogue_Update(const KvrInput& in) {
     // while the line plays (panel flags +0x1DF8: bit 1 set, bit 2 clear). Once the line is over Enter would pick the
     // highlighted reply instead, so it is only sent while the line plays.
     static bool skipWas;
-    bool skip = (in.buttons & (KVR_BTN_A | KVR_BTN_B)) != 0;
+    bool skip = (in.buttons & KVR_BTN_B) != 0;  // B only: A is pause
     if (g_showing && skip && !skipWas && !key) {
         int flags = LineFlags(g_replyPanel ? g_replyPanel : g_panel);
         if (flags >= 0 && (flags & 1) && !(flags & 2)) {
@@ -350,6 +355,8 @@ BYTE Dialogue_Update(const KvrInput& in) {
 }
 
 bool Dialogue_SkipClick() { return false; }
+
+double Dialogue_EndedAgo() { return g_endedAt ? (GetTickCount() - g_endedAt) / 1000.0 : 1e9; }
 
 bool Dialogue_Showing() { return g_showing;
 }

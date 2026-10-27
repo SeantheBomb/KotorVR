@@ -16,6 +16,7 @@
 #include "scan.h"
 #include "enginecam.h"
 #include "weapons.h"
+#include "anim.h"
 #include "combat.h"
 #include "features.h"
 #include "mirror.h"
@@ -376,6 +377,12 @@ static int g_ownNodeCur;
 
 static void RefreshPlayerPos() {
     g_playerPosValid = false;
+    // the body model's own world position (Gob +0x78) is exactly where its hierarchy is drawn; the server creature's
+    // position leads it while you move, which let the body pop into view (2026-10-27)
+    if (Anim_PlayerBodyPos(g_playerPos)) {
+        g_playerPosValid = true;
+        return;
+    }
     __try {
         BYTE* c = (BYTE*)Weapon_PlayerCreature();
         if (c) {
@@ -758,6 +765,9 @@ int VR_IsOwnBody(const float t[3], int depth) {
             if (depth == g_rootDepth && h2 < 3.0f * 3.0f) {
                 for (int i = 0; i < g_ownNodeCount[prev]; i++) {
                     const float* n = g_ownNodes[prev][i];
+                    // only the hands / arms / head carry models (weapons, the head): leg and foot bones sit at floor
+                    // level, where props and decals next to you have their roots (they vanished as you walked past)
+                    if (n[2] < g_playerPos[2] + 0.6f) continue;
                     float ex = t[0] - n[0], ey = t[1] - n[1], ez = t[2] - n[2];
                     if (ex * ex + ey * ey + ez * ez < 0.08f * 0.08f) return 2;
                 }

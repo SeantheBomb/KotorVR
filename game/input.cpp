@@ -22,6 +22,7 @@
 #include "combat.h"
 #include "cues.h"
 #include "anim.h"
+#include "hover.h"
 #include "tutorial.h"
 #include "dialogue.h"
 #include "hud.h"
@@ -185,6 +186,7 @@ void Input_Update(HWND wnd) {
         Tutorial_Update();
         Hud_Update();
         Anim_Update();
+        Hover_Update(in);
         double now = Gestures_Now();
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key
@@ -263,6 +265,7 @@ void Input_Update(HWND wnd) {
                 DWORD hover;
                 if (now - lastRangedPick > 1.0 && Weapon_HoverClientId(&hover)) {
                     Weapon_SetTarget(hover);
+                    Hover_Interacted();
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
                     WatchAttack(now);
@@ -284,7 +287,8 @@ void Input_Update(HWND wnd) {
             else g_gestureKeyAt = -1;
         }
 
-        if ((in.buttons & KVR_BTN_A) && !Dialogue_Showing()) keys[DIK_SPACE] = 0x80;  // pause (in a conversation: skip)
+        // pause - never during a conversation or just after one (A used to end conversations in pause mode)
+        if ((in.buttons & KVR_BTN_A) && !Dialogue_Showing() && Dialogue_EndedAgo() > 1.5) keys[DIK_SPACE] = 0x80;
         static bool eatB;  // B that closed the action ring is not also Escape
         if (ringWasOpen && (in.buttons & KVR_BTN_B)) eatB = true;
         if (!(in.buttons & KVR_BTN_B)) eatB = false;
@@ -325,6 +329,7 @@ void Input_Update(HWND wnd) {
         DWORD gripHover;
         if (gripNow && !gripWas && !rangedPickWanted && g_pickStartMs < 0 && Weapon_HoverClientId(&gripHover)) {
             Weapon_SetTarget(gripHover);
+            Hover_Interacted();
             gripPick = true;
             gripDownMs = tick;
             deferR = true;  // short squeeze -> R, held -> the action ring
@@ -349,13 +354,13 @@ void Input_Update(HWND wnd) {
                 deferR = false;
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
-                WatchAttack(now);
+                if (fighting) WatchAttack(now);  // an attack never walks you; a use / talk / open does, as in the game
             } else if (tick - gripDownMs >= 400) {
                 deferR = false;
                 if (!ActionRing_Open(in)) {
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
-                    WatchAttack(now);
+                    if (fighting) WatchAttack(now);
                 } else {
                     Log("input: grip held -> action ring");
                 }
@@ -384,7 +389,7 @@ void Input_Update(HWND wnd) {
                 } else {
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
-                    WatchAttack(now);  // a shot's attack or a grip's use / talk: never a walk
+                    if (!gripPick || fighting) WatchAttack(now);  // a shot / attack never walks you
                 }
             }
             if (t > 330) g_pickStartMs = -1;

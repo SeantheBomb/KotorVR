@@ -181,9 +181,9 @@ void QRot(const float* q, const float* v, float* o) {  // q v q*
     o[0] = t[1]; o[1] = t[2]; o[2] = t[3];
 }
 
-// NPCs look at you in conversations (2026-10-27 playtest): after a creature model within 6 m is animated, its head
+// NPCs look at you in conversations (2026-10-27 playtest): after a creature model within 10 m is animated, its head
 // node ("headhook", the head model hangs on it; forward = +Y, measured on Trask) is turned toward your eye - at most
-// 55 deg of yaw and 20 deg of pitch, 85% of the way (the eyes do the rest), not when you stand behind them.
+// 70 deg of yaw and 25 deg of pitch, all the way, not when you stand behind them.
 // The node is not keyframed in most animations, so the engine does not reset it each frame: the turn is always
 // computed from the engine's own value (remembered until the engine writes a new one), never stacked on our last one.
 // kvr.ini [Feel] LookAtYou=0 off.
@@ -233,11 +233,11 @@ void LookAt(BYTE* gob, void* head, const float eye[3]) {
     if (fabsf(yaw) > 1.75f) {  // you are behind them (> 100 deg): leave the head alone
         memcpy(out, hs->base, 16);
     } else {
-        float turn = yaw * 0.85f;
-        turn = turn > 0.96f ? 0.96f : turn < -0.96f ? -0.96f : turn;  // 55 deg
+        float turn = yaw;
+        turn = turn > 1.22f ? 1.22f : turn < -1.22f ? -1.22f : turn;  // 70 deg
         float pitchNow = atan2f(F[2], fl), pitchTo = atan2f(T[2], tl);
-        float pt = (pitchTo - pitchNow) * 0.85f;
-        pt = pt > 0.35f ? 0.35f : pt < -0.35f ? -0.35f : pt;  // 20 deg
+        float pt = pitchTo - pitchNow;
+        pt = pt > 0.44f ? 0.44f : pt < -0.44f ? -0.44f : pt;  // 25 deg
         // pitch about the head's own sideways axis (horizontal, perpendicular to its facing), then yaw about world up
         float side[3] = {F[1] / fl, -F[0] / fl, 0};
         float dp[4] = {cosf(pt / 2), side[0] * sinf(pt / 2), side[1] * sinf(pt / 2), 0};  // + about F x up = tilt up
@@ -266,7 +266,7 @@ extern "C" void __cdecl Anim_AnimatePost(BYTE* gob) {
     __try {
         const float* gp = (const float*)(gob + 0x78);
         float dx = eye[0] - gp[0], dy = eye[1] - gp[1];
-        if (dx * dx + dy * dy > 6.0f * 6.0f) return;
+        if (dx * dx + dy * dy > 10.0f * 10.0f) return;
         void* head = FindPart(*(void**)(gob + 0x6C), "headhook", 0);
         if (head) LookAt(gob, head, eye);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -291,6 +291,16 @@ void Anim_Update() {
     VirtualProtect(slot, 4, old, &old);
     g_firePatchedVtbl = vt;
     Log("anim: the hidden body's combat events filtered (model vtable %p, FireEvent %p)", vt, g_fireOrig);
+}
+
+bool Anim_PlayerBodyPos(float out[3]) {
+    BYTE* g = g_playerGob;
+    if (!g) return false;
+    __try {
+        memcpy(out, g + 0x78, 12);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
 }
 
 void Anim_HitPause(unsigned long targetId, float seconds) {

@@ -14,3 +14,5 @@ bool Dialogue_Active();
 bool Dialogue_SkipClick();
 // Our conversation panel is up (any line, with or without replies).
 bool Dialogue_Showing();
+// Seconds since the last conversation ended (huge if none yet).
+double Dialogue_EndedAgo();

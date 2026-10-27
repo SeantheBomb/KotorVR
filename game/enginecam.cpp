@@ -101,8 +101,8 @@ void QuatFromRows(const float m[9], float q[4]) {
 //   1. a reverse shot - the shot camera faces back at you (> 110 deg from your facing) or looks straight at you from
 //      close by - never cuts: those are the over-the-shoulder / "camera looking at the player" shots;
 //   2. otherwise the shot's subject (two hidden probe frames: the shot camera's view centre, then the eye toward it):
-//      more than 70 deg off your facing -> the game's shot; ahead of you -> first person if you can see it, the
-//      game's shot if something hides it.
+//      first person if you can see it from where you stand, the game's shot if it is in another room / around a
+//      corner (comm calls, scenes elsewhere).
 float g_shotPos[3], g_shotQ[4];
 float g_subject[3];  // the point the current shot looks at
 // 0 none, 1 first person, 2 cut, 3 subject probe this frame, 4 waiting for it, 5 eye probe this frame, 6 waiting
@@ -310,7 +310,7 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             baseQ = probeQ;
             // the subject's bearing against your facing (forward of the view yaw)
             float off = fabsf(WrapPi(atan2f(f[1], f[0]) - g_viewYaw));
-            if (g_shotMode == 5 && off > 1.22f) {  // > 70 deg to the side / behind: the game's shot (e.g. a comm call)
+            if (false && off > 1.22f) {  // (angle rule retired 2026-10-27: it cut away from shots you could see)
                 g_shotMode = 2;
                 basePos = g_origPos;
                 baseQ = g_origQ;
