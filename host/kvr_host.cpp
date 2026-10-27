@@ -1012,9 +1012,10 @@ static void Blit(Swapchain& sc, uint32_t imageIndex, SharedTex& src, uint32_t va
     DrawTex(sc.rtvs[imageIndex], vp, src, validW, validH, guiKey, g_scSrgb);
 }
 
-// ---------------------------------------------------------------- desktop mirror
-// A plain window showing what the headset shows: the left eye with the HUD keyed over it in the world, or the
-// panel (menus, cutscene movies) on its own. It never takes the foreground; closing it just stops the mirror.
+// ---------------------------------------------------------------- desktop mirror window (optional)
+// The game's own window mirrors the headset (game/mirror.cpp). This extra window shows the host's view of the same
+// frames - the left eye with the HUD keyed over it, or the panel (menus, movies) - and only opens with the
+// environment variable KVR_MIRROR_WINDOW=1. It never takes the foreground; closing it just stops it.
 static HWND g_mirrorWnd;
 static bool g_mirrorTried, g_mirrorResize;
 static IDXGISwapChain1* g_mirrorSc;
@@ -1045,6 +1046,9 @@ static void MirrorRelease() {
 static void MirrorFrame(bool world, bool hud, bool panelShown, float panelAspect) {
     if (!g_mirrorTried) {
         g_mirrorTried = true;
+        char flag[8] = "";
+        GetEnvironmentVariableA("KVR_MIRROR_WINDOW", flag, sizeof flag);
+        if (flag[0] != '1') return;
         WNDCLASSW wc{};
         wc.lpfnWndProc = MirrorProc;
         wc.hInstance = GetModuleHandleW(nullptr);
@@ -1054,7 +1058,7 @@ static void MirrorFrame(bool world, bool hud, bool panelShown, float panelAspect
         RECT rc{0, 0, 960, 720};
         AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
         g_mirrorWnd = CreateWindowExW(WS_EX_NOACTIVATE, L"KotorVRMirror", L"KotOR VR - headset view", WS_OVERLAPPEDWINDOW,
-                                      CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr,
+                                      80, 80, rc.right - rc.left, rc.bottom - rc.top, nullptr,
                                       nullptr, wc.hInstance, nullptr);
         if (g_mirrorWnd) ShowWindow(g_mirrorWnd, SW_SHOWNOACTIVATE);
         printf("mirror window %s\n", g_mirrorWnd ? "open" : "failed");

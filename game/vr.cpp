@@ -18,6 +18,7 @@
 #include "weapons.h"
 #include "combat.h"
 #include "features.h"
+#include "mirror.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -585,6 +586,7 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     } else if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
         DrawHandItems();
         Capture(g_curEye, &g_curPose, &g_curFov);
+        if (g_curEye == 0) Mirror_KeepEye(g_texW, g_texH, g_gl.GetProcAddress);  // desktop mirror (left eye)
     }
     g_eyeCaptured = true;
     ClearForGui();
@@ -634,6 +636,7 @@ void VR_OnSwap(HDC dc) {
         if (g_exportReady) {
             if (g_worldThisFrame && !g_eyeCaptured && NowMs() >= g_pickUntilMs && g_probeState != 1) Capture(g_curEye, &g_curPose, &g_curFov);
             Capture(SLOT_PANEL, nullptr, nullptr);
+            if (g_guiOnlyThisFrame) Mirror_Draw();  // the window shows the eye under the GUI (the panel is taken)
             // a probe that never got its depth read (no world / GUI pass this frame): give up after 3 frames as
             // "clear" so a cutscene can never hold the headset on a stale frame
             static int probeFrames;
