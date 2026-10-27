@@ -40,6 +40,8 @@ float Cues_KnockOff(float* yawSign);
 float Cues_PowerLag();
 // An action that would have walked the character to its target was cancelled (out of reach).
 void Cues_TooFar();
+// The blade touched an enemy (v2 contact): the feel of the cut, scaled by the swing's tip speed (m/s).
+void Cues_Contact(float speed);
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the

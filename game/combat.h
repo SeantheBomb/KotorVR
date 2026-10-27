@@ -12,6 +12,8 @@ bool Combat_InPerfectWindow();
 // The controlled character is already attacking (rolled within the last 3.5 s): KotOR repeats the attack every
 // round by itself, so gestures only count for timing; pressing attack again just fills its action queue.
 bool Combat_PlayerAttacking();
+// v2: your blade / barrel decides what lands ([Combat] Mode=contact, the default).
+bool Combat_ContactMode();
 // The player's queued attack was cleared: the next swing starts a new one.
 void Combat_ResetAttacking();
 

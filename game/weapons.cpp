@@ -26,6 +26,7 @@
 #include "combat.h"
 #include "cues.h"
 #include "dialogue.h"
+#include "melee.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -442,6 +443,11 @@ static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix 
 static float g_muzzleLen;
 static bool g_muzzleValid;
 static float g_lastInvEye[16];
+// this frame's melee weapons in eye space (grip at the origin, blade along -Z) and their blade lengths: the weapon
+// pass hands them to the contact combat (melee.cpp) in world coordinates
+static float g_weaponEye[2][16];
+static float g_weaponLen[2];
+static bool g_weaponValid[2];
 static double g_lastFlash = -10;
 
 static double NowS() { return GetTickCount() / 1000.0; }
@@ -603,6 +609,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                 dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
                 b.to[r] = b.from[r] + dw[r] * 30.0f;
             }
+            Melee_Shot(b.from, dw);  // v2: where the barrel points decides what the shot hits
             // the cursor follows the hand, so the game's own mouse-over point is where this shot meets a wall or a
             // body (no more bolts flying through walls); used when it lies along the barrel
             float hit[3];
@@ -619,6 +626,24 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         b.fromSet = true;
         g_lastFlash = tnow;
         VR_Haptic(1, 0.9f, 0.06f, 140);  // recoil kick
+    }
+    // the melee weapons in world coordinates for the contact combat: eye point e -> world R^T (e - t)
+    for (int h = 0; h < 2; h++) {
+        if (!g_weaponValid[h]) {
+            Melee_ClearBlade(h);
+            continue;
+        }
+        const float* m = g_weaponEye[h];
+        float eb[3] = {m[12], m[13], m[14]};
+        float et[3] = {m[12] - m[8] * g_weaponLen[h], m[13] - m[9] * g_weaponLen[h], m[14] - m[10] * g_weaponLen[h]};
+        float wb[3], wt[3];
+        for (int r = 0; r < 3; r++) {
+            float db[3] = {eb[0] - worldView[12], eb[1] - worldView[13], eb[2] - worldView[14]};
+            float dt[3] = {et[0] - worldView[12], et[1] - worldView[13], et[2] - worldView[14]};
+            wb[r] = worldView[r * 4 + 0] * db[0] + worldView[r * 4 + 1] * db[1] + worldView[r * 4 + 2] * db[2];
+            wt[r] = worldView[r * 4 + 0] * dt[0] + worldView[r * 4 + 1] * dt[1] + worldView[r * 4 + 2] * dt[2];
+        }
+        Melee_SetBlade(h, wb, wt);
     }
     bool anyBolt = false;
     for (const Bolt& b : g_bolts)
@@ -1043,6 +1068,7 @@ void Weapons_Draw(const float invEye[16]) {
     memcpy(g_lastInvEye, invEye, sizeof g_lastInvEye);
     RefreshPoseAdj();
     g_muzzleValid = false;
+    g_weaponValid[0] = g_weaponValid[1] = false;
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
         if (c == WC_NONE || !(in.gripValid & (1u << h))) continue;
@@ -1092,6 +1118,17 @@ void Weapons_Draw(const float invEye[16]) {
             memcpy(hand, knocked, sizeof knocked);
         }
         MulMat(invEye, hand, mv);
+        if (kProfiles[c].melee) {
+            memcpy(g_weaponEye[h], mv, sizeof mv);
+            float len = IsSaber(c) ? 1.05f * g_bladeExt : 0;
+            if (!IsSaber(c)) {
+                int wr = h ? g_rightRow : g_leftRow, wv = h ? g_rightVar : g_leftVar;
+                len = WeaponModels_Length(wr, wv);
+                if (len < 0.3f) len = 0.6f;
+            }
+            g_weaponLen[h] = len;
+            g_weaponValid[h] = len > 0.2f;
+        }
         p_glLoadMatrixf(mv);
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
         float glowRgb[3];

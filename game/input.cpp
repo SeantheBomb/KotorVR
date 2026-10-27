@@ -23,6 +23,7 @@
 #include "cues.h"
 #include "anim.h"
 #include "hover.h"
+#include "melee.h"
 #include "tutorial.h"
 #include "dialogue.h"
 #include "hud.h"
@@ -187,6 +188,7 @@ void Input_Update(HWND wnd) {
         Hud_Update();
         Anim_Update();
         Hover_Update(in);
+        Melee_Update();
         double now = Gestures_Now();
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key
@@ -233,7 +235,19 @@ void Input_Update(HWND wnd) {
                 }
             }
         }
-        if (Gestures_TakeSwing(&swingQ) && fighting) {
+        // v2 contact: touching an enemy with the blade starts your attack on it (no walking); swings themselves
+        // no longer press the attack key, so a guard raised into a blow is never read as an attack
+        if (Combat_ContactMode()) {
+            DWORD startOn = Melee_TakeAttackStart();
+            if (startOn && fighting && !Combat_PlayerAttacking()) {
+                Weapon_SetTarget(startOn | 0x80000000);
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+                WatchAttack(now);
+                Log("input: blade contact -> attack %08lX", startOn);
+            }
+        }
+        if (Gestures_TakeSwing(&swingQ) && fighting && !Combat_ContactMode()) {
             if (Combat_PlayerAttacking()) {  // KotOR repeats the attack by itself: the swing only counts for timing
                 Log("input: swing (already attacking: timing only)");
             } else {

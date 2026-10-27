@@ -387,6 +387,18 @@ float Cues_KnockOff(float* yawSign) {
     return g_knockPeak * (float)sin(age / 0.2 * 3.14159265);  // up and back down
 }
 
+void Cues_Contact(float speed) {  // the blade bit into a body: a burn-through buzz scaled by the swing
+    if (!Features().cues) return;
+    float k = speed > 6.0f ? 1.0f : speed / 6.0f;
+    Haptic(0, 1, 0.6f + 0.4f * k, 0.05f, 300);
+    Haptic(0.05, 1, 0.4f + 0.4f * k, 0.10f, 150);
+    Spark(0.6f + 0.4f * k);
+    Flash(0.6f + 0.4f * k);
+    bool saber = FamilyOf(Weapon_Right()) == FAM_SABER;
+    static const char* kSaber[2] = {"cb_ls_hithard1", "cb_ls_hithard2"};
+    if (saber) PlayResref(kSaber[rand() & 1], 0.5f + 0.4f * k, 0.95f + 0.1f * (rand() % 100) / 100.0f);
+}
+
 void Cues_TooFar() {  // an action out of reach was cancelled: a second, lower tick a beat later
     if (!Features().cues) return;
     Haptic(0.12, 1, 0.5f, 0.04f, 60);
