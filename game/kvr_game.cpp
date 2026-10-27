@@ -26,6 +26,7 @@
 #include "actionring.h"
 #include "movie.h"
 #include "ownsig.h"
+#include "compat.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -43,6 +44,16 @@ static GLenum g_mode = GL_MODELVIEW;
 static int g_mvDepth;
 static int g_hideDepth = -1;
 static int g_candDepth = -1;  // inside a hierarchy whose own-mesh draws are skipped (VR_IsOwnBody == 1)
+// While the controlled character's body is drawn (hidden), its model matrices per stack depth, in world space: the
+// bones' positions let the cull recognise models attached to them (weapons, head).
+static float g_ownMat[40][16];
+
+static void MulMat4(const float* a, const float* b, float* out) {  // column-major a * b
+    for (int c = 0; c < 4; c++)
+        for (int r = 0; r < 4; r++)
+            out[c * 4 + r] = a[0 * 4 + r] * b[c * 4 + 0] + a[1 * 4 + r] * b[c * 4 + 1] + a[2 * 4 + r] * b[c * 4 + 2] +
+                             a[3 * 4 + r] * b[c * 4 + 3];
+}
 
 void Log(const char* fmt, ...) {
     if (!g_log) return;
@@ -126,9 +137,19 @@ static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
     T("glMultMatrixf [%s] %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f | %.4f %.4f %.4f %.4f",
       ModeName(g_mode), m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
     if (VR_OnMultMatrixf(g_mode, m)) { T("  -> VR eye view"); return; }
+    if (g_mode == GL_MODELVIEW && g_hideDepth >= 0 && g_mvDepth > g_hideDepth && g_mvDepth < 40) {
+        float t[16];  // a bone inside the hidden body: track its world transform
+        MulMat4(g_ownMat[g_mvDepth], m, t);
+        memcpy(g_ownMat[g_mvDepth], t, sizeof t);
+        VR_OwnNode(t + 12);
+    }
     if (g_mode == GL_MODELVIEW && g_hideDepth < 0) {
         int own = VR_IsOwnBody(m + 12, g_mvDepth);
-        if (own == 2) { g_hideDepth = g_mvDepth; T("  -> own body, hidden"); }
+        if (own == 2) {
+            g_hideDepth = g_mvDepth;
+            if (g_mvDepth < 40) memcpy(g_ownMat[g_mvDepth], m, sizeof g_ownMat[0]);
+            T("  -> own body, hidden");
+        }
         else if (own == 1 && g_candDepth < 0) { g_candDepth = g_mvDepth; T("  -> near the player: own meshes hidden"); }
     }
     r_glMultMatrixf(m);
@@ -142,7 +163,7 @@ static void APIENTRY h_glViewport(GLint x, GLint y, GLsizei w, GLsizei h) { FIRS
 static void APIENTRY h_glTranslatef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glTranslatef"); T("glTranslatef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); if (VR_OnTranslatef(g_mode, x, y, z)) { T("  -> VR eye view"); return; } r_glTranslatef(x, y, z); }
 static void APIENTRY h_glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { FIRST("glRotatef"); T("glRotatef [%s] %.3f (%.3f %.3f %.3f)", ModeName(g_mode), a, x, y, z); r_glRotatef(a, x, y, z); }
 static void APIENTRY h_glScalef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glScalef"); T("glScalef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); r_glScalef(x, y, z); }
-static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) g_mvDepth++; r_glPushMatrix(); }
+static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth++; if (g_hideDepth >= 0 && g_mvDepth > g_hideDepth && g_mvDepth < 40) memcpy(g_ownMat[g_mvDepth], g_ownMat[g_mvDepth - 1], sizeof g_ownMat[0]); } r_glPushMatrix(); }
 static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; if (g_candDepth >= 0 && g_mvDepth < g_candDepth) g_candDepth = -1; } r_glPopMatrix(); }
 static void APIENTRY h_glClear(GLbitfield b) { FIRST("glClear"); T("glClear 0x%x", b); r_glClear(b); }
 static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(b); }
@@ -538,6 +559,11 @@ static void Install() {
     gl.GetProcAddress = r_wglGetProcAddress;
     VR_Init(gl, Log);
     Features_Load(g_dir);
+    {
+        char ini[MAX_PATH];
+        sprintf_s(ini, "%s\\kvr\\kvr.ini", g_dir);
+        Compat_Install(GetPrivateProfileIntA("Compat", "DiscordOverlay", 0, ini) != 0);
+    }
     WeaponModels_Init(g_dir);
     Cues_Init(g_dir);
     Tutorial_Init(g_dir);

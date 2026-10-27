@@ -1,6 +1,6 @@
 # Playtest guide
 
-Start: quit Discord fully, connect Air Link, run `host\build\kvr_host.exe`, launch KotOR from Steam.
+Start: connect Air Link, run `host\build\kvr_host.exe`, launch KotOR from Steam.
 The host opens a desktop window ("KotOR VR - headset view") mirroring the left eye with the HUD, or the menus /
 movie on their own; close it if you don't want it. The game's own window stays black.
 
@@ -87,6 +87,20 @@ Start a fight by gripping on an enemy.
 
 The equipped item's real model and textures (its variation, so your saber is your saber: hilt, blade colour).
 `[Debug] WeaponGallery=1` in kvr.ini cycles through one weapon of every class every 3 s (for screenshots).
+
+## Wrist panel (no flat HUD)
+
+- Turn your left palm toward your face: menu buttons, party and quick slots appear along the forearm. Poke a button
+  with your right index finger (a tick on the controller when it presses).
+- The flat HUD is off in the world. `[Features] FlatHud=1` brings it back; Y toggles it in game.
+- The pointer laser is only for dialogue and menus; both triggers are free in the world.
+
+## Settings worth knowing (kvr.ini)
+
+- `[Compat] DiscordOverlay=0` (default): Discord's in-game overlay is kept out of KotOR (it froze the game). Discord
+  itself (voice, chat) is unaffected, so leave it running. `=1` lets the overlay in.
+- `[Debug] Record=1`: the host records the headset view to `kvr\recordings\` (960x720, 30 fps, needs ffmpeg).
+  `python tools\popscan.py <file.mp4>` lists the frames where geometry pops.
 
 ## If something misbehaves
 

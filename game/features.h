@@ -16,6 +16,7 @@ struct FeatureFlags {
     float snapAngle;     // [Comfort] SnapAngle (degrees, default 30)
     float turnSpeed;     // [Comfort] TurnSpeed (degrees per second at full stick, default 120)
     bool cutsceneFirstPerson;  // [Comfort] CutsceneFirstPerson=1: never cut away from first person in cutscenes
+    bool traceWorld;     // [Debug] TraceWorld=1: one GL trace of a world frame (kvr\trace_f*.txt)
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };
 

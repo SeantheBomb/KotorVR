@@ -11,7 +11,8 @@ host\simhost_build.bat                     # build once
 python tools\contact_sheet.py traces\sim\<run> eye0 4
 ```
 
-- Preflight refuses to run with Discord open or a real `kvr_host` running (`-Force` stops the host). A 1-thread
+- Preflight refuses to run with Discord open (pass `-AllowDiscord`: the overlay is blocked in-game anyway) or a
+  real `kvr_host` running (`-Force` stops the host). A 1-thread
   `kvr_host` zombie from a lost Meta runtime session is ignored.
 - Menu clicks go through the panel pointer, which moves the real mouse cursor: leave the PC alone during a run.
 - Artifacts land in `traces\sim\<script>_<timestamp>\` (gitignored): `*_eye0/eye1/panel.png`, `stats.csv`,

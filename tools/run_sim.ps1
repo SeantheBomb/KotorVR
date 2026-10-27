@@ -10,7 +10,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Script,
     [int]$TimeoutSec = 300,
     [switch]$KeepGame,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$AllowDiscord   # run with Discord open (compatibility testing)
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -24,7 +25,7 @@ $simhost = Join-Path $root 'host\build\kvr_simhost.exe'
 if (-not (Test-Path $simhost)) { throw "build the simulator first: host\simhost_build.bat" }
 
 # --- preflight -------------------------------------------------------------------------------
-if (Get-Process Discord -ErrorAction SilentlyContinue) {
+if (-not $AllowDiscord -and (Get-Process Discord -ErrorAction SilentlyContinue)) {
     throw "Discord is running - its overlay leaks a GL context per frame and kills the game. Quit it first."
 }
 # a real host would fight the simulator over shared memory (a 1-thread zombie from a lost runtime is harmless)

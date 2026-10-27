@@ -177,7 +177,7 @@ IXAudio2SourceVoice* PlayResref(const char* resref, float gain, float ratio = 1.
         Wav w;
         if (!LoadWav(resref, w)) {
             static int warned;
-            if (warned++ < 5) Log("cues: sound %s missing (run tools\sound_export.py)", resref);
+            if (warned++ < 5) Log("cues: sound %s missing (run tools/sound_export.py)", resref);
             g_wavs[resref] = Wav();
             return nullptr;
         }

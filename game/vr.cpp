@@ -368,6 +368,11 @@ static float g_playerPos[3];
 static bool g_playerPosValid;
 static float g_nearestOwn = 1e9f;  // diagnostics: closest object origin to the player this frame
 static int g_rootDepth = -1;        // matrix stack depth of model roots (where the player's body root matched)
+// The character's own body bones (world positions) this frame and last: held weapons and the head are separate
+// models whose root sits exactly on a bone (hand, neck). The game draws them before the body, so last frame's bones.
+static float g_ownNodes[2][128][3];
+static int g_ownNodeCount[2];
+static int g_ownNodeCur;
 
 static void RefreshPlayerPos() {
     g_playerPosValid = false;
@@ -613,6 +618,8 @@ void VR_OnSwap(HDC dc) {
         }
     }
     g_nearestOwn = 1e9f;
+    g_ownNodeCur ^= 1;  // this frame's bones become "last frame's"
+    g_ownNodeCount[g_ownNodeCur] = 0;
     RefreshPlayerPos();
     Combat_EndFrame();
     static double lastStat, lastSwap;
@@ -682,6 +689,11 @@ void VR_OnSwap(HDC dc) {
     g_camState = 0;
 }
 
+void VR_OwnNode(const float world[3]) {
+    int& n = g_ownNodeCount[g_ownNodeCur];
+    if (n < 128) memcpy(g_ownNodes[g_ownNodeCur][n++], world, 12);
+}
+
 bool VR_IsOurTexture(GLuint) { return false; }  // export no longer owns GL textures (PBO readback)
 
 bool VR_InCapture() { return g_inCapture; }
@@ -728,15 +740,20 @@ int VR_IsOwnBody(const float t[3], int depth) {
             g_rootDepth = depth;
             return 2;
         }
-        if (OwnSig_Ready()) {
-            // Everything else near you is only a candidate: its draws are hidden when their mesh sizes are the
-            // character's own (body, head, held weapons - ownsig). Scenery that happens to stand close (crates,
-            // consoles, door frames) stays, and a weapon swung far out in an attack is still caught.
-            if (depth == g_rootDepth && h2 < 1.6f * 1.6f && dz > -0.6f && dz < 2.4f) return 1;
-            if (h2 < 0.3f * 0.3f && dz > 0.9f && dz < 2.3f) return 1;  // the head, a separate model at the neck
+        int prev = g_ownNodeCur ^ 1;
+        if (g_ownNodeCount[prev] > 0) {
+            // Exact: a model rooted on one of the body's bones (held weapons on the hands, the head on the neck) -
+            // wherever an attack swings it. Scenery that merely stands close (crates, consoles, door frames) stays.
+            if (depth == g_rootDepth && h2 < 3.0f * 3.0f) {
+                for (int i = 0; i < g_ownNodeCount[prev]; i++) {
+                    const float* n = g_ownNodes[prev][i];
+                    float ex = t[0] - n[0], ey = t[1] - n[1], ez = t[2] - n[2];
+                    if (ex * ex + ey * ey + ez * ez < 0.08f * 0.08f) return 2;
+                }
+            }
             return 0;
         }
-        // no signatures (tools/sig_export.py not run): the old radius rules
+        // no bones seen yet (first frames): the old radius rules
         // running / combat moves can put the drawn root a bit away from the server position for a frame: at the
         // model-root depth (whole objects only) accept up to 0.6 m, which only a creature standing inside you reaches
         if (depth == g_rootDepth && h2 < 0.6f * 0.6f && fabsf(dz) < 0.6f) return 2;
@@ -983,10 +1000,15 @@ static void NoteBoneParam(GLuint index, const GLfloat* v) {
     if (index == 20) g_boneFresh = 1;
 }
 
+// [Debug] TraceWorld=1 in kvr.ini: one GL trace of a world frame (kvr/trace_f<frame>.txt), in-game frames.
 bool VR_WantTrace() {
-    return false;  // set to the block below to capture one world frame mid-session (diagnostics)
+    static int want = -1;
+    if (want < 0) want = Features().traceWorld ? 1 : 0;
     static bool done;
-    if (done || !g_vrActive || g_worldFrames < 2300) return false;
+    static int inGame;  // world frames with a player character (the menu's 3D background doesn't count)
+    if (!want || done || !g_vrActive) return false;
+    if (g_worldThisFrame && Weapon_PlayerCreature()) inGame++;
+    if (inGame < 1500) return false;
     done = true;
     return true;
 }

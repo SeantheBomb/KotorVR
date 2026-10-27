@@ -23,6 +23,8 @@ bool VR_IsOurTexture(GLuint name);
 // True for a node translation (world space) inside the player's own body column around the first-person camera.
 // 2: the controlled character's own model hierarchy (hide it whole); 1: a nearby model that may be one of the
 // character's pieces (hide only draws whose size matches - ownsig); 0: not theirs
+// A bone of the controlled character's (hidden) body this frame, in world coordinates (from the hook layer).
+void VR_OwnNode(const float world[3]);
 int VR_IsOwnBody(const float t[3], int depth);  // depth: modelview stack depth of the multiply
 // Per draw call during the world pass: true when the draw belongs to the player's own body (skip it).
 bool VR_ShouldSkipDraw();
