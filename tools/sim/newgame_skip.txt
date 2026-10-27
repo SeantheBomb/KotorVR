@@ -65,3 +65,32 @@ shot look270
 head yaw=0 pitch=-30 over=0.5
 wait 1
 shot lookdown
+# keep picking the first reply until the conversation ends
+wait 5
+hover 1 1
+trigger
+hover 1 -1
+wait 5
+hover 1 1
+trigger
+hover 1 -1
+wait 5
+hover 1 1
+trigger
+hover 1 -1
+wait 5
+hover 1 1
+trigger
+hover 1 -1
+wait 5
+hover 1 1
+trigger
+hover 1 -1
+wait 8                    # after the conversation: gameplay must be back (turning, no probes)
+shot after_conv
+stick rx=1 for=0.6
+wait 1
+shot turned
+stick ly=1 for=1.5
+wait 1
+shot walked

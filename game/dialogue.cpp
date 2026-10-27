@@ -261,6 +261,12 @@ BYTE Dialogue_Update(const KvrInput& in) {
     if (g_dirty && open) {
         EnterCriticalSection(&g_lock);
         g_dirty = false;
+        if (g_message.empty() && g_replies.empty()) {  // nothing to show (an empty prompt): no panel
+            LeaveCriticalSection(&g_lock);
+            if (g_showing) VR_HideText(kSlot);
+            g_showing = false;
+            return 0;
+        }
         // line 0 is always the title (the host never offers it for picking)
         std::string text = "#" + (g_message.empty() ? std::string("...") : g_message);
         for (auto& r : g_replies) text += "\n" + r;

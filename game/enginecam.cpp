@@ -141,14 +141,17 @@ void QuatMul(const float a[4], const float b[4], float out[4]) {
 // Cutscene / dialogue cameras keep the game's narrow cinematic FOV (~55 deg), and the engine culls the world against
 // it: in first person (or looking around a cut) whole walls and floors outside that cone popped in and out. While
 // we drive such a camera its FOV is widened to the gameplay 170 deg for culling (the projection is ours anyway) and
-// handed back at the start of the next frame, so the game's own state never sees the change.
+// handed back at the start of the next frame, so the game's own state never sees the change. The value written is a
+// sentinel (168.5, not 170): the game itself sets 170 when a conversation ends, and restoring over that once left the
+// camera stuck in "cutscene" (no turning, endless line-of-sight probes) - 2026-10-26.
+static const float kCullFov = 168.5f;
 static BYTE* g_fovCam;
 static float g_fovSaved;
 static bool g_fovPatched;
 
 extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     g_applied = false;
-    if (g_fovPatched && cam == g_fovCam && *(float*)(cam + 0x1D0) == kGameplayFov) *(float*)(cam + 0x1D0) = g_fovSaved;
+    if (g_fovPatched && cam == g_fovCam && *(float*)(cam + 0x1D0) == kCullFov) *(float*)(cam + 0x1D0) = g_fovSaved;
     g_fovPatched = false;
     float fov = *(float*)(cam + 0x1D0);
     if (fov < 25.0f || !VR_IsActive()) return;  // GUI scenes (portraits, menu model) use ~22.7
@@ -179,6 +182,11 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     const float* basePos = g_origPos;
     const float* baseQ = g_origQ;
     bool gameplay = fabsf(fov - kGameplayFov) < 0.5f;
+    static int lastMode = -1;  // 1 gameplay, 0 cutscene / dialogue camera
+    if ((int)gameplay != lastMode) {
+        Log("enginecam: %s (camera fov %.1f)", gameplay ? "gameplay camera" : "cutscene / dialogue camera", fov);
+        lastMode = gameplay;
+    }
     if (gameplay) {
         // heading: the game camera's for reference, ours for the view
         float M0[9];
@@ -279,7 +287,7 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             baseQ = g_playQ;
         }
         g_fovSaved = fov;  // cull with the gameplay cone (see above)
-        *(float*)(cam + 0x1D0) = kGameplayFov;
+        *(float*)(cam + 0x1D0) = kCullFov;
         g_fovCam = cam;
         g_fovPatched = true;
     }
