@@ -107,6 +107,8 @@ extern "C" void __cdecl Dialogue_RepliesPre(void* panel, int count, const BYTE* 
     for (int i = 0; i < count && texts; i++) {
         std::string t = ReadExo(texts + i * 8);
         if (t.empty()) t = "[Continue]";  // KotOR's "continue" entries have no text
+        size_t hint = t.find(" [Left-click");  // the opening's mouse tutorial hint means nothing in VR
+        if (hint != std::string::npos) t.erase(hint);
         char num[8];
         sprintf_s(num, "%d. ", i + 1);
         r.push_back((i < 9 ? num : "") + t);

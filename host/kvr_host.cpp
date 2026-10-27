@@ -580,6 +580,8 @@ static ID2D1Factory* g_d2d;
 static IDWriteFactory* g_dw;
 static IDWriteTextFormat* g_fmtBody;
 static IDWriteTextFormat* g_fmtTitle;
+static IDWriteTextFormat* g_fmtGameBody;   // KotOR-style (dialogue, action ring): bold sans like the game's GUI font
+static IDWriteTextFormat* g_fmtGameTitle;
 struct TextPanel {
     Swapchain sc;
     ID3D11Texture2D* tex = nullptr;   // D2D target (UNORM twin of the swapchain format), copied in on change
@@ -602,6 +604,13 @@ static bool InitText() {
                                            DWRITE_FONT_STRETCH_NORMAL, 34.0f, L"en-us", &g_fmtBody);
     if (!g_fmtTitle) g_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
                                             DWRITE_FONT_STRETCH_NORMAL, 40.0f, L"en-us", &g_fmtTitle);
+    if (!g_fmtGameBody) g_dw->CreateTextFormat(L"Verdana", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                                               DWRITE_FONT_STRETCH_NORMAL, 29.0f, L"en-us", &g_fmtGameBody);
+    if (!g_fmtGameTitle) {
+        g_dw->CreateTextFormat(L"Verdana", nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+                               DWRITE_FONT_STRETCH_NORMAL, 31.0f, L"en-us", &g_fmtGameTitle);
+        if (g_fmtGameTitle) g_fmtGameTitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    }
     DXGI_FORMAT unorm = g_scFormat == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ? DXGI_FORMAT_B8G8R8A8_UNORM
                       : g_scFormat == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ? DXGI_FORMAT_R8G8B8A8_UNORM : g_scFormat;
     for (auto& p : g_text) {
@@ -643,14 +652,30 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     char text[sizeof src.text + 1];
     memcpy(text, src.text, sizeof src.text);
     text[sizeof src.text] = 0;
-    ID2D1SolidColorBrush *bg = nullptr, *fg = nullptr, *gold = nullptr, *hl = nullptr;
+    ID2D1SolidColorBrush *bg = nullptr, *fg = nullptr, *gold = nullptr, *hl = nullptr, *rule = nullptr;
+    // Pickable panels (conversations, the action ring) take KotOR's own GUI look: its dialogue blue, the yellow of a
+    // highlighted reply, bold sans text over a dark plate with thin blue rules. Others (instruction cards) stay neutral.
+    bool game = src.pickable != 0;
     p.rt->BeginDraw();
     p.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
-    p.rt->CreateSolidColorBrush(D2D1::ColorF(0.04f, 0.06f, 0.10f, 0.82f), &bg);
-    p.rt->CreateSolidColorBrush(D2D1::ColorF(0.92f, 0.95f, 1.0f, 1.0f), &fg);
-    p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 1.0f), &gold);
-    p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 0.25f), &hl);
-    p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(4, 4, kTextW - 4.0f, kTextH - 4.0f), 24, 24), bg);
+    if (game) {
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.02f, 0.05f, 0.72f), &bg);
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.11f, 0.62f, 0.91f, 1.0f), &fg);    // KotOR dialogue blue
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.95f, 0.90f, 0.12f, 1.0f), &gold);  // KotOR highlighted reply
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.11f, 0.62f, 0.91f, 0.14f), &hl);
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.11f, 0.62f, 0.91f, 0.85f), &rule);
+        p.rt->FillRectangle(D2D1::RectF(0, 6, (float)kTextW, kTextH - 6.0f), bg);
+        p.rt->FillRectangle(D2D1::RectF(0, 6, (float)kTextW, 9), rule);
+        p.rt->FillRectangle(D2D1::RectF(0, kTextH - 9.0f, (float)kTextW, kTextH - 6.0f), rule);
+    } else {
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.04f, 0.06f, 0.10f, 0.82f), &bg);
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(0.92f, 0.95f, 1.0f, 1.0f), &fg);
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 1.0f), &gold);
+        p.rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 0.82f, 0.35f, 0.25f), &hl);
+        p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(4, 4, kTextW - 4.0f, kTextH - 4.0f), 24, 24), bg);
+    }
+    IDWriteTextFormat* fmtTitle = game && g_fmtGameTitle ? g_fmtGameTitle : g_fmtTitle;
+    IDWriteTextFormat* fmtBody = game && g_fmtGameBody ? g_fmtGameBody : g_fmtBody;
     float y = 24;
     int line = 0;
     p.lines = 0;
@@ -660,7 +685,7 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
         bool title = s[0] == '#';
         int n = MultiByteToWideChar(CP_UTF8, 0, title ? s + 1 : s, -1, wide, 1024);
         IDWriteTextLayout* lay = nullptr;
-        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? g_fmtTitle : g_fmtBody, kTextW - 72.0f, (float)kTextH, &lay);
+        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? fmtTitle : fmtBody, kTextW - 72.0f, (float)kTextH, &lay);
         DWRITE_TEXT_METRICS m{};
         if (lay) lay->GetMetrics(&m);
         if (line < 24) {
@@ -672,7 +697,9 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
         if (lit)
             p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(20, y - 4, kTextW - 20.0f, y + m.height + 4), 12, 12), hl);
         if (lay) {
-            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, title || lit ? gold : fg);
+            // KotOR: the speaker's line in its blue, replies blue, the highlighted reply yellow
+            ID2D1SolidColorBrush* br = game ? (lit ? gold : fg) : (title || lit ? gold : fg);
+            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, br);
             lay->Release();
         }
         y += m.height + (title ? 14 : 8);
@@ -683,6 +710,7 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     if (fg) fg->Release();
     if (gold) gold->Release();
     if (hl) hl->Release();
+    if (rule) rule->Release();
     // into the swapchain
     uint32_t idx = 0;
     XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
@@ -1408,7 +1436,11 @@ static void Frame() {
         // Menus (no world): opaque theater screen 2.4 m ahead. In the world the panel carries only the GUI, keyed
         // over the stereo view as a HUD 1.6 m ahead covering ~64 deg; Y (or F9) hides it.
         bool hud = world && (g_shared[2].meta.flags & KVR_SLOT_GUI_ONLY);
-        bool panelVisible = movie || !world || (hud && !g_shm->showPanel);
+        // a pickable text panel (our conversation / action ring) replaces the game's flat HUD while it is up
+        bool pickableUp = false;
+        for (int i = 0; i < KVR_TEXT_PANELS; i++)
+            pickableUp |= g_shm->text[i].pickable && g_shm->text[i].anchor != KVR_ANCHOR_HIDDEN;
+        bool panelVisible = movie || !world || (hud && !g_shm->showPanel && !pickableUp);
         static DWORD lastHudLog;
         if (GetTickCount() - lastHudLog > 3000) {
             lastHudLog = GetTickCount();
