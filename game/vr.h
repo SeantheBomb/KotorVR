@@ -62,6 +62,8 @@ void VR_HideText(int slot);
 // A decoded cutscene movie frame (32-bit B, G, R, x rows, top-down) for the headset's cinema screen.
 void VR_MovieFrame(const unsigned char* bgrx, int w, int h);
 void VR_MovieEnded();
+// A colored flash around the edge of the view (0..1 strength), fading out over `seconds`.
+void VR_Flash(float r, float g, float b, float strength, float seconds);
 // Head (eye 0) position in the recenter-origin frame.
 void VR_HeadPos(float out[3]);
 bool VR_ChooseEye(KvrPose* out);

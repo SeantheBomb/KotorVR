@@ -4,12 +4,12 @@
 #include <stdint.h>
 
 // the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v10"
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v11"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 10
+#define KVR_VERSION 11
 
 #pragma pack(push, 8)
 
@@ -117,6 +117,15 @@ struct KvrTextPanel {
     char text[504];        // UTF-8; lines separated by \n; a line starting with '#' is a title
 };
 
+// Game -> host: a colored flash around the edge of the view (getting hit, blocks), fading out over `duration`.
+// The game fills the fields, then bumps serial.
+struct KvrFlash {
+    volatile uint32_t serial;
+    float rgb[3];
+    float strength;  // 0..1 peak opacity at the rim
+    float duration;  // seconds
+};
+
 struct KvrShared {
     uint32_t magic;
     uint32_t version;
@@ -135,6 +144,7 @@ struct KvrShared {
     KvrHaptic haptic[2];               // game -> host, left / right hand
     KvrHands hands;                    // host -> game
     KvrTextPanel text[KVR_TEXT_PANELS];  // game -> host
+    KvrFlash flash;                      // game -> host
 };
 
 #pragma pack(pop)

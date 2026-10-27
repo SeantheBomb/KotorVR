@@ -133,7 +133,7 @@ void vs(uint id : SV_VertexID, out float4 pos : SV_Position, out float2 uv : TEX
 float4 ps(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target {
     float3 c = t.Sample(s, uv).rgb;
     // GUI-only frames are drawn over black: key black out so the HUD floats over the stereo world
-    float a = guiKey > 0.5 ? saturate(max(c.r, max(c.g, c.b)) * 4.0) : 1.0;
+    float a = guiKey > 1.5 ? t.Sample(s, uv).a : guiKey > 0.5 ? saturate(max(c.r, max(c.g, c.b)) * 4.0) : 1.0;
     if (decodeSrgb > 0.5) c = pow(abs(c), 2.2);
     return float4(c, a);
 }
@@ -431,6 +431,7 @@ static XrAction a_move, a_turn, a_trig, a_grip, a_aim, a_gripPose, a_btnA, a_btn
 static XrPath g_handPath[2];
 static XrSpace g_aimSpace[2], g_gripSpace[2];
 static Swapchain g_beamSc, g_dotSc;
+static Swapchain g_flashSc;  // the rim flash (KvrFlash)
 static uint32_t g_prevButtons;
 
 static XrPath MakePath(const char* s) {
@@ -516,7 +517,8 @@ static bool InitControls() {
     ai.actionSets = &g_actSet;
     CHECK_XR(xrAttachSessionActionSets(g_session, &ai));
 
-    if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16)) return false;
+    if (!CreateSwapchain(g_beamSc, 4, 4) || !CreateSwapchain(g_dotSc, 16, 16) || !CreateSwapchain(g_flashSc, 128, 128))
+        return false;
     if (!InitText()) printf("text panels unavailable (DirectWrite / Direct2D init failed)\n");
     printf("controls ready\n");
     return true;
@@ -1260,6 +1262,91 @@ static bool HudSolidAt(float u, float v) {
     return lastSolid;
 }
 
+// ---------------------------------------------------------------- rim flash (hits taken, blocks)
+// A head-locked quad just in front of the eyes, transparent in the middle and tinted toward the edges, fading out.
+static ID3D11Texture2D* g_flashTex;
+static ID3D11ShaderResourceView* g_flashSrv;
+static ID3D11Device1* g_flashDev;
+
+static void AddFlashLayer(std::vector<XrCompositionLayerBaseHeader*>& layers) {
+    static uint32_t seen;
+    static double start = -10;
+    static KvrFlash f;
+    double now = GetTickCount64() / 1000.0;
+    if (g_shm->flash.serial != seen) {
+        seen = g_shm->flash.serial;
+        MemoryBarrier();
+        f = const_cast<const KvrFlash&>(g_shm->flash);
+        start = now;
+    }
+    double t = now - start;
+    if (f.duration <= 0 || t >= f.duration || !g_flashSc.handle) return;
+    float k = (float)(1.0 - t / f.duration);
+    float s = f.strength * k * k;
+    if (s < 0.01f) return;
+    const int N = 128;
+    if (g_flashDev != g_dev) {
+        SafeRelease(g_flashSrv);
+        SafeRelease(g_flashTex);
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = d.Height = N;
+        d.MipLevels = d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        g_dev->CreateTexture2D(&d, nullptr, &g_flashTex);
+        if (g_flashTex) g_dev->CreateShaderResourceView(g_flashTex, nullptr, &g_flashSrv);
+        g_flashDev = g_dev;
+    }
+    if (!g_flashSrv) return;
+    static std::vector<uint32_t> px(N * N);
+    uint32_t r = (uint32_t)(std::min(1.0f, f.rgb[0]) * 255), g = (uint32_t)(std::min(1.0f, f.rgb[1]) * 255),
+             b = (uint32_t)(std::min(1.0f, f.rgb[2]) * 255);
+    for (int y = 0; y < N; y++)
+        for (int x = 0; x < N; x++) {
+            float dx = (x + 0.5f) / N * 2 - 1, dy = (y + 0.5f) / N * 2 - 1;
+            float d = sqrtf(dx * dx + dy * dy);
+            float m = std::min(1.0f, std::max(0.0f, (d - 0.35f) / 0.5f));  // clear centre, full at the rim
+            uint32_t a = (uint32_t)(m * m * s * 255);
+            px[y * N + x] = r | (g << 8) | (b << 16) | (a << 24);
+        }
+    g_ctx->UpdateSubresource(g_flashTex, 0, nullptr, px.data(), N * 4, 0);
+    uint32_t idx = AcquireImage(g_flashSc);
+    const float clear[4] = {0, 0, 0, 0};
+    g_ctx->ClearRenderTargetView(g_flashSc.rtvs[idx], clear);
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (SUCCEEDED(g_ctx->Map(g_cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
+        float* p = (float*)m.pData;
+        p[0] = p[1] = 1;
+        p[2] = g_scSrgb ? 1.0f : 0.0f;
+        p[3] = 2;  // alpha from the texture
+        g_ctx->Unmap(g_cb, 0);
+    }
+    D3D11_VIEWPORT vp{0, 0, (float)N, (float)N, 0, 1};
+    g_ctx->OMSetRenderTargets(1, &g_flashSc.rtvs[idx], nullptr);
+    g_ctx->RSSetViewports(1, &vp);
+    g_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g_ctx->IASetInputLayout(nullptr);
+    g_ctx->VSSetShader(g_vs, nullptr, 0);
+    g_ctx->VSSetConstantBuffers(0, 1, &g_cb);
+    g_ctx->PSSetShader(g_ps, nullptr, 0);
+    g_ctx->PSSetConstantBuffers(0, 1, &g_cb);
+    g_ctx->PSSetShaderResources(0, 1, &g_flashSrv);
+    g_ctx->PSSetSamplers(0, 1, &g_samp);
+    g_ctx->Draw(3, 0);
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    g_ctx->PSSetShaderResources(0, 1, &nullSrv);
+    ReleaseImage(g_flashSc);
+    static XrCompositionLayerQuad q{XR_TYPE_COMPOSITION_LAYER_QUAD};
+    q.space = g_view;
+    q.pose = {{0, 0, 0, 1}, {0, 0, -0.5f}};
+    q.size = {2.4f, 2.4f};  // ~135 deg at 0.5 m: past the edges of the headset's view
+    q.subImage.swapchain = g_flashSc.handle;
+    q.subImage.imageRect = {{0, 0}, {N, N}};
+    q.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+    layers.push_back((XrCompositionLayerBaseHeader*)&q);
+}
+
 static void Frame() {
     XrFrameWaitInfo fwi{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState fs{XR_TYPE_FRAME_STATE};
@@ -1418,6 +1505,7 @@ static void Frame() {
     }
 
     if (tracked) AddTextLayers(layers, views[0].pose, g_lastAimValid, g_lastAim);
+    if (tracked) AddFlashLayer(layers);
 
     XrFrameEndInfo fei{XR_TYPE_FRAME_END_INFO};
     fei.displayTime = fs.predictedDisplayTime;
@@ -1463,6 +1551,10 @@ static void Teardown() {
     ResetSwapchain(g_panelSc);
     ResetSwapchain(g_beamSc);
     ResetSwapchain(g_dotSc);
+    ResetSwapchain(g_flashSc);
+    SafeRelease(g_flashSrv);
+    SafeRelease(g_flashTex);
+    g_flashDev = nullptr;
     ReleaseText();
     for (auto& p : g_text) ResetSwapchain(p.sc);
     // children before parents: destroying a live session through its instance deadlocks the Meta runtime

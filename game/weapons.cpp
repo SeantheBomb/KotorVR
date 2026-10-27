@@ -575,26 +575,41 @@ void Weapons_DrawWarnings(const float worldView[16]) {
 }
 
 // Spark burst (blocks / hits): bright streaks flying out from a point on the weapon, in the hand's frame.
-static void DrawSparks(float strength, double age, float along) {
+static void DrawSparks(float strength, double age, float along, const float rgb[3]) {
     p_glDisable(GL_TEXTURE_2D);
     p_glEnable(GL_BLEND);
     p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     p_glDepthMask(GL_FALSE);
-    if (p_glLineWidth) p_glLineWidth(3.0f);
+    if (p_glLineWidth) p_glLineWidth(4.0f);
     unsigned seed = 12345u;
     auto rnd = [&]() { seed = seed * 1103515245u + 12345u; return ((seed >> 8) & 0xFFFF) / 65535.0f * 2 - 1; };
-    float r0 = 0.02f + (float)age * 0.9f, r1 = r0 + 0.06f + (float)age * 0.4f;
+    // a burst of streaks flying out fast (decelerating) plus a bright core flash for the first few frames
+    float a = (float)age;
+    float r0 = 0.02f + a * 1.6f - a * a * 1.2f, r1 = r0 + 0.08f + a * 0.5f;
     p_glBegin(GL_LINES);
-    for (int i = 0; i < 28; i++) {
-        float d[3] = {rnd(), rnd(), rnd() * 0.5f};
+    for (int i = 0; i < 56; i++) {
+        float d[3] = {rnd(), rnd(), rnd() * 0.6f};
         float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) + 1e-4f;
         for (float& v : d) v /= n;
-        p_glColor4f(1.0f, 0.95f, 0.7f, strength);
-        p_glVertex3f(d[0] * r0, d[1] * r0, along + d[2] * r0);
-        p_glColor4f(1.0f, 0.6f, 0.2f, strength * 0.2f);
-        p_glVertex3f(d[0] * r1, d[1] * r1, along + d[2] * r1);
+        float sp = 0.6f + 0.4f * (rnd() * 0.5f + 0.5f);
+        p_glColor4f(1.0f, 0.95f, 0.85f, strength);
+        p_glVertex3f(d[0] * r0 * sp, d[1] * r0 * sp, along + d[2] * r0 * sp);
+        p_glColor4f(rgb[0], rgb[1], rgb[2], strength * 0.25f);
+        p_glVertex3f(d[0] * r1 * sp, d[1] * r1 * sp, along + d[2] * r1 * sp);
     }
     p_glEnd();
+    if (a < 0.08f) {  // core flash: a star of short bright rays
+        float c = 0.09f * (1.0f - a / 0.08f);
+        p_glBegin(GL_LINES);
+        for (int i = 0; i < 8; i++) {
+            float ang = i * 0.785398f;
+            p_glColor4f(1, 1, 1, strength);
+            p_glVertex3f(0, 0, along);
+            p_glColor4f(rgb[0], rgb[1], rgb[2], 0);
+            p_glVertex3f(cosf(ang) * c, sinf(ang) * c, along);
+        }
+        p_glEnd();
+    }
     p_glDepthMask(GL_TRUE);
 }
 
@@ -810,8 +825,10 @@ void Weapons_Draw(const float invEye[16]) {
             }
         }
         double sparkAge;
-        float spark = Cues_Sparks(&sparkAge);
-        if (spark > 0 && h == 1) DrawSparks(spark, sparkAge, IsSaber(c) ? -0.55f : kProfiles[c].melee ? -0.35f : -0.2f);  // the game's own mesh; procedural proxy as fallback
+        float sparkRgb[3];
+        float spark = Cues_Sparks(&sparkAge, sparkRgb);
+        if (spark > 0 && h == 1)
+            DrawSparks(spark, sparkAge, IsSaber(c) ? -0.55f : kProfiles[c].melee ? -0.35f : -0.2f, sparkRgb);  // the game's own mesh; procedural proxy as fallback
         if (kProfiles[c].twoHanded) break;  // a two-handed weapon occupies both hands
     }
 

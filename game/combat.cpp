@@ -272,14 +272,22 @@ extern "C" void __cdecl Combat_DamagePre(void* targetObj, void* effect) {
     if (!IsWeaponDamage(effect, &ints)) return;
     void* player = Weapon_PlayerCreature();
     if (!player || AsCreature(targetObj) != player) return;
-    if (!g_impactBlock) return;
+    int dealt = 0;
+    for (int i = 0; i < 15; i++) dealt += ints[i] > 0 ? ints[i] : 0;
+    if (!g_impactBlock) {
+        if (dealt > 0) Cues_Fire(CUE_HURT);
+        return;
+    }
 
     bool melee = Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
     double held = melee ? Gestures_GuardHeldFor() : -1;
     bool guard = held >= 0;
     bool perfect = guard && held <= 0.4;  // raised into the blow: a parry
     bool dodge = !guard && Gestures_Dodged(0.4);
-    if (!guard && !dodge) return;
+    if (!guard && !dodge) {
+        if (dealt > 0) Cues_Fire(CUE_HURT);
+        return;
+    }
     unsigned roll = D20();
     unsigned chance = perfect ? 19 : guard ? 12 : 10;  // 95% parry / 60% held guard / 50% dodge
     int total = 0;
@@ -293,6 +301,7 @@ extern "C" void __cdecl Combat_DamagePre(void* targetObj, void* effect) {
     } else {
         Log("combat: impact, %s failed (d20 %u > %u), %d damage", guard ? "block" : "dodge", roll, chance, total);
         Cues_Fire(CUE_BLOCK_FAILED);
+        if (total > 0) Cues_Fire(CUE_HURT);
     }
 }
 

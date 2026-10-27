@@ -54,17 +54,18 @@ struct CueSound {
 // Defaults: parries for blocks (KotOR's own cb_pa_* parry sounds, saber clash for sabers), the weapon's swing whoosh
 // for a perfectly timed attack, the action-queue blip for the attack window, the GUI prompt for an incoming attack.
 const CueSound kSounds[CUE_COUNT] = {
-    {"Block", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.3f},
-    {"PerfectBlock", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.6f},
+    {"Block", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 1.7f},
+    {"PerfectBlock", true, {"cb_ls_clash1,cb_ls_clash2", "cb_pa_blade1", "cb_pa_bldlrg1", "cb_pa_unarm1", ""}, 2.0f},
     {"Dodge", false, {""}, 0.6f},
     {"BlockFailed", false, {""}, 0.6f},
     {"PerfectHit", true, {"cb_ls_swinglong1,cb_ls_swinglong2,cb_ls_swinglong3", "cb_sw_blade1", "cb_sw_bldlrg1",
                           "cb_sw_unarmed1", ""}, 0.9f},
     {"WindowOpen", false, {"gui_actqueue"}, 0.5f},
     {"Incoming", false, {"gui_prompt"}, 0.8f},
-    {"HitLanded", false, {""}, 1.0f},  // KotOR plays its own impact sound
+    {"HitLanded", true, {"cb_ls_hithard1,cb_ls_hithard2", "", "", "", ""}, 0.7f},  // a saber sizzle over KotOR's own impact
     {"PerfectLanded", true, {"cb_ls_hithard1,cb_ls_hithard2", "", "", "", ""}, 1.0f},
     {"Force", false, {""}, 1.0f},  // KotOR plays the power's own sound
+    {"Hurt", false, {""}, 1.0f},   // KotOR plays the character's own pain grunt
 };
 
 struct Wav {
@@ -245,9 +246,11 @@ float g_tint[3] = {1, 1, 1};
 double g_tintUntil = -10;
 float g_spark;
 double g_sparkAt = -10;
-void Spark(float v) {
+bool g_sparkBlock;  // blue-white (a block) rather than hot orange (a hit)
+void Spark(float v, bool block = false) {
     g_spark = v;
     g_sparkAt = Now();
+    g_sparkBlock = block;
 }
 
 void Flash(float v) {
@@ -269,20 +272,30 @@ void Cues_Init(const char* gameDir) {
 void Cues_Fire(CueEvent e) {
     if (!Features().cues) return;
     static const char* names[CUE_COUNT] = {"block", "perfect block", "dodge", "block failed", "perfect hit",
-                                           "window open", "incoming_warning", "hit landed", "perfect landed", "force"};
+                                           "window open", "incoming_warning", "hit landed", "perfect landed", "force",
+                                           "hurt"};
     if (e != CUE_WINDOW_OPEN) Log("cue: %s", names[e]);
     PlaySoundFor(e);
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands
-        case CUE_PERFECT_BLOCK:  // crack + ring: unmistakable
-            Haptic(0, 1, 1.0f, 0.12f, 320); Haptic(0.14, 1, 0.7f, 0.10f, 160); Flash(1.0f); Spark(1.0f); break;
-        case CUE_BLOCK: Haptic(0, 1, 0.9f, 0.14f, 250); Flash(0.75f); Spark(0.6f); break;
-        case CUE_DODGE: Haptic(0, 2, 0.6f, 0.12f, 200); break;
+        case CUE_PERFECT_BLOCK:  // crack + ring + a bright blue rim: unmistakable
+            Haptic(0, 1, 1.0f, 0.14f, 320); Haptic(0.15, 1, 0.8f, 0.12f, 160); Flash(1.0f); Spark(1.0f, true);
+            VR_Flash(0.6f, 0.85f, 1.0f, 0.55f, 0.35f); break;
+        case CUE_BLOCK:
+            Haptic(0, 1, 1.0f, 0.15f, 250); Flash(0.85f); Spark(0.85f, true); VR_Flash(0.35f, 0.65f, 1.0f, 0.35f, 0.25f);
+            break;
+        case CUE_DODGE: Haptic(0, 2, 0.7f, 0.12f, 200); VR_Flash(0.8f, 0.8f, 0.8f, 0.2f, 0.2f); break;
         case CUE_BLOCK_FAILED: Haptic(0, 1, 0.6f, 0.08f, 80); Haptic(0.14, 1, 0.6f, 0.08f, 80); break;
+        case CUE_HURT:  // a heavy thump in both hands and a red pulse at the edge of the view
+            Haptic(0, 2, 1.0f, 0.16f, 55); Haptic(0.18, 2, 0.6f, 0.12f, 45); VR_Flash(0.95f, 0.05f, 0.02f, 0.75f, 0.55f);
+            break;
         case CUE_PERFECT_HIT: Haptic(0, 1, 0.8f, 0.10f, 120); Flash(0.6f); break;
         case CUE_WINDOW_OPEN: Haptic(0, 1, 0.25f, 0.03f, 200); break;
         case CUE_INCOMING: Haptic(0, 2, 0.5f, 0.06f, 160); break;
-        case CUE_HIT_LANDED: Haptic(0, 1, 0.8f, 0.12f, 90); Flash(0.5f); Spark(0.6f); break;
-        case CUE_PERFECT_LANDED: Haptic(0, 1, 1.0f, 0.22f, 70); Flash(1.0f); Spark(1.0f); break;
+        case CUE_HIT_LANDED:  // a hard knock then a short tail: it connected
+            Haptic(0, 1, 1.0f, 0.09f, 90); Haptic(0.1, 1, 0.5f, 0.08f, 60); Flash(0.8f); Spark(1.0f); break;
+        case CUE_PERFECT_LANDED:
+            Haptic(0, 1, 1.0f, 0.22f, 70); Haptic(0.24, 1, 0.6f, 0.1f, 50); Flash(1.0f); Spark(1.0f);
+            VR_Flash(1.0f, 0.75f, 0.2f, 0.25f, 0.3f); break;
         case CUE_FORCE:  // a low surge in the casting (left) hand
             Haptic(0, 0, 0.7f, 0.25f, 50); g_forceAt = Now(); break;
         default: break;
@@ -350,10 +363,13 @@ float Cues_ForceGlow(int hand) {
     return age < 0.5 ? (float)(1.0 - age / 0.5) : 0;
 }
 
-float Cues_Sparks(double* age) {
+float Cues_Sparks(double* age, float rgb[3]) {
     *age = Now() - g_sparkAt;
-    if (!Features().cues || *age > 0.3) return 0;
-    return g_spark * (float)(1.0 - *age / 0.3);
+    rgb[0] = g_sparkBlock ? 0.6f : 1.0f;
+    rgb[1] = g_sparkBlock ? 0.85f : 0.6f;
+    rgb[2] = g_sparkBlock ? 1.0f : 0.2f;
+    if (!Features().cues || *age > 0.45) return 0;
+    return g_spark * (float)(1.0 - *age / 0.45);
 }
 
 // ---------------------------------------------------------------- lightsaber

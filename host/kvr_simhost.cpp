@@ -428,6 +428,11 @@ static void LogHaptics() {
                    g_shm->haptic[h].duration, g_shm->haptic[h].frequency);
         seen[h] = serial;
     }
+    static uint32_t flashSeen;
+    if (primed && g_shm->flash.serial != flashSeen)
+        printf("[%.1f]   flash rgb %.2f %.2f %.2f strength %.2f for %.2f s\n", Now(), g_shm->flash.rgb[0],
+               g_shm->flash.rgb[1], g_shm->flash.rgb[2], g_shm->flash.strength, g_shm->flash.duration);
+    flashSeen = g_shm->flash.serial;
     primed = true;
 }
 

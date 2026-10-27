@@ -13,6 +13,7 @@ enum CueEvent {
     CUE_HIT_LANDED,     // the player's blow / bolt connected (the damage just landed)
     CUE_PERFECT_LANDED, // ... and it was an on-beat (+4) attack
     CUE_FORCE,          // a Force gesture fired (off hand)
+    CUE_HURT,           // the player took weapon damage (not blocked)
     CUE_COUNT
 };
 
@@ -27,8 +28,9 @@ void Cues_GlowColor(int hand, float rgb[3]);
 // A special move fired (1 power, 2 critical, 3 flurry, 4 power shot, 5 rapid): its own color flare and haptic pattern
 // on the weapon, so you can tell which one it was.
 void Cues_Move(int move);
-// Spark burst on the weapon for blocks and hits: 0..1 strength (fades over 0.3 s).
-float Cues_Sparks(double* age);
+// Spark burst on the weapon for blocks and hits: 0..1 strength (fades over 0.45 s); rgb: hot orange for hits,
+// blue-white for blocks.
+float Cues_Sparks(double* age, float rgb[3]);
 // Force glow on a hand (0..1, fades over 0.5 s) after a Force gesture.
 float Cues_ForceGlow(int hand);
 // The player's perfect attack window is open (drives the gentle weapon pulse).

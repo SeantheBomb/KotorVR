@@ -828,6 +828,17 @@ void VR_MovieFrame(const unsigned char* bgrx, int w, int h) {
     s.pending[0] = s.pending[1] = false;
 }
 
+void VR_Flash(float r, float g, float b, float strength, float seconds) {
+    if (!g_shm) return;
+    g_shm->flash.rgb[0] = r;
+    g_shm->flash.rgb[1] = g;
+    g_shm->flash.rgb[2] = b;
+    g_shm->flash.strength = strength;
+    g_shm->flash.duration = seconds;
+    MemoryBarrier();
+    g_shm->flash.serial = g_shm->flash.serial + 1;
+}
+
 void VR_MovieEnded() {
     if (g_shm) g_shm->panel.flags &= ~KVR_SLOT_MOVIE;
 }
