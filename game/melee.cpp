@@ -289,6 +289,23 @@ void Melee_Update() {
     }
 }
 
+// --- line of sight: CSWSArea::ClearLineOfSight 0x50C330 (thiscall on the area of the player, CSWSObject::GetArea
+// 0x4CB120): (start in/out - overwritten with the hit point when blocked, end, two scratch vectors, ignore id, ignore
+// id, 1, 0) as CSWSCreature calls it at 0x4F312F; non-zero = clear.
+bool Melee_LineOfSight(const float from[3], const float to[3], DWORD ignoreA, DWORD ignoreB) {
+    typedef void*(__fastcall * GetAreaFn)(void* obj, void*);
+    typedef int(__fastcall * LosFn)(void* area, void*, float* start, const float* end, float* a, float* b, DWORD idA,
+                                   DWORD idB, int one, int zero);
+    __try {
+        void* p = Weapon_PlayerCreature();
+        void* area = p ? ((GetAreaFn)0x4CB120)(p, nullptr) : nullptr;
+        if (!area) return true;
+        float start[3] = {from[0], from[1], from[2]}, end[3] = {to[0], to[1], to[2]}, sa[3] = {}, sb[3] = {};
+        return ((LosFn)0x50C330)(area, nullptr, start, end, sa, sb, ignoreA, ignoreB, 1, 0) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return true;
+}
+
 // --- defence: the blade against a strike zone / a bolt's path
 bool Melee_BladeNear(const float point[3], float radius, float* speed) {
     for (int h = 0; h < 2; h++) {

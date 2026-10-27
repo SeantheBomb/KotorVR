@@ -37,6 +37,7 @@
 #include "melee.h"
 #include "force.h"
 #include "gestures.h"
+#include "vr.h"
 #include "weapons.h"
 
 extern void Log(const char* fmt, ...);
@@ -441,6 +442,16 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
     bool melee = Weapon_Right() != WC_NONE && Weapon_Profile(Weapon_Right()).melee;
     double t = Now();
     if (ranged) {
+        // cover: the shooter sees neither your head nor your chest (the game's own line of sight) - the wall takes it
+        float head[3] = {me[0], me[1], me[2] + 1.6f}, from[3] = {them[0], them[1], them[2] + 1.4f};
+        DWORD meId = ObjectId(Weapon_PlayerCreature());
+        if (!Melee_LineOfSight(from, head, attacker, meId) && !Melee_LineOfSight(from, chest, attacker, meId)) {
+            for (int i = 0; i < 15; i++)
+                if (ints[i] > 0) ints[i] = 0;
+            VR_Haptic(1, 0.3f, 0.03f, 250);
+            Log("combat: bolt from %08lX hit your cover", attacker);
+            return true;
+        }
         // the bolt's last 1.5 m before your chest: a saber across it deflects it; a fast one sends it back
         float a[3] = {chest[0] + dx * 1.5f, chest[1] + dy * 1.5f, them[2] + 1.3f};
         float speed = 0;

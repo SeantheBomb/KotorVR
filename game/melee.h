@@ -24,6 +24,8 @@ bool Melee_BladeNear(const float point[3], float radius, float* speed);
 bool Melee_BladeCrossesLine(const float a[3], const float b[3], float radius, float* speed);
 // A trigger shot along the barrel (world): credits the first enemy body it passes through.
 void Melee_Shot(const float origin[3], const float dir[3]);
+// The game's own line-of-sight test between two world points (ignoring two objects); true = clear.
+bool Melee_LineOfSight(const float from[3], const float to[3], DWORD ignoreA, DWORD ignoreB);
 // Force aim: the left controller's ray (world) each frame, and the enemy it points at (35 deg cone, then forgiving fallbacks).
 void Melee_SetPalm(const float origin[3], const float dir[3]);
 DWORD Melee_PalmTarget();
