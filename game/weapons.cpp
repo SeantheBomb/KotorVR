@@ -647,6 +647,50 @@ static void UpdateSaber(const KvrInput& in) {
     Cues_SaberHum(saber && g_bladeExt > 0.5f, speed);
 }
 
+// Per-class hand pose corrections from kvr.ini [WeaponPose] (re-read whenever the file changes, so a held weapon can
+// be tuned in the headset): key = class name with '_' for spaces, value = "roll pitch yaw forward" in degrees and
+// metres, applied in the grip frame (roll about the blade / barrel axis, -Z). E.g. short_blade=180 0 0 0.
+struct PoseAdj {
+    bool set;
+    float m[16];
+};
+static PoseAdj g_poseAdj[WC_COUNT];
+
+static void RefreshPoseAdj() {
+    static DWORD lastCheck;
+    static FILETIME lastWrite;
+    if (GetTickCount() - lastCheck < 1000) return;
+    lastCheck = GetTickCount();
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    const char* ini = Features_IniPath();
+    if (!ini[0] || !GetFileAttributesExA(ini, GetFileExInfoStandard, &fa)) return;
+    if (CompareFileTime(&fa.ftLastWriteTime, &lastWrite) == 0) return;
+    lastWrite = fa.ftLastWriteTime;
+    for (int c = 0; c < WC_COUNT; c++) {
+        char key[32], val[64];
+        strcpy_s(key, kProfiles[c].name);
+        for (char* p = key; *p; p++)
+            if (*p == ' ') *p = '_';
+        GetPrivateProfileStringA("WeaponPose", key, "", val, sizeof val, ini);
+        float roll = 0, pitch = 0, yaw = 0, fwd = 0;
+        PoseAdj& a = g_poseAdj[c];
+        a.set = sscanf_s(val, "%f %f %f %f", &roll, &pitch, &yaw, &fwd) >= 1;
+        if (!a.set) continue;
+        const float d = 3.14159265f / 180.0f;
+        float cr = cosf(roll * d), sr = sinf(roll * d), cp = cosf(pitch * d), sp = sinf(pitch * d), cy = cosf(yaw * d),
+              sy = sinf(yaw * d);
+        // R = Ry(yaw) * Rx(pitch) * Rz(roll), column-major, translation along -Z (forward)
+        float Rz[16] = {cr, sr, 0, 0, -sr, cr, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        float Rx[16] = {1, 0, 0, 0, 0, cp, sp, 0, 0, -sp, cp, 0, 0, 0, 0, 1};
+        float Ry[16] = {cy, 0, -sy, 0, 0, 1, 0, 0, sy, 0, cy, 0, 0, 0, 0, 1};
+        float t[16];
+        MulMat(Rx, Rz, t);
+        MulMat(Ry, t, a.m);
+        a.m[14] = -fwd;
+        Log("weapons: pose for %s: roll %.0f pitch %.0f yaw %.0f forward %.2f", kProfiles[c].name, roll, pitch, yaw, fwd);
+    }
+}
+
 void Weapons_Draw(const float invEye[16]) {
     const KvrShared* shm = VR_Shared();
     if (!shm || !LoadGl()) return;
@@ -716,6 +760,7 @@ void Weapons_Draw(const float invEye[16]) {
             }
     }
     memcpy(g_lastInvEye, invEye, sizeof g_lastInvEye);
+    RefreshPoseAdj();
     g_muzzleValid = false;
     for (int h = 1; h >= 0; h--) {  // right, then left
         WeaponClass c = h ? g_right : g_left;
@@ -728,6 +773,11 @@ void Weapons_Draw(const float invEye[16]) {
             MulMat(g, gripToAim, hand);
         } else {
             PoseMatrix(in.grip[h].pos, in.grip[h].quat, hand);
+        }
+        if (g_poseAdj[c].set) {
+            float adjusted[16];
+            MulMat(hand, g_poseAdj[c].m, adjusted);
+            memcpy(hand, adjusted, sizeof adjusted);
         }
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);

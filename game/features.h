@@ -20,3 +20,5 @@ struct FeatureFlags {
 
 const FeatureFlags& Features();
 void Features_Load(const char* gameDir);
+// <game>\kvr\kvr.ini (for sections read live, e.g. [WeaponPose])
+const char* Features_IniPath();

@@ -104,7 +104,7 @@ def blade_edge_up(meshes, rows):
                 xs.append(q[0])
                 ys.append(q[1])
     if xs and (max(xs) - min(xs)) > 1.5 * (max(ys) - min(ys)) and (max(xs) - min(xs)) > 0.03:
-        rz = [[0, -1, 0], [1, 0, 0], [0, 0, 1]]  # x -> y
+        rz = [[0, 1, 0], [-1, 0, 0], [0, 0, 1]]  # -90 deg: x -> -y (+90 left vibroblade edges facing back, 2026-10-26)
         return mmul(rz, rows)
     return rows
 

@@ -9,9 +9,12 @@ static FeatureFlags g_flags = {true, true, true, true, false, true, true, true, 
 
 const FeatureFlags& Features() { return g_flags; }
 
+static char g_iniPath[MAX_PATH];
+const char* Features_IniPath() { return g_iniPath; }
+
 void Features_Load(const char* gameDir) {
-    char path[MAX_PATH];
-    sprintf_s(path, "%s\\kvr\\kvr.ini", gameDir);
+    char* path = g_iniPath;
+    sprintf_s(g_iniPath, "%s\\kvr\\kvr.ini", gameDir);
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
         // write the defaults so they are easy to find and flip
         WritePrivateProfileStringA("Features", "EngineCamera", "1", path);
