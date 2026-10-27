@@ -39,10 +39,38 @@ onto ours where noted.
   - back toward the shooter with a Deflect skill check, or away.
 
 ### 3. Ranged as real guns (M)
-- v1 already fires on the trigger pull. v2 makes the bolt authoritative: it travels, and hits what it reaches (ray
-  against hit volumes, line of sight) - then the d20 decides damage. Light aim assist (d2r-pcvr: 4/12 degree cone,
-  visible line only, 750 ms sticky) keeps it fair at range.
-- Dual wield: each hand's trigger fires its own gun (the HUD removal for v1 frees the left trigger for this).
+Rule (as for melee): the dice never contradict what you physically did.
+
+Your shots
+- Aim decides hit or miss: each trigger pull casts along the real barrel against per-bone capsules of the target
+  (NPC skeletons are readable since the 2026-10-27 node probe, FINDINGS.md "Client animation nodes"). The d20 grades
+  the hit - graze / clean / crit - instead of deciding it. Headshot raises crit threat; limb hits react on that limb.
+- Feats become fire modes: Rapid Shot = higher rate, more spread; Power Blast = hold the trigger to charge; Sniper
+  Shot = rewards holding steady (steadiness shown on the weapon, no scope); Two-Weapon Fighting = dual pistols on
+  both triggers, aimed independently, the feat penalties applied as spread.
+- Off hand on a rifle's foregrip tightens spread and recoil.
+- Feel: recoil kick on the weapon model (never the camera), tracers, impact sparks / scorches, per-weapon haptics,
+  short hit-pause on kills.
+- Optional aim magnetism, a small cone that grows with Blaster skill (d2r-pcvr Light / Strong: 4/12 degrees,
+  visible line only, 750 ms sticky); never a guaranteed hit.
+
+Incoming fire
+- Enemy shots are rolled ~0.5 s before impact: muzzle glint on the shooter at roll time, the bolt flies visibly.
+- Dodge and cover: head / body out of the bolt's path at impact, or the engine's line of sight blocked by cover,
+  turns the hit into a miss (leaning out of a bolt is the ranged parry). Needs the engine's LOS function (Lane's
+  labels).
+- Saber deflection as in pillar 2.
+
+Enemies and grenades
+- Hit reactions where the bolt lands via the bone layer (spine flinch, head snap; knockdown on crit / Power Blast
+  through the engine's knockdown effect).
+- Grenades: physical throw arc (d2r-pcvr hand-launched projectiles); the engine resolves the blast at the landing
+  point.
+
+Not doing: reloads, ammo, heat - KotOR has none, and Until You Fall's lesson is not to add interactions whose only
+effect is new ways to fail.
+
+Order: barrel hits + bone reactions, then telegraphed bolts + dodge / cover, then fire modes + foregrip, grenades.
 
 ### 4. Reactions and feedback (M)
 - Enemy hit reactions on contact (play the game's own damage / knockdown animations), stagger on parries.
