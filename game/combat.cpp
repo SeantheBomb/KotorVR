@@ -30,7 +30,9 @@
 #include <map>
 #include <vector>
 
+#include "anim.h"
 #include "cues.h"
+#include "features.h"
 #include "gestures.h"
 #include "weapons.h"
 
@@ -107,6 +109,7 @@ struct Incoming {
     BYTE* record;        // the attacker's attack record (round + 4 + index * 0x14C)
     double rolled, due;  // Now() seconds; due < 0 until ReaxnDelay is known
     bool warned;
+    bool ranged;
 };
 CRITICAL_SECTION g_lock;
 std::vector<Incoming> g_incoming;
@@ -130,7 +133,7 @@ double PredictedNextRoll() {
 
 const double kPerfectWindow = 0.6;  // seconds before the roll
 const double kTimedWindow = 2.0;
-const double kIncomingLead = 0.6;  // warning shown / cue fired this long before an attack lands
+const double kIncomingLead = kCombatWarnLead;  // incoming cue fired this long before an attack lands
 
 // Special moves: the attack gesture's move becomes the best rank of that combat feat the character can use, written
 // into the attack record's AttackType (+0x64) before the roll; KotOR then applies the feat's own to-hit / damage
@@ -205,13 +208,18 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         Log("combat: player_attack, gesture %.2f s before the roll: d20 %u +%d -> %u", ago, nat, bonus, forced);
         return;
     }
-    if (target == player) {
+    // [Debug] TelegraphTest=1: every attack (e.g. a kinrath on a companion) is telegraphed as if aimed at the player
+    if (target == player || (Features().telegraphTest && target && attacker != player)) {
         __try {
             BYTE* round = *(BYTE**)((BYTE*)attacker + 0x9C8);
             BYTE* record = round ? round + 4 + *(round + 0x96C) * 0x14C : nullptr;
             if (record) {
                 EnterCriticalSection(&g_lock);
-                g_incoming.push_back({ObjectId(attacker), record, Now(), -1, false});
+                bool ranged = false;
+                __try {
+                    ranged = *(int*)(record + 0x40) != 0;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                g_incoming.push_back({ObjectId(attacker), record, Now(), -1, false, ranged});
                 LeaveCriticalSection(&g_lock);
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -244,9 +252,13 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
     if (caller == playerId && object != playerId) {  // the player's blow / bolt just connected
         bool beat = g_lastPlayerBonus == 4 && Now() - g_lastPlayerBonusAt < 3.0;
         if (beat) g_lastPlayerBonus = 0;
+        int dealt = 0;
+        for (int i = 0; i < 15; i++) dealt += ints[i] > 0 ? ints[i] : 0;
+        if (dealt > 0) Anim_HitPause(object, beat ? 0.09f : 0);  // the struck enemy freezes a beat (Phase A feel)
         Cues_Fire(beat ? CUE_PERFECT_LANDED : CUE_HIT_LANDED);
         return;
     }
+    if (Features().telegraphTest && object != playerId) Anim_HitPause(object, 0);  // any landed blow freezes its target
     if (object != playerId || caller == playerId) return;
     // the blow just landed: match it to its roll (oldest pending from this attacker) and log the prediction error
     double t = Now();
@@ -345,10 +357,11 @@ __declspec(naked) static void DamageStub() {
     }
 }
 
-static bool Detour(DWORD va, const BYTE* orig, int len, void* stub, BYTE** tramp, const char* what) {
+bool Combat_Detour(unsigned long va, const unsigned char* orig, int len, void* stub, unsigned char** tramp,
+                   const char* what) {
     BYTE* target = (BYTE*)(ULONG_PTR)va;
     if (memcmp(target, orig, len) != 0) {
-        Log("combat: unexpected bytes at %08lX (%s), not hooking", va, what);
+        Log("hook: unexpected bytes at %08lX (%s), not hooking", va, what);
         return false;
     }
     *tramp = (BYTE*)VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -362,7 +375,7 @@ static bool Detour(DWORD va, const BYTE* orig, int len, void* stub, BYTE** tramp
     for (int i = 5; i < len; i++) target[i] = 0x90;
     VirtualProtect(target, len, old, &old);
     FlushInstructionCache(GetCurrentProcess(), target, len);
-    Log("combat: hooked %s at %08lX", what, va);
+    Log("hook: %s at %08lX", what, va);
     return true;
 }
 
@@ -372,9 +385,9 @@ bool Combat_Install() {
     GetModuleFileNameA(nullptr, ini, MAX_PATH);
     if (char* s = strrchr(ini, '\\')) strcpy_s(s + 1, MAX_PATH - (s + 1 - ini), "kvr\\kvr.ini");
     g_impactBlock = GetPrivateProfileIntA("Combat", "ImpactBlock", 1, ini) != 0;
-    bool ok = Detour(kResolverVA, kResolverOrig, 6, ResolverStub, &g_resolverTramp, "attack resolver");
-    if (ok) Detour(kQueueVA, kQueueOrig, 8, QueueStub, &g_queueTramp, "event queue");
-    bool dmg = ok && Detour(kDamageVA, kDamageOrig, 7, DamageStub, &g_damageTramp, "damage handler");
+    bool ok = Combat_Detour(kResolverVA, kResolverOrig, 6, ResolverStub, &g_resolverTramp, "attack resolver");
+    if (ok) Combat_Detour(kQueueVA, kQueueOrig, 8, QueueStub, &g_queueTramp, "event queue");
+    bool dmg = ok && Combat_Detour(kDamageVA, kDamageOrig, 7, DamageStub, &g_damageTramp, "damage handler");
     if (!dmg) g_impactBlock = false;
     Log("combat: blocks decided %s", g_impactBlock ? "at impact" : "at the roll");
     return ok;
@@ -392,6 +405,18 @@ void Combat_Update() {
     double t = Now();
     bool fighting = Combat_AttackWithin(6000);
     EnterCriticalSection(&g_lock);
+    if (Features().telegraphTest) {  // harness: keep re-arming a 1.2 s telegraph from the last real attacker
+        static DWORD lastAttacker;
+        static double lastFake;
+        static bool ranged;
+        if (!g_incoming.empty() && g_incoming.back().record) lastAttacker = g_incoming.back().attacker;
+        if (lastAttacker && g_incoming.empty() && t - lastFake > 2.0) {
+            lastFake = t;
+            ranged = !ranged;
+            g_incoming.push_back({lastAttacker, nullptr, t, t + 1.2, false, ranged});
+            Log("combat: telegraph_test from %08lX (%s)", lastAttacker, ranged ? "ranged" : "melee");
+        }
+    }
     for (size_t i = 0; i < g_incoming.size();) {
         Incoming& in = g_incoming[i];
         if (in.due < 0) {  // ReaxnDelay is filled in after the roll
@@ -439,9 +464,11 @@ int Combat_IncomingWarnings(CombatWarning* out, int max) {
         if (n >= max) break;
         if (in.due < 0) continue;
         double left = in.due - t;
-        if (left > kIncomingLead || left < -0.15) continue;
+        if (left > 3.0 || left < -0.15) continue;  // shown from the roll (Phase A telegraph)
         out[n].attacker = in.attacker;
         out[n].secondsLeft = (float)left;
+        out[n].total = (float)(in.due - in.rolled);
+        out[n].ranged = in.ranged;
         n++;
     }
     LeaveCriticalSection(&g_lock);

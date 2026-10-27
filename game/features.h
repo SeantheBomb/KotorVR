@@ -17,6 +17,7 @@ struct FeatureFlags {
     float turnSpeed;     // [Comfort] TurnSpeed (degrees per second at full stick, default 120)
     bool cutsceneFirstPerson;  // [Comfort] CutsceneFirstPerson=1: never cut away from first person in cutscenes
     bool traceWorld;     // [Debug] TraceWorld=1: one GL trace of a world frame (kvr\trace_f*.txt)
+    bool telegraphTest;  // [Debug] TelegraphTest=1: telegraph / hit-pause every attack in a fight, not just those on the player (harness)
     bool animProbe;      // [Debug] AnimProbe=1: log the player model's animation nodes vs the GL bones every 5 s
     bool tracePosition;  // [Debug] TracePosition=1: log the player camera position and heading every 2 s (harness navigation)
 };

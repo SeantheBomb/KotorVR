@@ -481,8 +481,30 @@ void* Weapon_CreatureById(DWORD id) {
     return nullptr;
 }
 
-// A downward chevron (two triangles) over the attacker's head, drawn in eye space so it always faces the player.
-// Amber while the attack winds up, white-gold and larger in the parry window (last 0.4 s), fading after impact.
+static bool IsSaber(WeaponClass c);
+
+static bool CreaturePos(DWORD id, float out[3]) {
+    __try {
+        BYTE* c = (BYTE*)Weapon_CreatureById(id);
+        if (!c) return false;
+        memcpy(out, c + 0x90, 12);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+static void ToEye(const float* worldView, const float* p, float* e) {
+    for (int r = 0; r < 3; r++)
+        e[r] = worldView[0 * 4 + r] * p[0] + worldView[1 * 4 + r] * p[1] + worldView[2 * 4 + r] * p[2] + worldView[12 + r];
+}
+
+// Telegraph for every attack rolled against the player, from the roll to just after the impact (v2 Phase A):
+// - a downward chevron over the attacker's head: blue = block / parry it, red = dodge it (a bolt you can't deflect);
+//   white-gold and larger in the parry window (last 0.4 s);
+// - a timing ring around the chevron that closes onto it at the impact;
+// - a strike-zone diamond in front of the player's chest on the attacker's side: where the blow arrives - put the
+//   blade there (Until You Fall's block line).
+// Drawn in eye space so they always face the player, through walls (Arkham's counter icons).
 void Weapons_DrawWarnings(const float worldView[16]) {
     if (!Features().cues || !LoadGl()) return;
     CombatWarning w[8];
@@ -572,26 +594,82 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
         }
     }
-    for (int i = 0; i < n; i++) {
-        float wp[3];
-        __try {
-            BYTE* c = (BYTE*)Weapon_CreatureById(w[i].attacker);
-            if (!c) continue;
-            wp[0] = *(float*)(c + 0x90);
-            wp[1] = *(float*)(c + 0x94);
-            wp[2] = *(float*)(c + 0x98) + 2.1f;  // above the head (creature origin is at its feet)
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            continue;
+    float pp[3] = {0, 0, 0};
+    bool havePlayer = false;
+    __try {
+        if (BYTE* pc = (BYTE*)Weapon_PlayerCreature()) {
+            memcpy(pp, pc + 0x90, sizeof pp);
+            havePlayer = true;
         }
-        float e[3];
-        for (int r = 0; r < 3; r++)
-            e[r] = worldView[0 * 4 + r] * wp[0] + worldView[1 * 4 + r] * wp[1] + worldView[2 * 4 + r] * wp[2] + worldView[12 + r];
-        if (e[2] > -0.3f) continue;  // behind / at the eye
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    bool melee = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
+    bool saber = IsSaber(Weapon_Right()) || IsSaber(Weapon_Left());
+    for (int i = 0; i < n; i++) {
+        float ap[3], wp[3];
+        bool found = CreaturePos(w[i].attacker, ap);
+        static unsigned long lastLogged;
+        if (w[i].attacker != lastLogged) {
+            Log("telegraph: attack by %08lX, %.2f of %.2f s left, attacker %s", w[i].attacker, w[i].secondsLeft,
+                w[i].total, found ? "found" : "NOT found");
+            lastLogged = w[i].attacker;
+        }
+        if (!found) continue;
         float left = w[i].secondsLeft;
         bool parry = left <= 0.4f;
         float fade = left < 0 ? 1.0f + left / 0.15f : 1.0f;  // gone 0.15 s after the impact
+        float frac = w[i].total > 0.05f ? max(0.0f, min(1.0f, left / w[i].total)) : 0.0f;  // 1 at the roll, 0 at impact
+        bool blockable = w[i].ranged ? saber : melee;
+        float base[3] = {blockable ? 0.3f : 1.0f, blockable ? 0.65f : 0.2f, blockable ? 1.0f : 0.15f};
+        float rgb[3] = {parry ? 1.0f : base[0], parry ? 0.92f : base[1], parry ? 0.6f : base[2]};
+        float e[3];
+        // strike zone: chest height, 0.55 m in front of the player towards the attacker
+        if (havePlayer) {
+            float dx = ap[0] - pp[0], dy = ap[1] - pp[1];
+            float dl = sqrtf(dx * dx + dy * dy);
+            if (dl > 0.3f) {
+                float zp[3] = {pp[0] + dx / dl * 0.55f, pp[1] + dy / dl * 0.55f, pp[2] + 1.2f};
+                ToEye(worldView, zp, e);
+                if (e[2] < -0.2f) {
+                    float a = (0.25f + 0.75f * (1.0f - frac)) * fade, z = 0.06f + 0.04f * (1.0f - frac);
+                    if (p_glLineWidth) p_glLineWidth(3.0f);
+                    p_glColor4f(rgb[0], rgb[1], rgb[2], a);
+                    p_glBegin(GL_LINE_LOOP);
+                    p_glVertex3f(e[0], e[1] + z, e[2]);
+                    p_glVertex3f(e[0] + z, e[1], e[2]);
+                    p_glVertex3f(e[0], e[1] - z, e[2]);
+                    p_glVertex3f(e[0] - z, e[1], e[2]);
+                    p_glEnd();
+                    if (parry) {  // filled in the parry window
+                        p_glColor4f(rgb[0], rgb[1], rgb[2], 0.35f * fade);
+                        p_glBegin(GL_TRIANGLES);
+                        p_glVertex3f(e[0], e[1] + z, e[2]);
+                        p_glVertex3f(e[0] + z, e[1], e[2]);
+                        p_glVertex3f(e[0], e[1] - z, e[2]);
+                        p_glVertex3f(e[0], e[1] + z, e[2]);
+                        p_glVertex3f(e[0], e[1] - z, e[2]);
+                        p_glVertex3f(e[0] - z, e[1], e[2]);
+                        p_glEnd();
+                    }
+                }
+            }
+        }
+        wp[0] = ap[0];
+        wp[1] = ap[1];
+        wp[2] = ap[2] + 2.1f;  // above the head (creature origin is at its feet)
+        ToEye(worldView, wp, e);
+        if (e[2] > -0.3f) continue;  // behind / at the eye
         float s = parry ? 0.22f : 0.15f;
-        float rgb[3] = {1.0f, parry ? 0.92f : 0.55f, parry ? 0.6f : 0.1f};
+        if (left > 0) {  // timing ring: closes from 3.5x onto the chevron at the impact
+            float rr = s * (1.0f + 2.5f * frac);
+            if (p_glLineWidth) p_glLineWidth(3.0f);
+            p_glColor4f(rgb[0], rgb[1], rgb[2], 0.7f * fade);
+            p_glBegin(GL_LINE_LOOP);
+            for (int k = 0; k < 28; k++) {
+                float an = k * (6.2831853f / 28);
+                p_glVertex3f(e[0] + rr * cosf(an), e[1] + rr * sinf(an), e[2]);
+            }
+            p_glEnd();
+        }
         for (int pass = 0; pass < 2; pass++) {  // soft halo, then the core
             float k = pass ? 1.0f : 1.8f, a = (pass ? 0.95f : 0.25f) * fade;
             p_glColor4f(rgb[0], rgb[1], rgb[2], a);
@@ -823,12 +901,43 @@ void Weapons_Draw(const float invEye[16]) {
             PoseMatrix(in.grip[h].pos, in.grip[h].quat, g);
             MulMat(g, gripToAim, hand);
         } else {
-            PoseMatrix(in.grip[h].pos, in.grip[h].quat, hand);
+            // Power Attack: the blade's rotation drags behind the hand for a moment (weight); the hilt stays in the hand
+            static float lagQ[2][4];
+            static double lagT[2] = {-1, -1};
+            const float* q = in.grip[h].quat;
+            float lag = Cues_PowerLag();
+            double ldt = lagT[h] > 0 ? in.time - lagT[h] : 0;
+            lagT[h] = in.time;
+            if (lag > 0 && ldt > 0 && ldt < 0.2) {
+                float dot = lagQ[h][0] * q[0] + lagQ[h][1] * q[1] + lagQ[h][2] * q[2] + lagQ[h][3] * q[3];
+                float sgn = dot < 0 ? -1.0f : 1.0f, a = 1.0f - expf(-(float)ldt / lag), len = 0;
+                for (int k = 0; k < 4; k++) {
+                    lagQ[h][k] += (q[k] * sgn - lagQ[h][k]) * a;
+                    len += lagQ[h][k] * lagQ[h][k];
+                }
+                len = sqrtf(len) + 1e-6f;
+                for (int k = 0; k < 4; k++) lagQ[h][k] /= len;
+            } else {
+                memcpy(lagQ[h], q, sizeof lagQ[h]);
+            }
+            PoseMatrix(in.grip[h].pos, lagQ[h], hand);
         }
         if (g_poseAdj[c].set) {
             float adjusted[16];
             MulMat(hand, g_poseAdj[c].m, adjusted);
             memcpy(hand, adjusted, sizeof adjusted);
+        }
+        float yawSign = 1, knock = kProfiles[c].melee ? Cues_KnockOff(&yawSign) : 0;
+        if (knock > 0) {  // block knock-off: rotate the weapon about its grip, tip thrown up and to one side
+            float ax = 0.8f, ay = 0.6f * yawSign, az = 0;
+            float an = knock * 3.14159265f / 180.0f, cs = cosf(an), sn = sinf(an), ic = 1 - cs;
+            float R[16] = {cs + ax * ax * ic,      ay * ax * ic + az * sn, az * ax * ic - ay * sn, 0,
+                           ax * ay * ic - az * sn, cs + ay * ay * ic,      az * ay * ic + ax * sn, 0,
+                           ax * az * ic + ay * sn, ay * az * ic - ax * sn, cs + az * az * ic,      0,
+                           0, 0, 0, 1};
+            float knocked[16];
+            MulMat(hand, R, knocked);
+            memcpy(hand, knocked, sizeof knocked);
         }
         MulMat(invEye, hand, mv);
         p_glLoadMatrixf(mv);

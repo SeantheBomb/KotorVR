@@ -260,6 +260,18 @@ void Flash(float v) {
     }
 }
 
+// Blade knock-off (JKXR): a block / parry throws the drawn weapon off the hand by up to `peak` degrees, rising then
+// falling back over 200 ms - the resistance the controller can't give. Only the weapon model moves, never the camera.
+double g_knockAt = -10;
+float g_knockPeak, g_knockYawSign = 1;
+void KnockOff(float peakDeg) {
+    g_knockAt = Now();
+    g_knockPeak = peakDeg;
+    g_knockYawSign = (rand() & 1) ? 1.0f : -1.0f;
+}
+
+double g_powerAt = -10;  // a Power Attack / Power Blast was chosen: the blade swings heavier for a moment
+
 }  // namespace
 
 void Cues_Init(const char* gameDir) {
@@ -277,12 +289,12 @@ void Cues_Fire(CueEvent e) {
     if (e != CUE_WINDOW_OPEN) Log("cue: %s", names[e]);
     PlaySoundFor(e);
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands
-        case CUE_PERFECT_BLOCK:  // crack + ring + a bright blue rim: unmistakable
+        case CUE_PERFECT_BLOCK:  // crack + ring + a bright blue rim: unmistakable; a clean parry barely moves the blade
             Haptic(0, 1, 1.0f, 0.14f, 320); Haptic(0.15, 1, 0.8f, 0.12f, 160); Flash(1.0f); Spark(1.0f, true);
-            VR_Flash(0.6f, 0.85f, 1.0f, 0.55f, 0.35f); break;
-        case CUE_BLOCK:
+            VR_Flash(0.6f, 0.85f, 1.0f, 0.55f, 0.35f); KnockOff(18.0f); break;
+        case CUE_BLOCK:  // a held guard soaks the blow: the blade is shoved hard
             Haptic(0, 1, 1.0f, 0.15f, 250); Flash(0.85f); Spark(0.85f, true); VR_Flash(0.35f, 0.65f, 1.0f, 0.35f, 0.25f);
-            break;
+            KnockOff(40.0f); break;
         case CUE_DODGE: Haptic(0, 2, 0.7f, 0.12f, 200); VR_Flash(0.8f, 0.8f, 0.8f, 0.2f, 0.2f); break;
         case CUE_BLOCK_FAILED: Haptic(0, 1, 0.6f, 0.08f, 80); Haptic(0.14, 1, 0.6f, 0.08f, 80); break;
         case CUE_HURT:  // a heavy thump in both hands and a red pulse at the edge of the view
@@ -291,8 +303,18 @@ void Cues_Fire(CueEvent e) {
         case CUE_PERFECT_HIT: Haptic(0, 1, 0.8f, 0.10f, 120); Flash(0.6f); break;
         case CUE_WINDOW_OPEN: Haptic(0, 1, 0.25f, 0.03f, 200); break;
         case CUE_INCOMING: Haptic(0, 2, 0.5f, 0.06f, 160); break;
-        case CUE_HIT_LANDED:  // a hard knock then a short tail: it connected
-            Haptic(0, 1, 1.0f, 0.09f, 90); Haptic(0.1, 1, 0.5f, 0.08f, 60); Flash(0.8f); Spark(1.0f); break;
+        case CUE_HIT_LANDED:  // it connected: the feel depends on what you hit with; a faint warm edge flash
+            switch (FamilyOf(Weapon_Right())) {
+                case FAM_SABER:  // a searing buzz that bites, then a burn-through tail
+                    Haptic(0, 1, 1.0f, 0.06f, 280); Haptic(0.06, 1, 0.7f, 0.12f, 140); break;
+                case FAM_HEAVY:  // a deep, heavy thud
+                    Haptic(0, 1, 1.0f, 0.14f, 55); Haptic(0.15, 1, 0.5f, 0.1f, 40); break;
+                case FAM_RANGED:  // the bolt struck home: a light tick
+                    Haptic(0, 1, 0.45f, 0.04f, 220); break;
+                default:  // blades, batons, fists: a hard knock then a short tail
+                    Haptic(0, 1, 1.0f, 0.09f, 90); Haptic(0.1, 1, 0.5f, 0.08f, 60); break;
+            }
+            Flash(0.8f); Spark(1.0f); VR_Flash(1.0f, 0.8f, 0.55f, 0.12f, 0.12f); break;
         case CUE_PERFECT_LANDED:
             Haptic(0, 1, 1.0f, 0.22f, 70); Haptic(0.24, 1, 0.6f, 0.1f, 50); Flash(1.0f); Spark(1.0f);
             VR_Flash(1.0f, 0.75f, 0.2f, 0.25f, 0.3f); break;
@@ -345,6 +367,7 @@ void Cues_Move(int move) {
     if (move < 1 || move > 5) return;
     memcpy(g_tint, kColor[move], sizeof g_tint);
     g_tintUntil = Now() + 0.8;
+    if (move == 1) g_powerAt = Now();  // Power Attack: heavier blade
     Flash(1.0f);
     for (int h = 0; h < 2; h++) g_flashAt[h] = Now() + 0.2;  // hold the flare a moment longer than a plain flash
     switch (move) {
@@ -355,6 +378,18 @@ void Cues_Move(int move) {
     }
     static const char* names[6] = {"", "power", "critical", "flurry", "power shot", "rapid"};
     Log("cue: move %s", names[move]);
+}
+
+float Cues_KnockOff(float* yawSign) {
+    *yawSign = g_knockYawSign;
+    double age = Now() - g_knockAt;
+    if (!Features().cues || age < 0 || age > 0.2) return 0;
+    return g_knockPeak * (float)sin(age / 0.2 * 3.14159265);  // up and back down
+}
+
+float Cues_PowerLag() {
+    double age = Now() - g_powerAt;
+    return Features().cues && age >= 0 && age < 1.2 ? 0.07f : 0;  // seconds of drag for 1.2 s after a power move
 }
 
 float Cues_ForceGlow(int hand) {

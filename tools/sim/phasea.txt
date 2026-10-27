@@ -1,0 +1,55 @@
+# v2 Phase A feel check (Kashyyyk kinrath): roll-time telegraphs (chevron + closing ring + strike-zone diamond), the
+# enemy hit-pause on landed hits, block knock-off. Needs EnableCheats=1 and [Autopause Options] Enemy Sighted=0 in
+# swkotor.ini (set them for the run, put them back after). Nothing is saved.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.410 v=0.431      # Game 1
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+key grave
+type warp kas_m22ab
+key enter
+wait 6
+wait_world 120
+wait 3
+key grave
+type invulnerability
+key enter
+shot arrived
+pointer world
+record on
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=0
+stick ly=1 for=2.0         # walk into the kinrath so they go for the player, not only the companions
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait_new_log telegraph_test 30
+shot telegraph_roll        # just after the roll: ring wide, diamond faint
+wait 0.5
+shot telegraph_late        # nearer the impact: ring closing, parry window
+wait_new_log telegraph_test 10
+wait 0.2
+shot telegraph_other       # the other kind (melee / ranged alternate)
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 1.5
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 1.5
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait_new_log incoming_warning 20
+hand R x=0.10 y=-0.15 z=-0.35 yaw=-70 pitch=10    # guard across the body: block -> knock-off
+wait 0.15
+shot knock
+wait 1.2
+hand R x=0.30 y=-0.10 z=-0.30 yaw=0 pitch=0
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 1.5
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 3
+shot after
+record off
+wait_log anim: 20

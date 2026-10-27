@@ -28,6 +28,7 @@
 #include "ownsig.h"
 #include "compat.h"
 #include "animprobe.h"
+#include "anim.h"
 
 typedef HRESULT(WINAPI* DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
 
@@ -574,7 +575,7 @@ static void Install() {
     Movie_Install();
     OwnSig_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
-    if (Features().combat) Combat_Install();
+    if (Features().combat && Combat_Install()) Anim_Install();
 }
 
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE inst, DWORD ver, REFIID riid, LPVOID* out, LPUNKNOWN outer) {

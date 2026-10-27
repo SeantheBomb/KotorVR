@@ -15,9 +15,18 @@ bool Combat_PlayerAttacking();
 // The player's queued attack was cleared: the next swing starts a new one.
 void Combat_ResetAttacking();
 
-// An enemy attack on the player that lands within the warning lead (or just landed).
+// An enemy attack on the player, from its roll until just after it lands (the telegraph).
 struct CombatWarning {
     unsigned long attacker;  // server object id
     float secondsLeft;       // until the impact (negative = just landed)
+    float total;             // roll -> impact, seconds (for the closing timing ring)
+    bool ranged;             // a bolt (dodge / deflect) rather than a blow (block / parry)
 };
 int Combat_IncomingWarnings(CombatWarning* out, int max);
+// The warning lead: incoming-attack cue / gold parry chevron this long before the impact.
+const float kCombatWarnLead = 0.6f;
+
+// A 5+ byte detour at va whose first len bytes must equal orig (absolute operands only): stub runs first, then
+// jumps to *tramp (the original). Shared by the combat and animation hooks.
+bool Combat_Detour(unsigned long va, const unsigned char* orig, int len, void* stub, unsigned char** tramp,
+                   const char* what);

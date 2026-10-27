@@ -88,6 +88,21 @@ Start a fight by gripping on an enemy.
 The equipped item's real model and textures (its variation, so your saber is your saber: hilt, blade colour).
 `[Debug] WeaponGallery=1` in kvr.ini cycles through one weapon of every class every 3 s (for screenshots).
 
+## v2 Phase A: combat feel (no rule changes)
+
+- Telegraphs from the moment an enemy rolls its attack on you: a chevron over the attacker with a ring that closes
+  onto it at the impact, and a diamond in front of your chest on its side (where the blow arrives - put your blade
+  there). Blue = block / parry it, red = dodge it (a bolt you can't deflect). Gold, closed ring, filled diamond =
+  the parry window.
+- A block throws your weapon off your hand for 0.2 s (about 40 degrees; a clean parry about 18). The camera never
+  moves.
+- Your hits: the struck enemy freezes for a beat (60 ms, 90 on the beat). Saber hits buzz and burn, heavy weapons
+  thud, bolts tick; a faint warm flash at the edge of the view.
+- After a Power Attack the blade drags behind your hand for a moment (weight).
+- kvr.ini `[Feel] HitPause=0` turns the freeze off, `HitPauseMs` sets it.
+- To judge: are the telegraphs readable without being a crutch? Does the knock-off feel like resistance or like a
+  glitch? Is the hit-pause noticeable, too long, too short?
+
 ## Wrist panel (no flat HUD)
 
 - Turn your left palm toward your face: menu buttons, party and quick slots appear along the forearm. Poke a button

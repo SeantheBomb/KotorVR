@@ -36,6 +36,7 @@ void Features_Load(const char* gameDir) {
     g_flags.turnSpeed = (float)GetPrivateProfileIntA("Comfort", "TurnSpeed", 120, path);
     g_flags.cueTest = GetPrivateProfileIntA("Debug", "CueTest", 0, path) != 0;
     g_flags.tracePosition = GetPrivateProfileIntA("Debug", "TracePosition", 0, path) != 0;
+    g_flags.telegraphTest = GetPrivateProfileIntA("Debug", "TelegraphTest", 0, path) != 0;
     g_flags.animProbe = GetPrivateProfileIntA("Debug", "AnimProbe", 0, path) != 0;
     g_flags.traceWorld = GetPrivateProfileIntA("Debug", "TraceWorld", 0, path) != 0;
     g_flags.cutsceneFirstPerson = GetPrivateProfileIntA("Comfort", "CutsceneFirstPerson", 0, path) != 0;

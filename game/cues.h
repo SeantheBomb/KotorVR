@@ -33,6 +33,11 @@ void Cues_Move(int move);
 float Cues_Sparks(double* age, float rgb[3]);
 // Force glow on a hand (0..1, fades over 0.5 s) after a Force gesture.
 float Cues_ForceGlow(int hand);
+// Blade knock-off after a block / parry: degrees to rotate the drawn weapon off the hand now (0 = none); yawSign
+// picks the side it is knocked to.
+float Cues_KnockOff(float* yawSign);
+// After a Power Attack the blade follows the hand with this much lag (seconds, 0 = none): a heavier swing.
+float Cues_PowerLag();
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the
