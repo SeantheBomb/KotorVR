@@ -257,11 +257,17 @@ void Input_Update(HWND wnd) {
             bool ranged = rangedHeld;
             if (ranged) {
                 Gestures_OnShot();
-                // shoot what you point at: pick along the hand (target) + attack; at most once a second (KotOR
-                // keeps firing every round on its own, extra presses only fill its queue)
-                if (now - lastRangedPick > 1.0) {
-                    rangedPickWanted = true;
+                // shoot what you point at: the game already hovers what the hand points at (the hover ring) - make
+                // it the target and attack. No aim pick: its hidden camera frames were the lag spike on every shot
+                // (2026-10-27). At most once a second (KotOR keeps firing every round on its own).
+                DWORD hover;
+                if (now - lastRangedPick > 1.0 && Weapon_HoverClientId(&hover)) {
+                    Weapon_SetTarget(hover);
+                    g_gestureKey = DIK_R;
+                    g_gestureKeyAt = now;
+                    WatchAttack(now);
                     lastRangedPick = now;
+                    Log("input: shot -> target %08lX + attack", hover);
                 }
             } else if (!Combat_PlayerAttacking()) {
                 g_gestureKey = DIK_R;
@@ -314,7 +320,16 @@ void Input_Update(HWND wnd) {
         static bool deferR;          // grip still held when the pick settled: R on a short release, ring on a hold
         bool gripNow = world && in.gripR > 0.7f && !ringWasOpen;
         double tick = (double)GetTickCount();
-        if (((gripNow && !gripWas) || rangedPickWanted) && g_pickStartMs < 0) {
+        // grip on what the hover ring marks: target it directly (no aim pick, no hidden frames); the aim pick stays
+        // the fallback when the hand points at nothing the game hovers
+        DWORD gripHover;
+        if (gripNow && !gripWas && !rangedPickWanted && g_pickStartMs < 0 && Weapon_HoverClientId(&gripHover)) {
+            Weapon_SetTarget(gripHover);
+            gripPick = true;
+            gripDownMs = tick;
+            deferR = true;  // short squeeze -> R, held -> the action ring
+            Log("input: world grip -> target %08lX (hover)", gripHover);
+        } else if (((gripNow && !gripWas) || rangedPickWanted) && g_pickStartMs < 0) {
             gripPick = !rangedPickWanted;
             gripDownMs = tick;
             deferR = false;

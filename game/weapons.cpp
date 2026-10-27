@@ -433,7 +433,8 @@ struct Bolt {
     float to[3];        // world target
     float from[3];      // world muzzle, set on the first frame after t0
     bool fromSet;
-    bool alongBarrel;   // fired by the trigger: flies 30 m down the barrel instead of at a target
+    bool alongBarrel;   // fired by the trigger: flies down the barrel to what it hits (else 30 m)
+    bool impact;        // it ends on a surface / creature: a burst of sparks there
 };
 static double g_lastBarrelShot = -10;
 static std::vector<Bolt> g_bolts;
@@ -483,6 +484,52 @@ void* Weapon_CreatureById(DWORD id) {
 }
 
 static bool IsSaber(WeaponClass c);
+
+// The game's client internals: [[app+4]+4] (CClientExoAppInternal).
+static BYTE* ClientInternal() {
+    __try {
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* client = app ? *(BYTE**)(app + 4) : nullptr;
+        return client ? *(BYTE**)(client + 4) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
+// Where the cursor's ray (which follows the hand) meets the world: the mouse-over point, internal +0x4A8.
+static bool CursorWorldHit(float out[3]) {
+    __try {
+        BYTE* in = ClientInternal();
+        if (!in) return false;
+        memcpy(out, in + 0x4A8, 12);
+        return out[0] != 0 || out[1] != 0 || out[2] != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+bool Weapon_HoverClientId(DWORD* id) {
+    __try {
+        BYTE* in = ClientInternal();
+        if (!in) return false;
+        DWORD h = *(DWORD*)(in + 0x4A4);
+        if (h == 0x7F000000 || h == 0) return false;
+        BYTE* player = (BYTE*)Weapon_PlayerCreature();
+        if (player && *(DWORD*)(player + 4) == (h & 0x7FFFFFFF)) return false;
+        *id = h;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+// Make a (client) object the current target, as a click would: CClientExoApp::SetLastTarget 0x5EDD70 (thiscall on
+// the client app, (id, 1)); the game's default action (R) then acts on it.
+void Weapon_SetTarget(DWORD clientId) {
+    typedef void(__fastcall * SetLastTargetFn)(void* clientApp, void*, DWORD id, DWORD changed);
+    __try {
+        BYTE* app = *(BYTE**)0x7A39FC;
+        void* client = app ? *(void**)(app + 4) : nullptr;
+        if (client) ((SetLastTargetFn)0x5EDD70)(client, nullptr, clientId, 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
 
 // What the right hand points at in the world: the game's mouse-over object (the cursor follows the hand's ray), client
 // internal [[app+4]+4] +0x4A4 (0x7F000000 = nothing; CClientExoAppInternal::HandleMouseOver 0x6222F0), looked up as a
@@ -550,11 +597,23 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                        g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
         float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
         for (int r = 0; r < 3; r++) b.from[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
-        if (b.alongBarrel) {  // the barrel (-Z of the weapon) in eye space -> world, 30 m out
-            float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]};
+        if (b.alongBarrel) {  // the barrel (-Z of the weapon) in eye space -> world: to what it hits, else 30 m out
+            float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]}, dw[3];
             for (int r = 0; r < 3; r++) {
-                float dw = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
-                b.to[r] = b.from[r] + dw * 30.0f;
+                dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
+                b.to[r] = b.from[r] + dw[r] * 30.0f;
+            }
+            // the cursor follows the hand, so the game's own mouse-over point is where this shot meets a wall or a
+            // body (no more bolts flying through walls); used when it lies along the barrel
+            float hit[3];
+            if (CursorWorldHit(hit)) {
+                float v[3] = {hit[0] - b.from[0], hit[1] - b.from[1], hit[2] - b.from[2]};
+                float dist = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                float along = dist > 0.01f ? (v[0] * dw[0] + v[1] * dw[1] + v[2] * dw[2]) / dist : 0;
+                if (dist > 0.4f && dist < 40.0f && along > 0.97f) {
+                    memcpy(b.to, hit, sizeof b.to);
+                    b.impact = true;
+                }
             }
         }
         b.fromSet = true;
@@ -601,6 +660,25 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         float dir[3] = {b.to[0] - b.from[0], b.to[1] - b.from[1], b.to[2] - b.from[2]};
         float len = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]) + 1e-4f;
         float head = (float)(tnow - b.t0) * 40.0f, tail = head - 1.0f;
+        if (b.impact && head >= len && head < len + 6.0f) {  // the bolt struck: a hot spark burst for 0.15 s
+            float age = (head - len) / 40.0f, k = 1.0f - age / 0.15f, ie[3];
+            ToEye(worldView, b.to, ie);
+            if (ie[2] < -0.1f) {
+                unsigned seed = (unsigned)(b.t0 * 1000);
+                if (p_glLineWidth) p_glLineWidth(3.0f);
+                p_glBegin(GL_LINES);
+                for (int i = 0; i < 18; i++) {
+                    seed = seed * 1103515245u + 12345u;
+                    float a = ((seed >> 8) & 0xFFFF) / 65535.0f * 6.2831853f;
+                    float r0 = 0.02f + age * 1.2f, r1 = r0 + 0.06f;
+                    p_glColor4f(1.0f, 0.85f, 0.6f, k);
+                    p_glVertex3f(ie[0] + cosf(a) * r0, ie[1] + sinf(a) * r0, ie[2]);
+                    p_glColor4f(1.0f, 0.35f, 0.15f, 0);
+                    p_glVertex3f(ie[0] + cosf(a) * r1, ie[1] + sinf(a) * r1, ie[2]);
+                }
+                p_glEnd();
+            }
+        }
         if (tail > len) continue;
         head = min(head, len);
         tail = max(tail, 0.0f);

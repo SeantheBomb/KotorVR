@@ -46,6 +46,10 @@ void Weapons_Draw(const float invEye[16]);
 void Weapons_DrawWarnings(const float worldView[16]);
 // Server creature for an object id, or null.
 void* Weapon_CreatureById(DWORD id);
+// The game's mouse-over object (client id) - what the right hand points at; false for nothing / yourself.
+bool Weapon_HoverClientId(DWORD* id);
+// Make a client object the current target (the default action R then acts on it), without a click.
+void Weapon_SetTarget(DWORD clientId);
 // The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
 // with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
 void Weapons_FireBolt(const float targetWorld[3], float delay);
