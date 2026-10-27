@@ -11,3 +11,5 @@ BYTE Force_Update(const KvrInput& in, bool fighting);
 void Force_OnParry();
 // The saber is in the air (Saber Throw) until you catch it.
 bool Force_SaberThrown();
+// A grenade is in your left hand (armed at the hip, not yet thrown).
+bool Force_GrenadeArmed();

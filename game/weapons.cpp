@@ -1104,6 +1104,25 @@ void Weapons_Draw(const float invEye[16]) {
             }
     }
     memcpy(g_lastInvEye, invEye, sizeof g_lastInvEye);
+    if (Force_GrenadeArmed() && (in.gripValid & 1)) {  // the grenade in your left hand: a small blinking orb
+        float g[16], m[16];
+        PoseMatrix(in.grip[0].pos, in.grip[0].quat, g);
+        MulMat(invEye, g, m);
+        p_glLoadMatrixf(m);
+        p_glDisable(GL_TEXTURE_2D);
+        p_glEnable(GL_BLEND);
+        p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        float blink = 0.6f + 0.4f * (fmodf((float)NowS() * 3.0f, 1.0f) < 0.5f ? 1.0f : 0.0f), r = 0.035f;
+        p_glBegin(GL_TRIANGLES);
+        static const float v[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        static const int f[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4}, {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
+        for (auto& t : f)
+            for (int k = 0; k < 3; k++) {
+                p_glColor4f(1.0f, 0.55f, 0.15f, blink);
+                p_glVertex3f(v[t[k]][0] * r, v[t[k]][1] * r, v[t[k]][2] * r - 0.03f);
+            }
+        p_glEnd();
+    }
     RefreshPoseAdj();
     g_muzzleValid = false;
     g_weaponValid[0] = g_weaponValid[1] = false;

@@ -44,4 +44,16 @@ wait 0.8
 squeeze L grip=0
 wait 2
 shot healed
+hand L x=-0.25 y=-0.85 z=0.0 yaw=0 pitch=0
+wait 0.3
+squeeze L grip=1
+wait 0.8
+shot armed
+hand L x=-0.25 y=-0.4 z=-0.3 yaw=0 pitch=0
+wait 0.03
+hand L x=-0.25 y=-0.1 z=-0.6 yaw=0 pitch=0
+wait 0.03
+squeeze L grip=0
+wait 2
+shot thrown
 wait_log force: 10

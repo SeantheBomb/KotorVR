@@ -27,3 +27,5 @@ void Melee_Shot(const float origin[3], const float dir[3]);
 // Force aim: the left controller's ray (world) each frame, and the enemy it points at (35 deg cone, then forgiving fallbacks).
 void Melee_SetPalm(const float origin[3], const float dir[3]);
 DWORD Melee_PalmTarget();
+// A grenade thrown along the palm's heading lands this far out: the enemy nearest that spot within radius (0 none).
+DWORD Melee_LandingTarget(float range, float radius);

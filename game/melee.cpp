@@ -374,6 +374,26 @@ DWORD Melee_PalmTarget() {
     return best;
 }
 
+// the enemy nearest a point this far out along the palm's heading (a thrown grenade's landing spot), within radius
+DWORD Melee_LandingTarget(float range, float radius) {
+    if (Now() - g_palmAt > 0.5) return 0;
+    float hl = sqrtf(g_palmD[0] * g_palmD[0] + g_palmD[1] * g_palmD[1]) + 1e-5f;
+    float land[2] = {g_palmO[0] + g_palmD[0] / hl * range, g_palmO[1] + g_palmD[1] / hl * range};
+    DWORD best = 0;
+    float bd = radius;
+    for (auto& kv : g_fighters) {
+        if (!Melee_IsEnemy(kv.first)) continue;
+        float p[3];
+        if (!CreaturePos(kv.first, p)) continue;
+        float d = sqrtf((p[0] - land[0]) * (p[0] - land[0]) + (p[1] - land[1]) * (p[1] - land[1]));
+        if (d < bd) {
+            bd = d;
+            best = kv.first;
+        }
+    }
+    return best;
+}
+
 // --- ranged: the barrel ray against enemy bodies
 void Melee_Shot(const float origin[3], const float dir[3]) {
     float best = 40.0f;

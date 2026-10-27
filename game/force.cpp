@@ -17,6 +17,9 @@
 // (CClientExoApp::SetLastTarget), the menu refreshes, the power's entry is selected in its column and the column's key
 // performs it - the same path as clicking it, so Force points, saves and animations are all the game's.
 // Parries refund a little Force (stats [creature+0xA74]: current +0x124, max via 0x4FD490).
+// Grenades: squeeze the left grip at your hip (a click: one is in your hand), throw it - the release velocity flies an
+// arc to the floor; the enemy nearest the landing spot (4 m) gets the grenade from the target menu (an entry whose
+// icon names a grenade), so its blast, damage and saves are the game's.
 #include "force.h"
 
 #include <windows.h>
@@ -66,7 +69,8 @@ struct Pending {
     double start;
     const char* what;
     bool active;
-    bool self;  // a power on yourself: the personal slots
+    bool self;     // a power on yourself: the personal slots
+    bool grenade;  // a grenade from the target menu
 };
 Pending g_pending;
 
@@ -125,16 +129,44 @@ void LogPersonal(BYTE* blk) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+// a grenade entry in the target columns (icon resref names it: i_grenade_*, ...); select it, return the column key
+BYTE SelectGrenade(BYTE* blk, char* name, int cap) {
+    __try {
+        for (int c = 0; c < 3; c++) {
+            BYTE* ents = *(BYTE**)(blk + c * 0xC);
+            int count = *(int*)(blk + c * 0xC + 4);
+            for (int i = 0; ents && i < count && i < 24; i++) {
+                char icon[17];
+                memcpy(icon, ents + i * 0x38 + 0x20, 16);
+                icon[16] = 0;
+                for (char* p = icon; *p; p++) *p = (char)tolower((unsigned char)*p);
+                if (!strstr(icon, "gren") && !strstr(icon, "dtnr") && !strstr(icon, "thermal")) continue;
+                int id = *(int*)(ents + i * 0x38 + 8);
+                int who = *(signed char*)(blk + 0x1AEA);
+                *(int*)(blk + (c + (who + 3) * 3) * 4) = id;
+                strncpy_s(name, cap, icon, _TRUNCATE);
+                static const BYTE kKeys[3] = {0x02, 0x03, 0x04};
+                return kKeys[c];
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return 0;
+}
+
 void LogMenu(BYTE* blk) {
     __try {
         char line[512];
         int len = sprintf_s(line, "force: the target menu has");
-        for (int c = 0; c < 6 && len < 470; c++) {
+        for (int c = 0; c < 3 && len < 470; c++) {
             BYTE* ents = *(BYTE**)(blk + c * 0xC);
             int count = *(int*)(blk + c * 0xC + 4);
             len += sprintf_s(line + len, sizeof line - len, " | col %d:", c);
-            for (int i = 0; ents && i < count && i < 10 && len < 470; i++)
-                len += sprintf_s(line + len, sizeof line - len, " %08X", *(int*)(ents + i * 0x38 + 8));
+            for (int i = 0; ents && i < count && i < 8 && len < 470; i++) {
+                char icon[17];
+                memcpy(icon, ents + i * 0x38 + 0x20, 16);
+                icon[16] = 0;
+                len += sprintf_s(line + len, sizeof line - len, " %08X/%s", *(int*)(ents + i * 0x38 + 8), icon);
+            }
         }
         Log("%s", line);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -181,6 +213,12 @@ float g_rSpeedFwd;  // the right hand's forward speed (for two-handed shoves)
 bool g_thrown;
 double g_thrownAt = -10;
 bool g_gripRWas = true;
+// grenades
+bool g_armed;
+float g_prevL[3];
+double g_prevLT = -1;
+float g_lVel[3];  // the left hand's peak velocity over the last 0.15 s (tracking space, y up)
+double g_lVelAt = -10;
 
 int Tier(double held) { return held < 0.7 ? 0 : held < 1.6 ? 1 : 2; }
 
@@ -194,6 +232,7 @@ void FamilyCast(const int* tiers, int tier, DWORD target, const char* what) {
 }  // namespace
 
 bool Force_SaberThrown() { return g_thrown; }
+bool Force_GrenadeArmed() { return g_armed; }
 
 void Force_OnParry() {
     typedef short(__fastcall * GetMaxFpFn)(void* creature, void*);
@@ -225,6 +264,13 @@ BYTE Force_Update(const KvrInput& in, bool fighting) {
                 key = g_pending.self ? SelectPersonal(blk, g_pending.spells[i]) : SelectPower(blk, g_pending.spells[i]);
                 if (key) Log("force: cast power %d (%s)", g_pending.spells[i], g_pending.what);
             }
+            if (g_pending.grenade) {
+                char name[24];
+                key = SelectGrenade(blk, name, sizeof name);
+                if (key) Log("force: grenade thrown (%s)", name);
+            }
+            static int menusLogged;
+            if (key && menusLogged++ < 3) LogMenu(blk);
         }
         if (key) {
             g_pending.active = false;
@@ -276,8 +322,65 @@ BYTE Force_Update(const KvrInput& in, bool fighting) {
         }
     }
     g_gripRWas = gripR;
-    // ---- gather with the left grip
+    // left hand velocity (throws)
+    {
+        double dt = g_prevLT > 0 ? in.time - g_prevLT : 0;
+        if (dt > 0.001 && dt < 0.2) {
+            float v[3];
+            for (int i = 0; i < 3; i++) v[i] = (float)((lp[i] - g_prevL[i]) / dt);
+            float s2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+            float p2 = g_lVel[0] * g_lVel[0] + g_lVel[1] * g_lVel[1] + g_lVel[2] * g_lVel[2];
+            // the throw's velocity: the peak of the last 0.15 s (you let go at or just after the fastest point)
+            if (s2 >= p2 || t - g_lVelAt > 0.15) {
+                memcpy(g_lVel, v, 12);
+                g_lVelAt = t;
+            }
+        }
+        if (dt > 0.001 || g_prevLT < 0) {
+            memcpy(g_prevL, lp, 12);
+            g_prevLT = in.time;
+        }
+    }
     bool gripL = in.gripL > 0.7f;
+    // ---- grenades: squeeze at the hip to arm, throw and let go
+    bool atHip = lp[1] < head[1] - 0.75f;
+    if (gripL && !g_g.on && !g_armed && atHip) {
+        g_armed = true;
+        VR_Haptic(0, 0.6f, 0.03f, 300);
+        VR_Haptic(0, 0.4f, 0.03f, 200);
+        Log("force: grenade in hand");
+    }
+    if (g_armed) {
+        if (gripL) return key;
+        g_armed = false;
+        float sp = sqrtf(g_lVel[0] * g_lVel[0] + g_lVel[1] * g_lVel[1] + g_lVel[2] * g_lVel[2]);
+        if (sp < 2.0f) {
+            Log("force: grenade put away (no throw)");
+            return key;
+        }
+        // fly the arc: tracking space is y-up, metres; the horizontal throw direction is mapped onto the palm's world
+        // heading (Melee palm ray), so only the speeds matter here
+        float vh = sqrtf(g_lVel[0] * g_lVel[0] + g_lVel[2] * g_lVel[2]) * 1.6f, vy = g_lVel[1] * 1.6f + 1.0f;  // a throw carries
+        float h0 = lp[1] - (head[1] - 1.6f);  // release height above the floor (standing eye ~1.6 m)
+        float tFlight = (vy + sqrtf(vy * vy + 2 * 9.81f * (h0 > 0 ? h0 : 0.1f))) / 9.81f;
+        float range = vh * tFlight;
+        if (range > 18) range = 18;
+        DWORD target = Melee_LandingTarget(range, 4.0f);
+        Log("force: grenade thrown %.1f m/s -> lands %.1f m out", sp, range);
+        if (!target) {
+            Log("force: no enemy near where it lands");
+            return key;
+        }
+        memset(&g_pending, 0, sizeof g_pending);
+        g_pending.grenade = true;
+        g_pending.target = target;
+        g_pending.start = Now();
+        g_pending.what = "grenade";
+        g_pending.active = true;
+        Weapon_SetTarget(target | 0x80000000);
+        return key;
+    }
+    // ---- gather with the left grip
     if (gripL && !g_g.on) {
         g_g.on = true;
         g_g.start = t;
