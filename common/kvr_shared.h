@@ -114,7 +114,8 @@ struct KvrTextPanel {
     uint32_t pickable;     // the right hand can point at its lines (dialogue options): the host shows the laser,
                            // highlights the line under it and reports it in `hover`
     volatile int32_t hover;  // host -> game: line index under the right-hand ray (-1 none)
-    char text[504];        // UTF-8; lines separated by \n; a line starting with '#' is a title
+    char text[504];        // UTF-8; lines separated by \n; a line starting with '#' is a title; "@icon|text" draws
+                           // the game's GUI icon <game>\kvr\icons\<icon>.png before the text
 };
 
 // Game -> host: a colored flash around the edge of the view (getting hit, blocks), fading out over `duration`.
@@ -145,6 +146,7 @@ struct KvrShared {
     KvrHands hands;                    // host -> game
     KvrTextPanel text[KVR_TEXT_PANELS];  // game -> host
     KvrFlash flash;                      // game -> host
+    char gameDir[260];                   // game -> host: the game folder (ANSI), for kvr\icons
 };
 
 #pragma pack(pop)

@@ -10,6 +10,7 @@
 #include <dxgi1_2.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <wincodec.h>
 #include <d3dcompiler.h>
 #define XR_USE_PLATFORM_WIN32
 #define XR_USE_GRAPHICS_API_D3D11
@@ -19,10 +20,14 @@
 #include <cstdio>
 #include <vector>
 #include <algorithm>
+#include <map>
+#include <string>
 
 #include "../common/kvr_shared.h"
 
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d2d1.lib")
@@ -591,6 +596,7 @@ struct TextPanel {
     XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
     int lines = 0;
     float lineTop[24], lineBottom[24];  // texture pixels, for pointing at a line
+    std::map<std::string, ID2D1Bitmap*> icons;  // GUI icons loaded into this panel's render target (null: missing)
 };
 static TextPanel g_text[KVR_TEXT_PANELS];
 static bool g_lastAimValid;    // this frame's right aim ray (LOCAL), for pointing at text panels
@@ -614,7 +620,7 @@ static bool InitText() {
     DXGI_FORMAT unorm = g_scFormat == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ? DXGI_FORMAT_B8G8R8A8_UNORM
                       : g_scFormat == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ? DXGI_FORMAT_R8G8B8A8_UNORM : g_scFormat;
     for (auto& p : g_text) {
-        if (p.sc.handle == XR_NULL_HANDLE && !CreateSwapchain(p.sc, kTextW, kTextH)) return false;
+        if (g_session && p.sc.handle == XR_NULL_HANDLE && !CreateSwapchain(p.sc, kTextW, kTextH)) return false;
         if (!p.tex) {
             D3D11_TEXTURE2D_DESC d{};
             d.Width = kTextW;
@@ -639,10 +645,44 @@ static bool InitText() {
 
 static void ReleaseText() {
     for (auto& p : g_text) {
+        for (auto& kv : p.icons)
+            if (kv.second) kv.second->Release();
+        p.icons.clear();
         if (p.rt) { p.rt->Release(); p.rt = nullptr; }
         if (p.tex) { p.tex->Release(); p.tex = nullptr; }
         p.serial = 0xFFFFFFFF;
     }
+}
+
+// A GUI icon exported by tools/icon_export.py (<game>\kvr\icons\<name>.png), as a bitmap of this panel's target.
+static ID2D1Bitmap* PanelIcon(TextPanel& p, const std::string& name) {
+    auto it = p.icons.find(name);
+    if (it != p.icons.end()) return it->second;
+    ID2D1Bitmap* bmp = nullptr;
+    static IWICImagingFactory* wic;
+    if (!wic) {
+        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
+    }
+    char dir[260];
+    memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
+    dir[sizeof dir - 1] = 0;
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%hs\\kvr\\icons\\%hs.png", dir, name.c_str());
+    IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* fr = nullptr;
+    IWICFormatConverter* conv = nullptr;
+    if (wic && dir[0] && SUCCEEDED(wic->CreateDecoderFromFilename(path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &dec)) &&
+        SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(wic->CreateFormatConverter(&conv)) &&
+        SUCCEEDED(conv->Initialize(fr, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0,
+                                   WICBitmapPaletteTypeCustom)))
+        p.rt->CreateBitmapFromWicBitmap(conv, nullptr, &bmp);
+    if (conv) conv->Release();
+    if (fr) fr->Release();
+    if (dec) dec->Release();
+    if (!bmp) printf("text panel: icon %s not found (run tools\\icon_export.py)\n", name.c_str());
+    p.icons[name] = bmp;
+    return bmp;
 }
 
 // redraw a panel's texture from the game's text: dark rounded card, an optional '#' title line, the rest wrapped;
@@ -683,11 +723,26 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
         char* nl = strchr(s, '\n');
         if (nl) *nl = 0;
         bool title = s[0] == '#';
+        ID2D1Bitmap* icon = nullptr;
+        if (s[0] == '@') {  // "@icon|text"
+            char* bar = strchr(s, '|');
+            if (bar) {
+                *bar = 0;
+                icon = PanelIcon(p, std::string(s + 1));
+                s = bar + 1;
+            }
+        }
+        const float iconSize = 58, textX = icon ? 36 + iconSize + 16 : 36;
         int n = MultiByteToWideChar(CP_UTF8, 0, title ? s + 1 : s, -1, wide, 1024);
         IDWriteTextLayout* lay = nullptr;
-        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? fmtTitle : fmtBody, kTextW - 72.0f, (float)kTextH, &lay);
+        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? fmtTitle : fmtBody, kTextW - textX - 36.0f, (float)kTextH, &lay);
         DWRITE_TEXT_METRICS m{};
         if (lay) lay->GetMetrics(&m);
+        float textY = y;
+        if (icon && m.height < iconSize) {  // an icon row: as tall as the icon, text centred beside it
+            textY = y + (iconSize - m.height) / 2;
+            m.height = iconSize;
+        }
         if (line < 24) {
             p.lineTop[line] = y - 4;
             p.lineBottom[line] = y + m.height + 4;
@@ -699,7 +754,8 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
         if (lay) {
             // KotOR: the speaker's line in its blue, replies blue, the highlighted reply yellow
             ID2D1SolidColorBrush* br = game ? (lit ? gold : fg) : (title || lit ? gold : fg);
-            p.rt->DrawTextLayout(D2D1::Point2F(36, y), lay, br);
+            if (icon) p.rt->DrawBitmap(icon, D2D1::RectF(36, y, 36 + iconSize, y + iconSize), lit ? 1.0f : 0.85f);
+            p.rt->DrawTextLayout(D2D1::Point2F(textX, textY), lay, br);
             lay->Release();
         }
         y += m.height + (title ? 14 : 8);
@@ -712,6 +768,7 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     if (hl) hl->Release();
     if (rule) rule->Release();
     // into the swapchain
+    if (!p.sc.handle) return;  // --preview: no XR session
     uint32_t idx = 0;
     XrSwapchainImageAcquireInfo ai{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
     xrAcquireSwapchainImage(p.sc.handle, &ai, &idx);
@@ -1629,7 +1686,36 @@ static BOOL WINAPI OnConsoleClose(DWORD) {
     return FALSE;
 }
 
-int main() {
+// --preview <text file> <out.bmp> [pickable 0|1] [game dir]: draw one text panel offscreen (no headset) and dump
+// it, to check styling and icons. The text file is the panel text (UTF-8, '\n' lines, '#' title, "@icon|name").
+static int Preview(int argc, char** argv) {
+    if (argc < 4) { printf("usage: kvr_host --preview <text.txt> <out.bmp> [pickable] [game dir]\n"); return 2; }
+    static KvrShared shm{};
+    g_shm = &shm;
+    strcpy_s(shm.gameDir, argc > 5 ? argv[5] : "C:\\Program Files (x86)\\Steam\\steamapps\\common\\swkotor");
+    ID3D11Device* dev = nullptr;
+    D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, &fl, 1,
+                                 D3D11_SDK_VERSION, &dev, nullptr, &g_ctx))) return 1;
+    dev->QueryInterface(IID_PPV_ARGS(&g_dev));
+    dev->Release();
+    g_scFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    if (!InitText()) { printf("InitText failed\n"); return 1; }
+    KvrTextPanel src{};
+    FILE* f = nullptr;
+    if (fopen_s(&f, argv[2], "rb") || !f) return 1;
+    size_t n = fread(src.text, 1, sizeof src.text - 1, f);
+    fclose(f);
+    src.text[n] = 0;
+    src.pickable = argc > 4 ? atoi(argv[4]) : 1;
+    src.highlight = -1;
+    DrawTextPanel(g_text[0], src, 2);  // line 2 hovered
+    DumpTex(g_text[0].tex, argv[3]);
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    if (argc > 1 && !strcmp(argv[1], "--preview")) return Preview(argc, argv);
     setvbuf(stdout, nullptr, _IONBF, 0);
     SetConsoleCtrlHandler(OnConsoleClose, TRUE);
     if (!OpenShared()) { printf("shared memory failed\n"); return 1; }

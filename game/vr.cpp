@@ -123,6 +123,13 @@ static bool EnsureShm() {
         g_shm->magic = KVR_MAGIC;
         g_shm->version = KVR_VERSION;
     }
+    if (g_shm) {  // the host finds the exported GUI icons through the game folder
+        char exe[MAX_PATH];
+        DWORD n = GetModuleFileNameA(nullptr, exe, MAX_PATH);
+        while (n > 0 && exe[n - 1] != '\\') n--;
+        if (n > 0) exe[n - 1] = 0;
+        strncpy_s(g_shm->gameDir, exe, _TRUNCATE);
+    }
     g_log("shared memory %s", g_shm ? "mapped" : "failed");
     return g_shm != nullptr;
 }

@@ -137,7 +137,9 @@ bool ActionRing_Open(const KvrInput& in) {
     std::string text = "#Actions";
     g_choices.clear();
     for (int i = 0; i < n; i++) {
-        text += "\n" + NameFor(ents[i].icon);
+        std::string icon = ents[i].icon;
+        for (auto& ch : icon) ch = (char)tolower((unsigned char)ch);
+        text += "\n@" + icon + "|" + NameFor(ents[i].icon);
         g_choices.push_back({ents[i].column, ents[i].id});
     }
     // world-locked 0.7 m out along your hand's aim, facing you, tilted back a little
