@@ -766,6 +766,7 @@ int main(int argc, char** argv) {
             std::string k = args.empty() ? "" : args[0];
             WORD vk = k == "grave" ? VK_OEM_3 : k == "enter" ? VK_RETURN : k == "escape" ? VK_ESCAPE : k == "space" ? VK_SPACE : k == "tab" ? VK_TAB : 0;
             if (!vk && k.size() >= 2 && (k[0] == 'f' || k[0] == 'F')) vk = (WORD)(VK_F1 + atoi(k.c_str() + 1) - 1);
+            if (!vk && k.size() == 1 && isalnum((unsigned char)k[0])) vk = (WORD)toupper((unsigned char)k[0]);  // letters / digits
             if (!vk) { printf("line %d: unknown key\n", lineNo); result = 2; break; }
             FocusGame();
             TapKey(vk);

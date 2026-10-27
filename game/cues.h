@@ -38,6 +38,8 @@ float Cues_ForceGlow(int hand);
 float Cues_KnockOff(float* yawSign);
 // After a Power Attack the blade follows the hand with this much lag (seconds, 0 = none): a heavier swing.
 float Cues_PowerLag();
+// An action that would have walked the character to its target was cancelled (out of reach).
+void Cues_TooFar();
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the

@@ -387,6 +387,12 @@ float Cues_KnockOff(float* yawSign) {
     return g_knockPeak * (float)sin(age / 0.2 * 3.14159265);  // up and back down
 }
 
+void Cues_TooFar() {  // an action out of reach was cancelled: a second, lower tick a beat later
+    if (!Features().cues) return;
+    Haptic(0.12, 1, 0.5f, 0.04f, 60);
+    PlayResref("gui_actqueue", 0.4f, 0.7f);
+}
+
 float Cues_PowerLag() {
     double age = Now() - g_powerAt;
     return Features().cues && age >= 0 && age < 1.2 ? 0.07f : 0;  // seconds of drag for 1.2 s after a power move

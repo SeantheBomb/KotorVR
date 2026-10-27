@@ -1937,12 +1937,15 @@ static void Frame() {
             flatDefault = IniFloat("Features", "FlatHud", 0) != 0;
         }
         bool flatHud = flatDefault ? !g_shm->showPanel : g_shm->showPanel != 0;
-        bool panelVisible = movie || !world || (hud && flatHud && !pickableUp);
+        // a game menu over the world (container, inventory, store, computer): the flat panel with the right-hand
+        // laser, as in the menus - never the wrist
+        bool menuUp = hud && g_shm->menuOpen != 0;
+        bool panelVisible = movie || !world || menuUp || (hud && flatHud && !pickableUp);
         static DWORD lastHudLog;
         if (GetTickCount() - lastHudLog > 3000) {
             lastHudLog = GetTickCount();
-            printf("hud: world=%d hud=%d panelVisible=%d panelFlags=0x%x panelHave=%d hidden(showPanel)=%u cinematic=%u\n", world, hud,
-                   panelVisible, g_shared[2].meta.flags, g_shared[2].have, g_shm->showPanel, g_shm->cinematic);
+            printf("hud: world=%d hud=%d menu=%d panelVisible=%d panelFlags=0x%x panelHave=%d hidden(showPanel)=%u cinematic=%u\n", world, hud,
+                   menuUp, panelVisible, g_shared[2].meta.flags, g_shared[2].have, g_shm->showPanel, g_shm->cinematic);
         }
         // HUD lazily follows head yaw: once you have looked more than 35 deg away for 0.6 s it swings round to face you
         static float hudYaw;
@@ -1994,11 +1997,11 @@ static void Frame() {
         RecordFrame(world, hud, panelVisible, panelAspect);
 
         // controllers: publish state, then draw the right-hand laser and the panel cursor
-        PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud);
+        PointerResult pr = UpdateControls(fs.predictedDisplayTime, panelVisible, panelPose, panelW, panelH, world, hud && !menuUp);
         g_lastAimValid = pr.aimValid;
         g_lastAim = pr.aimLocal;
         static XrCompositionLayerQuad* wristLayer;
-        wristLayer = tracked ? UpdateWrist(views[0].pose, pr, world && !flatHud) : nullptr;
+        wristLayer = tracked ? UpdateWrist(views[0].pose, pr, world && !flatHud && !menuUp) : nullptr;
         if (wristLayer) layers.push_back((XrCompositionLayerBaseHeader*)wristLayer);
         static XrCompositionLayerQuad beam{XR_TYPE_COMPOSITION_LAYER_QUAD}, dot{XR_TYPE_COMPOSITION_LAYER_QUAD};
         // the laser only exists for flat GUI; in the world your hand points through the game's own hover feedback

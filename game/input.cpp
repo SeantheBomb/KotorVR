@@ -32,7 +32,7 @@ extern void Log(const char* fmt, ...);
 
 // ---------------------------------------------------------------- desired state (computed per frame)
 static BYTE g_wantKeys[256];
-static double g_attackWatchAt = -10;  // an attack we just started (swing / shot): see the movement rules in Input_Update
+static double g_attackWatchAt = -10;  // an action we just started (swing / shot / use / talk): see the movement rules in Input_Update
 static float g_attackFrom[3];
 static void WatchAttack(double now) {
     if (Weapon_PlayerPos(g_attackFrom)) g_attackWatchAt = now;
@@ -203,8 +203,9 @@ void Input_Update(HWND wnd) {
         bool fighting = inWorld && Weapon_PlayerInCombat();  // R outside combat would *use* whatever is targeted
         // Movement stays yours. (1) Pushing the stick while the game is still running an attack for you clears it
         // (the HUD's clear-queue button): an attack on a target that can't be reached used to leave the character
-        // unable to walk after a fight. (2) An attack we start from a swing or shot must not walk you to the target:
-        // if the character travels > 0.8 m with the stick idle in the next 2.5 s, that walk is cancelled.
+        // unable to walk after a fight. (2) An action we start (swing, shot, use, open, talk) must never walk you to
+        // the target: if the character travels > 0.8 m with the stick idle in the next 2.5 s, that walk is cancelled
+        // and a double tick says "too far - step closer".
         {
             static bool stickWas;
             bool stickNow = mag > 0.5f;
@@ -221,7 +222,9 @@ void Input_Update(HWND wnd) {
                     if (mag < 0.3f && dx * dx + dy * dy > 0.8f * 0.8f && ActionRing_ClearQueue()) {
                         Combat_ResetAttacking();
                         g_attackWatchAt = -10;
-                        Log("input: attack would walk you to the target -> cancelled (swing when in reach)");
+                        Log("input: action would walk you to the target -> cancelled (step closer)");
+                        VR_Haptic(1, 0.5f, 0.04f, 90);
+                        Cues_TooFar();
                     }
                 }
             }
@@ -273,11 +276,12 @@ void Input_Update(HWND wnd) {
             else g_gestureKeyAt = -1;
         }
 
-        if (in.buttons & KVR_BTN_A) keys[DIK_SPACE] = 0x80;                     // pause
+        if ((in.buttons & KVR_BTN_A) && !Dialogue_Showing()) keys[DIK_SPACE] = 0x80;  // pause (in a conversation: skip)
         static bool eatB;  // B that closed the action ring is not also Escape
         if (ringWasOpen && (in.buttons & KVR_BTN_B)) eatB = true;
         if (!(in.buttons & KVR_BTN_B)) eatB = false;
-        if ((in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) && !eatB) keys[DIK_ESCAPE] = 0x80;   // menu / back
+        if (((in.buttons & KVR_BTN_MENU) || ((in.buttons & KVR_BTN_B) && !Dialogue_Showing())) && !eatB)
+            keys[DIK_ESCAPE] = 0x80;  // menu / back (B in a conversation: skip the line)
         if (in.buttons & KVR_BTN_X) keys[DIK_TAB] = 0x80;                       // change character
         // click: in menus the right trigger on the panel; in the world the HUD only answers the LEFT hand's trigger, so
         // the right trigger always stays the weapon. Each press keeps the owner it started with until released (a shot
@@ -294,7 +298,8 @@ void Input_Update(HWND wnd) {
         mouse[0] = ((rOwner == 2 && in.pointerMode == KVR_POINTER_PANEL) ||
                     (lOwner == 1 && in.pointerMode == KVR_POINTER_HUD_LEFT) ||
                     (in.pointerMode == KVR_POINTER_PANEL && in.poke)) &&  // a fingertip poke on the wrist panel
-                   !Dialogue_Active();
+                   !Dialogue_Active() ||
+                   Dialogue_SkipClick();  // A / B during a spoken line: the click that skips it
         // World grip: no mouse click at all (KotOR draws the target's action menu right at the target, so a click there
         // fires a menu slot: the medpack / mine accidents). Instead the game camera looks down the hand's aim ray for
         // ~0.35 s (frames not shown in the headset), the cursor hovers the screen center so the aimed object becomes
@@ -327,11 +332,13 @@ void Input_Update(HWND wnd) {
                 deferR = false;
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
+                WatchAttack(now);
             } else if (tick - gripDownMs >= 400) {
                 deferR = false;
                 if (!ActionRing_Open(in)) {
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
+                    WatchAttack(now);
                 } else {
                     Log("input: grip held -> action ring");
                 }
@@ -360,7 +367,7 @@ void Input_Update(HWND wnd) {
                 } else {
                     g_gestureKey = DIK_R;
                     g_gestureKeyAt = now;
-                    if (!gripPick) WatchAttack(now);  // a shot's pick: an attack, not a use / talk
+                    WatchAttack(now);  // a shot's attack or a grip's use / talk: never a walk
                 }
             }
             if (t > 330) g_pickStartMs = -1;

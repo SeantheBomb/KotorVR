@@ -4,12 +4,12 @@
 #include <stdint.h>
 
 // the layout version is part of the name: a stale process holding an older (smaller) mapping can never block it
-#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v12"
+#define KVR_SHM_NAME L"Local\\KotorVR_Shared_v13"
 #define KVR_TEX_NAME_EYE0 L"Local\\KotorVR_Eye0"
 #define KVR_TEX_NAME_EYE1 L"Local\\KotorVR_Eye1"
 #define KVR_TEX_NAME_PANEL L"Local\\KotorVR_Panel"
 #define KVR_MAGIC 0x4B565231u  // 'KVR1'
-#define KVR_VERSION 12
+#define KVR_VERSION 13
 
 #pragma pack(push, 8)
 
@@ -157,6 +157,8 @@ struct KvrShared {
     KvrFlash flash;                      // game -> host
     char gameDir[260];                   // game -> host: the game folder (ANSI), for kvr\icons
     KvrHudLayout hud;                    // game -> host
+    volatile uint32_t menuOpen;          // game -> host: a game menu (container, inventory, store, computer...) is up
+                                         // over the world: show the flat panel with the laser, not the wrist
 };
 
 #pragma pack(pop)

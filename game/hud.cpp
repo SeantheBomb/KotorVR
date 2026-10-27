@@ -7,6 +7,8 @@
 #include <initializer_list>
 
 #include "../common/kvr_shared.h"
+#include "dialogue.h"
+#include "gui.h"
 #include "vr.h"
 
 extern void Log(const char* fmt, ...);
@@ -80,6 +82,8 @@ void LogRaw(BYTE* mi) {  // once: the raw extents, to check them against a GUI f
 void Hud_Update() {
     KvrShared* shm = const_cast<KvrShared*>(VR_Shared());
     if (!shm) return;
+    GuiState gs = Gui_State();
+    shm->menuOpen = gs.menuPanels > 0;
     BYTE* mi = MainInterface();
     if (!mi) return;
     static bool logged;

@@ -25,6 +25,7 @@
 #include "ownsig.h"
 #include "combat.h"
 #include "cues.h"
+#include "dialogue.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -483,6 +484,37 @@ void* Weapon_CreatureById(DWORD id) {
 
 static bool IsSaber(WeaponClass c);
 
+// What the right hand points at in the world: the game's mouse-over object (the cursor follows the hand's ray), client
+// internal [[app+4]+4] +0x4A4 (0x7F000000 = nothing; CClientExoAppInternal::HandleMouseOver 0x6222F0), looked up as a
+// server object (any type: 0x4AE750) for its position. The flat HUD that would show its name is hidden in the world,
+// so a ring at its feet says what a grip / trigger would act on.
+static bool HoverPos(float out[3]) {
+    typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
+    const GetObject_t GetObj = (GetObject_t)0x4AE750;
+    __try {
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* client = app ? *(BYTE**)(app + 4) : nullptr;
+        BYTE* internal = client ? *(BYTE**)(client + 4) : nullptr;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        if (!internal || !server) return false;
+        DWORD id = *(DWORD*)(internal + 0x4A4);
+        if (id == 0x7F000000 || id == 0) return false;
+        id &= 0x7FFFFFFF;  // client ids are the server's with the top bit set (0x8000000A -> 0x0A)
+        BYTE* player = (BYTE*)Weapon_PlayerCreature();
+        if (player && *(DWORD*)(player + 4) == id) return false;
+        BYTE* o = (BYTE*)GetObj(server, id);
+        if (!o) return false;
+        memcpy(out, o + 0x90, 12);
+        static DWORD lastId;
+        if (id != lastId) {
+            Log("hover: object %08lX at (%.1f %.1f %.1f)", id, out[0], out[1], out[2]);
+            lastId = id;
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 static bool CreaturePos(DWORD id, float out[3]) {
     __try {
         BYTE* c = (BYTE*)Weapon_CreatureById(id);
@@ -534,7 +566,10 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         if (b.fromSet && tnow - b.t0 < 1.5) anyBolt = true;
     g_bolts.erase(std::remove_if(g_bolts.begin(), g_bolts.end(), [&](const Bolt& b) { return tnow - b.t0 > 1.5; }),
                   g_bolts.end());
-    if (n == 0 && !anyBolt) return;
+    float hover[3];
+    const KvrShared* hshm = VR_Shared();
+    bool showHover = hshm && hshm->input.pointerMode == KVR_POINTER_WORLD && !Dialogue_Showing() && HoverPos(hover);
+    if (n == 0 && !anyBolt && !showHover) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -681,6 +716,21 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glVertex3f(e[0] + s * k, e[1] + s * 0.6f * k, e[2]);
             p_glVertex3f(e[0], e[1] - s * 0.1f * k, e[2]);
             p_glVertex3f(e[0], e[1] - s * 0.6f * k, e[2]);
+            p_glEnd();
+        }
+    }
+    if (showHover) {  // a gently pulsing ring on the floor around what the hand points at
+        float pulse = 0.45f + 0.04f * sinf((float)tnow * 6.0f);
+        if (p_glLineWidth) p_glLineWidth(4.0f);
+        for (int pass = 0; pass < 2; pass++) {
+            float rr = pass ? pulse : pulse + 0.03f;
+            p_glColor4f(0.75f, 0.95f, 1.0f, pass ? 0.9f : 0.3f);
+            p_glBegin(GL_LINE_LOOP);
+            for (int k = 0; k < 40; k++) {
+                float an = k * (6.2831853f / 40), p[3] = {hover[0] + rr * cosf(an), hover[1] + rr * sinf(an), hover[2] + 0.04f}, e[3];
+                ToEye(worldView, p, e);
+                p_glVertex3f(e[0], e[1], e[2]);
+            }
             p_glEnd();
         }
     }

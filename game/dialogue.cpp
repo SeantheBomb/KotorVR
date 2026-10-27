@@ -16,6 +16,11 @@
 // the replies below it. The host hit-tests the right-hand ray against the lines (KvrTextPanel::pickable / hover); a
 // trigger pull taps the hovered reply's number key, so KotOR's own selection path runs. The game's flat panel keeps
 // working too.
+//
+// Lines without replies (NPC lines, cutscene subtitles) come from the cinematic panel, not the reply panel: the panel
+// shows while either is up, so every line is captioned. A / B skips the current line: a left click, which the dialog
+// panel's input handler (0x6A7230) turns into its skip while a line plays with no replies up. Computer terminals (CSWGuiDialogComputer) are not mirrored: their own screen is
+// shown on the flat panel with the laser (gui.cpp).
 #include "dialogue.h"
 
 #include <cmath>
@@ -57,6 +62,7 @@ void* volatile g_replyPanel;  // the panel holding the replies (NPC conversation
 bool g_showing;
 int g_shownReplies;
 bool g_trigWas;
+DWORD g_skipAt;  // A / B skip pressed (GetTickCount), 0 = never
 
 std::string ToUtf8(const char* s, int len) {
     if (!s || len <= 0) return std::string();
@@ -85,9 +91,18 @@ std::string ReadExo(const void* exo) {
     return ToUtf8(buf, CopyExo(exo, buf, sizeof buf));
 }
 
+bool IsComputer(void* panel) {  // CSWGuiDialogComputer (constructor 0x6A8EB0) and its info / base vtables
+    __try {
+        DWORD vt = *(DWORD*)panel;
+        return vt == 0x755888 || vt == 0x755730;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 }  // namespace
 
 extern "C" void __cdecl Dialogue_MessagePre(void* panel, const void* exo) {
+    if (IsComputer(panel)) return;
     std::string m = exo ? ReadExo(exo) : std::string();
     EnterCriticalSection(&g_lock);
     g_panel = panel;
@@ -103,6 +118,7 @@ extern "C" void __cdecl Dialogue_ResetPre(void* panel) {
 }
 
 extern "C" void __cdecl Dialogue_RepliesPre(void* panel, int count, const BYTE* texts) {
+    if (IsComputer(panel)) return;
     std::vector<std::string> r;
     if (count > 20) count = 20;
     for (int i = 0; i < count && texts; i++) {
@@ -223,9 +239,9 @@ bool Dialogue_Active() {
     return g_showing && shm && shm->text[kSlot].hover >= 0;
 }
 
-static bool PanelOpen() {
+static bool PanelOpen(void* p) {
+    if (!p) return false;
     __try {
-        void* p = g_replyPanel ? g_replyPanel : g_panel;
         return *(void* const*)((const BYTE*)p + kOpenOffset) != nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return false;
@@ -252,7 +268,7 @@ BYTE Dialogue_Update(const KvrInput& in) {
     if (!shm) return 0;
     // shown only while the game's panel is up: it opens a moment after the first line arrives, and the closing node's
     // last updates land as it closes
-    bool open = (g_replyPanel || g_panel) && PanelOpen();
+    bool open = PanelOpen(g_replyPanel) || PanelOpen(g_panel);
     if (g_showing && !open) {
         Log("dialogue: over");
         VR_HideText(kSlot);
@@ -302,5 +318,18 @@ BYTE Dialogue_Update(const KvrInput& in) {
         }
     }
     g_trigWas = trig;
+    // skip the line being spoken (no replies up yet): A or B -> a short left click (Dialogue_SkipClick)
+    static bool skipWas;
+    bool skip = (in.buttons & (KVR_BTN_A | KVR_BTN_B)) != 0;
+    if (g_showing && skip && !skipWas && g_shownReplies == 0) {
+        g_skipAt = GetTickCount();
+        Log("dialogue: line skipped");
+    }
+    skipWas = skip;
     return key;
+}
+
+bool Dialogue_SkipClick() { return g_skipAt && GetTickCount() - g_skipAt < 80; }
+
+bool Dialogue_Showing() { return g_showing;
 }

@@ -10,3 +10,7 @@ bool Dialogue_Install();
 BYTE Dialogue_Update(const KvrInput& in);
 // The right hand points at a reply on the conversation panel (the trigger belongs to it).
 bool Dialogue_Active();
+// A / B pressed during a line with no replies: hold the left mouse button down this frame (the panel's skip).
+bool Dialogue_SkipClick();
+// Our conversation panel is up (any line, with or without replies).
+bool Dialogue_Showing();
