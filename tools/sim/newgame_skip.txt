@@ -48,6 +48,11 @@ wait 6
 shot conv2
 wait 6
 shot conv3
+hover 1 1                          # pick the first reply on the VR panel (no native click first)
+trigger
+hover 1 -1
+wait 4
+shot picked
 head yaw=90 pitch=0 over=0.5      # look around during the conversation: culled geometry shows as holes
 wait 1
 shot look90

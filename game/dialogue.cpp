@@ -52,7 +52,8 @@ CRITICAL_SECTION g_lock;
 std::string g_message;               // the speaker's line (UTF-8)
 std::vector<std::string> g_replies;  // as shown, "1. ..." (UTF-8)
 volatile bool g_dirty;
-void* volatile g_panel;  // the panel being mirrored
+void* volatile g_panel;       // the panel that last sent text
+void* volatile g_replyPanel;  // the panel holding the replies (NPC conversations send the line from another object)
 bool g_showing;
 int g_shownReplies;
 bool g_trigWas;
@@ -117,12 +118,13 @@ extern "C" void __cdecl Dialogue_RepliesPre(void* panel, int count, const BYTE* 
     g_replies.swap(r);
     g_dirty = true;
     g_panel = panel;
+    g_replyPanel = panel;
     LeaveCriticalSection(&g_lock);
     Log("dialogue: %d replies (panel %p) t=%lu", count, panel, GetTickCount());
 }
 
 extern "C" void __cdecl Dialogue_SelectPre(void* panel, int index) {
-    if (panel == g_panel) Log("dialogue: reply %d chosen t=%lu", index + 1, GetTickCount());
+    if (panel == g_replyPanel) Log("dialogue: reply %d chosen t=%lu", index + 1, GetTickCount());
 }
 
 __declspec(naked) static void MessageStub() {
@@ -223,7 +225,24 @@ bool Dialogue_Active() {
 
 static bool PanelOpen() {
     __try {
-        return *(void* const*)((const BYTE*)g_panel + kOpenOffset) != nullptr;
+        void* p = g_replyPanel ? g_replyPanel : g_panel;
+        return *(void* const*)((const BYTE*)p + kOpenOffset) != nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+// Pick a reply the way the panel's input handler 0x6A7230 does for a reply key (event 0xFE + n): its virtual method
+// at vtable + 0x6C with the index. Called directly, because the handler only receives keys once the panel has had
+// keyboard focus - in a new game's first conversation it ignored our number keys until a mouse click.
+static bool SelectReplyDirect(void* panel, int index) {
+    typedef void(__fastcall * SelectFn)(void* self, void* edx, int index);  // thiscall, one stack argument
+    __try {
+        BYTE* vt = *(BYTE**)panel;
+        if ((ULONG_PTR)vt < 0x700000 || (ULONG_PTR)vt > 0x7A0000) return false;  // the exe's vtables
+        SelectFn fn = *(SelectFn*)(vt + 0x6C);
+        if ((ULONG_PTR)fn < 0x401000 || (ULONG_PTR)fn > 0x734000) return false;  // the exe's code
+        fn(panel, nullptr, index);
+        return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return false;
 }
@@ -233,7 +252,7 @@ BYTE Dialogue_Update(const KvrInput& in) {
     if (!shm) return 0;
     // shown only while the game's panel is up: it opens a moment after the first line arrives, and the closing node's
     // last updates land as it closes
-    bool open = g_panel && PanelOpen();
+    bool open = (g_replyPanel || g_panel) && PanelOpen();
     if (g_showing && !open) {
         Log("dialogue: over");
         VR_HideText(kSlot);
@@ -264,15 +283,16 @@ BYTE Dialogue_Update(const KvrInput& in) {
         VR_SetTextPickable(kSlot, true);
         g_showing = true;
     }
-    // pick: trigger on a hovered reply -> that reply's number key (KotOR's own selection path)
+    // pick: trigger on a hovered reply -> the panel's own selection (the number key only as a fallback)
     BYTE key = 0;
     bool trig = in.trigR > 0.6f;
     if (g_showing && trig && !g_trigWas) {
         int reply = shm->text[kSlot].hover - 1;
         static const BYTE kDigits[9] = {0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A};  // DIK_1..DIK_9
         if (reply >= 0 && reply < 9 && reply < g_shownReplies) {
-            key = kDigits[reply];
-            Log("dialogue: picked reply %d", reply + 1);
+            bool direct = g_replyPanel && SelectReplyDirect(g_replyPanel, reply);
+            if (!direct) key = kDigits[reply];
+            Log("dialogue: picked reply %d (%s)", reply + 1, direct ? "selected on the panel" : "number key");
         }
     }
     g_trigWas = trig;
