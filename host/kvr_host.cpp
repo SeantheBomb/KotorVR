@@ -697,7 +697,8 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     ID2D1SolidColorBrush *bg = nullptr, *fg = nullptr, *gold = nullptr, *hl = nullptr, *rule = nullptr;
     // Pickable panels (conversations, the action ring) take KotOR's own GUI look: its dialogue blue, the yellow of a
     // highlighted reply, bold sans text over a dark plate with thin blue rules. Others (instruction cards) stay neutral.
-    bool game = src.pickable != 0;
+    bool game = src.pickable != 0 || text[0] == '~';  // '~': the game's look for a label (the hover name)
+    if (text[0] == '~') memmove(text, text + 1, strlen(text));
     p.rt->BeginDraw();
     p.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
     if (game) {

@@ -6,6 +6,8 @@ bool Anim_Install();
 void Anim_Update();
 // The controlled character's body model's world position (exactly where its hierarchy is drawn).
 bool Anim_PlayerBodyPos(float out[3]);
+// How high the controlled character's head is above its feet (m; -99 unknown): ~1.6 standing, much less lying down.
+float Anim_PlayerHeadHeight();
 // A hit at a world point on this creature: its upper body flinches away from it for a quarter second.
 void Anim_Flinch(unsigned long targetId, const float hit[3]);
 // v2 per-bone hit volumes: the creature model standing at this world position (nullptr if none animated there) and

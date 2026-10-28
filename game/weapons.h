@@ -50,6 +50,8 @@ void* Weapon_CreatureById(DWORD id);
 bool Weapon_HoverClientId(DWORD* id);
 // Make a client object the current target (the default action R then acts on it), without a click.
 void Weapon_SetTarget(DWORD clientId);
+// Any server object's world position (+0x90).
+bool Weapon_ObjectPos(DWORD serverId, float out[3]);
 // Blaster handling: the current spread cone (deg), whether the gun hand has held still a second, and a Power Blast
 // for the next trigger shot.
 float Weapon_SpreadDeg();

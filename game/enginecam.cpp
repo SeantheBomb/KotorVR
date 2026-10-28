@@ -20,6 +20,7 @@
 
 #include "../common/kvr_shared.h"
 #include "features.h"
+#include "anim.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -114,6 +115,8 @@ float g_aimedPos[3], g_aimedQ[4];
 
 // The eye's world position this frame (the composed camera, not during aim picks): what NPCs look at.
 float g_eyeWorld[3];
+float g_eyeWorldHist[2][3];
+int g_eyeHistI;
 bool g_eyeWorldValid;
 
 // The controlled creature is dead (CSWSCreature::GetDead 0x4EF820, fastcall on the server creature).
@@ -262,10 +265,16 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                     dm = sqrtf(toMe[0] * toMe[0] + toMe[1] * toMe[1] + toMe[2] * toMe[2]);
                     if (dm > 0.01f) lookAtMe = (toMe[0] * sf[0] + toMe[1] * sf[1] + toMe[2] * sf[2]) / dm;
                 }
-                if (rel > 1.92f || (lookAtMe > 0.906f && dm < 8.0f)) {  // > 110 deg / within 25 deg of you
+                float headUp = Anim_PlayerHeadHeight();
+                if (headUp > -50 && headUp < 1.15f) {  // lying / sitting: any first-person view would be inside the bed
+                    // a shot of you lying / sitting (waking in the bunk): your own eyes would be inside the bed -
+                    // show the game's shot of you, as it was before
+                    g_shotMode = 2;
+                    Log("cutscene: you are lying / sitting (head %.2f m up) -> the game's shot", headUp);
+                } else if (rel > 1.92f || (lookAtMe > 0.906f && dm < 8.0f)) {  // > 110 deg / within 25 deg of you
                     g_shotMode = 1;
-                    Log("cutscene: reverse shot (%.0f deg from your facing%s) -> stay first person", rel * 57.29578f,
-                        lookAtMe > 0.906f && dm < 8.0f ? ", looking at you" : "");
+                    Log("cutscene: reverse shot (%.0f deg from your facing%s, head %.2f m up) -> stay first person",
+                        rel * 57.29578f, lookAtMe > 0.906f && dm < 8.0f ? ", looking at you" : "", headUp);
                 }
             }
         }
@@ -383,13 +392,31 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
     }
     g_cam = cam;
     g_applied = true;
-    if (!g_pickApplied) memcpy(g_eyeWorld, pos, sizeof g_eyeWorld), g_eyeWorldValid = true;
+    if (!g_pickApplied) {
+        memcpy(g_eyeWorldHist[g_eyeHistI], pos, sizeof g_eyeWorld);
+        g_eyeHistI ^= 1;
+        if (!g_eyeWorldValid) memcpy(g_eyeWorldHist[g_eyeHistI], pos, sizeof g_eyeWorld);
+        memcpy(g_eyeWorld, pos, sizeof g_eyeWorld);
+        g_eyeWorldValid = true;
+    }
     VR_EngineCamApplied(basePos);
 }
 
 bool EngineCam_EyeWorld(float out[3]) {
     if (!g_eyeWorldValid) return false;
-    memcpy(out, g_eyeWorld, sizeof g_eyeWorld);
+    // the midpoint of the last two eyes (the game renders one eye per frame, alternately: NPCs looked at the left one)
+    for (int i = 0; i < 3; i++) out[i] = (g_eyeWorldHist[0][i] + g_eyeWorldHist[1][i]) * 0.5f;
+    return true;
+}
+
+bool EngineCam_WorldToTracking(const float w[3], float out[3]) {
+    if (!g_havePlay) return false;
+    // the gameplay camera base (your head's place and view heading): tracking = M^T (world - base), the inverse of
+    // how the eye pose is composed onto it
+    float M[9];
+    QuatWxyzToRows(g_playQ, M);
+    float d[3] = {w[0] - g_playPos[0], w[1] - g_playPos[1], w[2] - g_playPos[2]};
+    for (int c = 0; c < 3; c++) out[c] = M[0 * 3 + c] * d[0] + M[1 * 3 + c] * d[1] + M[2 * 3 + c] * d[2];
     return true;
 }
 

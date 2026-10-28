@@ -544,6 +544,19 @@ bool Weapon_HoverClientId(DWORD* id) {
     return false;
 }
 
+bool Weapon_ObjectPos(DWORD serverId, float out[3]) {
+    typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
+    __try {
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        BYTE* o = server ? (BYTE*)((GetObject_t)0x4AE750)(server, serverId) : nullptr;
+        if (!o) return false;
+        memcpy(out, o + 0x90, 12);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 // Make a (client) object the current target, as a click would: CClientExoApp::SetLastTarget 0x5EDD70 (thiscall on
 // the client app, (id, 1)); the game's default action (R) then acts on it.
 void Weapon_SetTarget(DWORD clientId) {
@@ -641,11 +654,13 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             // the cursor follows the hand, so the game's own mouse-over point is where this shot meets a wall or a
             // body (no more bolts flying through walls); used when it lies along the barrel
             float hit[3];
-            if (CursorWorldHit(hit)) {
+            DWORD hovered;
+            // the mouse-over point only for walls / floors: on a hovered body (a corpse!) it pulled every bolt there
+            if (!Weapon_HoverClientId(&hovered) && CursorWorldHit(hit)) {
                 float v[3] = {hit[0] - b.from[0], hit[1] - b.from[1], hit[2] - b.from[2]};
                 float dist = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
                 float along = dist > 0.01f ? (v[0] * dw[0] + v[1] * dw[1] + v[2] * dw[2]) / dist : 0;
-                if (dist > 0.4f && dist < 40.0f && along > 0.97f) {
+                if (dist > 0.4f && dist < 40.0f && along > 0.995f) {
                     memcpy(b.to, hit, sizeof b.to);
                     b.impact = true;
                 }

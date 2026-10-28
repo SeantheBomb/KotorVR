@@ -134,20 +134,28 @@ void Hover_Update(const KvrInput& in) {
         dist = sqrtf(dx * dx + dy * dy);
     }
     dist = dist < 1.0f ? 1.0f : dist > 6.0f ? 6.0f : dist;
-    // the aim ray (tracking space = the WORLD anchor's frame): x, y, z, w; forward -Z
-    const float* q = in.aim.quat;
-    float f[3] = {-(2 * (q[0] * q[2] + q[3] * q[1])), -(2 * (q[1] * q[2] - q[3] * q[0])), -(1 - 2 * (q[0] * q[0] + q[1] * q[1]))};
-    float d = dist * 0.9f;
-    float pos[3] = {in.aim.pos[0] + f[0] * d, in.aim.pos[1] + f[1] * d + 0.06f * dist + 0.08f, in.aim.pos[2] + f[2] * d};
-    float yaw = VR_HeadYaw();
+    // anchored in the world just above the object (over a creature's head, over the ring for things), facing you
+    if (!havePos) {
+        Hide();
+        return;
+    }
+    bool creature = Weapon_CreatureById(id & 0x7FFFFFFF) != nullptr;
+    float above[3] = {op[0], op[1], op[2] + (creature ? 2.15f : 1.0f)}, pos[3];
+    if (!EngineCam_WorldToTracking(above, pos)) {
+        Hide();
+        return;
+    }
+    float head[3];
+    VR_HeadPos(head);
+    float yaw = atan2f(head[0] - pos[0], head[2] - pos[2]);  // the card's +Z toward your head
     float rq[4] = {0, sinf(yaw * 0.5f), 0, cosf(yaw * 0.5f)};
     char text[128];
     bool flash = Now() < g_flashUntil;
-    sprintf_s(text, flash ? "> %s <" : "%s", g_name);
+    sprintf_s(text, flash ? "~#%s" : "~%s", g_name);  // '~': KotOR's own panel look; '#': brighter title on interact
     static char lastText[128];
     static DWORD lastSent;
     if (!g_visible || strcmp(text, lastText) != 0 || GetTickCount() - lastSent > 50) {  // not every frame
-        VR_ShowText(kSlot, KVR_ANCHOR_WORLD, pos, rq, 0.09f * dist + 0.12f, text, -1);
+        VR_ShowText(kSlot, KVR_ANCHOR_WORLD, pos, rq, 0.05f * dist + 0.12f, text, -1);
         strcpy_s(lastText, text);
         lastSent = GetTickCount();
     }

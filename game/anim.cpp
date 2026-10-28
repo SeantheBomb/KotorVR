@@ -459,6 +459,19 @@ int Anim_BoneSegments(void* model, AnimBone* out, int max) {
     return n;
 }
 
+float Anim_PlayerHeadHeight() {
+    BYTE* g = g_playerGob;
+    if (!g) return -99;
+    __try {
+        void* head = FindPart(*(void**)(g + 0x6C), "headhook", 0);
+        if (!head) return -99;
+        float wp[3], wq[4];
+        ((PartGetWorldFn)0x43E4A0)(head, nullptr, wp, wq);
+        return wp[2] - *(float*)(g + 0x7C + 4);  // world z of the head - the body's feet z (+0x78 xyz -> +0x80)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return -99;
+}
+
 bool Anim_PlayerBodyPos(float out[3]) {
     BYTE* g = g_playerGob;
     if (!g) return false;

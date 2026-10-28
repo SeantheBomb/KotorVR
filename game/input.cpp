@@ -260,12 +260,28 @@ void Input_Update(HWND wnd) {
             if (Combat_InPerfectWindow()) Cues_Fire(CUE_PERFECT_HIT);
         }
         static bool trigWas;
+        // v2: the bolt flies on the next drawn frame; whatever live enemy it hit becomes the target (then R)
+        static double pendingShotTarget = -10;
+        if (pendingShotTarget > 0) {
+            DWORD hit = Melee_TakeShotTarget();
+            if (hit) {
+                Weapon_SetTarget(hit | 0x80000000);
+                g_gestureKey = DIK_R;
+                g_gestureKeyAt = now;
+                WatchAttack(now);
+                Log("input: shot hit %08lX -> target + attack", hit);
+                pendingShotTarget = -10;
+            } else if (now - pendingShotTarget > 0.3) {
+                pendingShotTarget = -10;
+            }
+        }
         bool trigNow = in.trigR > 0.6f;
         static bool rangedPickWanted;
         static double lastRangedPick = -10;
         bool rangedHeld = !Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE;
         static double trigDownAt = -10, lastShotAt = -10;
-        if (trigNow && !trigWas && inWorld && rangedHeld && !ringWasOpen && !Dialogue_Active() && !Force_MenuHovered()) {
+        // a gun fires only in a fight, and never while a conversation is up (answering used to shoot)
+        if (trigNow && !trigWas && fighting && rangedHeld && !ringWasOpen && !Dialogue_Showing() && !Force_MenuHovered()) {
             // a gun fires when you pull its trigger: bolt, flash, recoil and sound right away; where the barrel points
             // decides what it hits (v2). Fire modes: a steady second before the pull = Sniper Shot, a quick second pull
             // = Rapid Shot, a trigger held ~1 s and let go = Power Blast (an extra, heavier bolt).
@@ -292,8 +308,9 @@ void Input_Update(HWND wnd) {
                 // shoot what you point at: the game already hovers what the hand points at (the hover ring) - make
                 // it the target and attack. No aim pick: its hidden camera frames were the lag spike on every shot
                 // (2026-10-27). At most once a second (KotOR keeps firing every round on its own).
-                DWORD hover;
-                if (now - lastRangedPick > 1.0 && Weapon_HoverClientId(&hover)) {
+                DWORD hover = 0;
+                if (now - lastRangedPick > 1.0 && Combat_ContactMode()) pendingShotTarget = now;  // see below
+                if (now - lastRangedPick > 1.0 && !Combat_ContactMode() && Weapon_HoverClientId(&hover)) {
                     Weapon_SetTarget(hover);
                     Hover_Interacted();
                     g_gestureKey = DIK_R;

@@ -379,8 +379,16 @@ static void RefreshPlayerPos() {
     g_playerPosValid = false;
     // the body model's own world position (Gob +0x78) is exactly where its hierarchy is drawn; the server creature's
     // position leads it while you move, which let the body pop into view (2026-10-27)
+    float prev[3] = {g_playerPos[0], g_playerPos[1], g_playerPos[2]};
+    bool had = g_playerPosValid;
     if (Anim_PlayerBodyPos(g_playerPos)) {
         g_playerPosValid = true;
+        float dx = g_playerPos[0] - prev[0], dy = g_playerPos[1] - prev[1];
+        if (had && dx * dx + dy * dy > 0.6f * 0.6f) {
+            // you switched to another character (Tab) or were moved: last frame's bones belong to the old body -
+            // forget them, so its head shows at once and the new head is hidden by the neck rule this frame
+            g_ownNodeCount[0] = g_ownNodeCount[1] = 0;
+        }
         return;
     }
     __try {

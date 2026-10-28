@@ -266,6 +266,11 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     if (g_contact) {
         DWORD aid = ObjectId(attacker), tid = ObjectId(targetObj);
         if (attacker == player) {
+            double tnow = Now();  // your attack rounds (the stick clears a queued attack while one runs)
+            if (tnow - g_playerRolls[1] > 0.3) {
+                g_playerRolls[0] = g_playerRolls[1];
+                g_playerRolls[1] = tnow;
+            }
             // an open enemy (guard broken): your blow is a critical threat
             if (IsOpen(tid)) {
                 *kForcedRoll = 20;

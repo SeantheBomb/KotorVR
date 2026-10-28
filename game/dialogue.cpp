@@ -31,6 +31,9 @@
 
 #include "../common/kvr_shared.h"
 #include "gui.h"
+#include "enginecam.h"
+#include "movie.h"
+#include "weapons.h"
 #include "vr.h"
 
 extern void Log(const char* fmt, ...);
@@ -254,6 +257,18 @@ static int LineFlags(void* p) {
     return -1;
 }
 
+// the conversation's owner (CSWGuiDialog::SetOwner 0x6A7C90 writes +0x19C0); 0 unknown / yourself
+static DWORD SpeakerOf(void* panel) {
+    if (!panel) return 0;
+    __try {
+        DWORD id = *(DWORD*)((BYTE*)panel + 0x19C0);
+        BYTE* p = (BYTE*)Weapon_PlayerCreature();
+        if (id == 0 || id == 0x7F000000 || (p && (id & 0x7FFFFFFF) == *(DWORD*)(p + 4))) return 0;
+        return id;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return 0;
+}
+
 static bool PanelOpen(void* p) {
     if (!p) return false;
     __try {
@@ -289,6 +304,15 @@ BYTE Dialogue_Update(const KvrInput& in) {
     // (+0x1C) is not reliable: after the tutorial conversation it stayed set, our panel never closed and its stale
     // reply re-started the conversation when picked (2026-10-27 softlock).
     bool open = Gui_State().dialogPanels > 0;
+    // a cinematic movie plays: step aside (it came back with the next line) - 2026-10-27
+    if (Movie_Playing()) {
+        if (g_showing) {
+            VR_HideText(kSlot);
+            g_showing = false;
+            g_dirty = true;  // re-shown with the current line when the movie ends
+        }
+        return 0;
+    }
     if (g_showing && !open) {
         Log("dialogue: over");
         VR_HideText(kSlot);
@@ -316,10 +340,23 @@ BYTE Dialogue_Update(const KvrInput& in) {
         g_shownReplies = (int)g_replies.size();
         LeaveCriticalSection(&g_lock);
         if (!g_showing) {
-            // world-locked where you look, a little low so the speaker stays visible above it
+            // world-locked in the direction of whoever you are talking to (the dialog panel's owner, +0x19C0), a
+            // little low so they stay visible above it; where you look when there is no one to face
             float head[3];
             VR_HeadPos(head);
             float yaw = VR_HeadYaw();
+            float spk[3], st[3];
+            DWORD owner = SpeakerOf(g_replyPanel ? g_replyPanel : g_panel);
+            if (owner && Weapon_ObjectPos(owner & 0x7FFFFFFF, spk)) {
+                spk[2] += 1.2f;
+                if (EngineCam_WorldToTracking(spk, st)) {
+                    float dx = st[0] - head[0], dz = st[2] - head[2];
+                    if (dx * dx + dz * dz > 0.3f * 0.3f) {
+                        yaw = atan2f(-dx, -dz);  // facing direction: -Z forward
+                        Log("dialogue: panel placed toward the speaker %08lX (%.0f deg)", owner, yaw * 57.29578f);
+                    }
+                }
+            }
             float pos[3] = {head[0] - sinf(yaw) * 1.1f, head[1] - 0.45f, head[2] - cosf(yaw) * 1.1f};
             // yaw to face you, tilted back ~20 deg so it looks up at your eyes
             float sy = sinf(yaw * 0.5f), cy = cosf(yaw * 0.5f), sp = sinf(-0.175f), cp = cosf(-0.175f);

@@ -175,9 +175,19 @@ static int FactionOf(DWORD id) {
     return -1;
 }
 
+static bool IsDead(DWORD id) {  // CSWSCreature::GetDead 0x4EF820
+    typedef int(__fastcall * GetDeadFn)(void* creature);
+    __try {
+        void* c = Weapon_CreatureById(id);
+        return !c || ((GetDeadFn)0x4EF820)(c) != 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return true;
+}
+
 bool Melee_IsEnemy(DWORD id) {
     auto it = g_fighters.find(id);
     if (it == g_fighters.end() || Now() - it->second.seen > 30) return false;
+    if (IsDead(id)) return false;  // corpses are nobody's target or hit volume
     if (it->second.ally) return false;
     if (it->second.enemy) return true;
     // in a fight but not (yet) in one with you: a hostile faction (STANDARD_FACTION_HOSTILE_1 / _2, INSANE, PTAT_TUSKAN,
@@ -411,6 +421,14 @@ DWORD Melee_LandingTarget(float range, float radius) {
     return best;
 }
 
+// the live enemy the last shot actually hit (the attack target for KotOR's rounds), 0 none
+static DWORD g_shotTarget;
+DWORD Melee_TakeShotTarget() {
+    DWORD id = g_shotTarget;
+    g_shotTarget = 0;
+    return id;
+}
+
 // --- ranged: the barrel ray against enemy bodies
 void Melee_Shot(const float origin[3], const float dir[3]) {
     float best = 40.0f;
@@ -456,6 +474,7 @@ void Melee_Shot(const float origin[3], const float dir[3]) {
         return;
     }
     g_credit[bestId] = {Now(), 1.0f, head};
+    g_shotTarget = bestId;
     Anim_HitPause(bestId, head ? 0.09f : 0.05f);
     float hit[3] = {origin[0] + dir[0] * best, origin[1] + dir[1] * best, origin[2] + dir[2] * best};
     Anim_Flinch(bestId, hit);

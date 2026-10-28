@@ -3,6 +3,8 @@
 
 // The headset eye in KotOR world coordinates this frame (false before the first applied camera).
 bool EngineCam_EyeWorld(float out[3]);
+// KotOR world -> tracking space (the frame of WORLD-anchored text panels), from the gameplay camera base.
+bool EngineCam_WorldToTracking(const float w[3], float out[3]);
 
 bool EngineCam_Install();
 // true while the current frame's world camera was replaced at the engine level
