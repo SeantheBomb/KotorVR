@@ -7,3 +7,5 @@ build/
 dumps/
 traces/
 third_party/
+installer/build/
+dist/
