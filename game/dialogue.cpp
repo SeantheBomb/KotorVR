@@ -285,12 +285,21 @@ BYTE Dialogue_Update(const KvrInput& in) {
     // last updates land as it closes
     // while a conversation / cutscene panel is shown (GUI manager list; the reply panel's own open flag is only set
     // while replies are up, so lines between reply rounds went uncaptioned)
-    bool open = Gui_State().dialogPanels > 0 || PanelOpen(g_replyPanel);
+    // only while the game shows a conversation / cutscene panel (GUI manager list). The reply panel's own "open" pointer
+    // (+0x1C) is not reliable: after the tutorial conversation it stayed set, our panel never closed and its stale
+    // reply re-started the conversation when picked (2026-10-27 softlock).
+    bool open = Gui_State().dialogPanels > 0;
     if (g_showing && !open) {
         Log("dialogue: over");
         VR_HideText(kSlot);
         g_showing = false;
         g_endedAt = GetTickCount();
+        EnterCriticalSection(&g_lock);  // nothing of it may be picked or shown again
+        g_message.clear();
+        g_replies.clear();
+        g_shownReplies = 0;
+        g_dirty = false;
+        LeaveCriticalSection(&g_lock);
     }
     if (g_dirty && open) {
         EnterCriticalSection(&g_lock);
