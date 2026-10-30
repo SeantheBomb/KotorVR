@@ -387,6 +387,12 @@ float Cues_KnockOff(float* yawSign) {
     return g_knockPeak * (float)sin(age / 0.2 * 3.14159265);  // up and back down
 }
 
+void Cues_Glance() {  // the blade touched a body too slowly to count: a faint spark and a light tick - "swing harder"
+    if (!Features().cues) return;
+    Haptic(0, 1, 0.2f, 0.02f, 120);
+    Spark(0.25f, true);
+}
+
 void Cues_Contact(float speed) {  // the blade bit into a body: a burn-through buzz scaled by the swing
     if (!Features().cues) return;
     float k = speed > 6.0f ? 1.0f : speed / 6.0f;

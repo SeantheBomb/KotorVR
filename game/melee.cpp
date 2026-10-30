@@ -267,7 +267,9 @@ void Melee_Update() {
         Blade& b = g_blade[h];
         if (!b.valid || t - b.t > 0.2) continue;
         if (b.speed < 1.2f) b.armed = true;
-        if (b.speed < 2.0f || !b.armed) continue;
+        // below the swing gate a touch is only a glance: shown (a faint spark), not credited
+        bool glance = b.speed < 2.0f || !b.armed;
+        if (glance && b.speed < 0.5f) continue;
         for (auto& kv : g_fighters) {
             if (!Melee_IsEnemy(kv.first)) continue;
             float p[3];
@@ -290,6 +292,16 @@ void Melee_Update() {
                 touched = d <= 0.34f || sweep <= 0.34f;
             }
             if (!touched) continue;
+            if (glance) {
+                static std::map<DWORD, double> lastGlance;
+                double& lg = lastGlance[kv.first];
+                if (t - lg > 0.5) {
+                    lg = t;
+                    Cues_Glance();
+                    Log("melee: glance on %08lX at %.1f m/s (below the 2.0 m/s gate)", kv.first, b.speed);
+                }
+                break;
+            }
             auto lc = g_lastContact.find(kv.first);
             if (lc != g_lastContact.end() && t - lc->second < 0.35) continue;
             b.armed = false;

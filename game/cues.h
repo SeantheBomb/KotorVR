@@ -42,6 +42,8 @@ float Cues_PowerLag();
 void Cues_TooFar();
 // The blade touched an enemy (v2 contact): the feel of the cut, scaled by the swing's tip speed (m/s).
 void Cues_Contact(float speed);
+// ... but too slowly to count (below the swing gate): a faint spark, a light tick.
+void Cues_Glance();
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the
