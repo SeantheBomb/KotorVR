@@ -472,6 +472,18 @@ float Anim_PlayerHeadHeight() {
     return -99;
 }
 
+bool Anim_PartPos(void* model, const char* name, float out[3]) {
+    if (!model) return false;
+    __try {
+        void* part = FindPart(*(void**)((BYTE*)model + 0x6C), name, 0);
+        if (!part) return false;
+        float wq[4];
+        ((PartGetWorldFn)0x43E4A0)(part, nullptr, out, wq);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
 bool Anim_PlayerBodyPos(float out[3]) {
     BYTE* g = g_playerGob;
     if (!g) return false;

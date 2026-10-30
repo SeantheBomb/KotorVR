@@ -108,9 +108,17 @@ void Hide() {
 
 void Hover_Interacted() { g_flashUntil = Now() + 0.6; }
 
+static double g_suppressUntil;
+void Hover_Suppress(double seconds) {
+    g_suppressUntil = Now() + seconds;
+    g_visible = true;  // the slot holds someone else's text: hide it when the suppression ends
+    g_shownId = 0;
+}
+
 void Hover_Update(const KvrInput& in) {
     const KvrShared* shm = VR_Shared();
     DWORD id;
+    if (Now() < g_suppressUntil) return;
     if (!shm || shm->cinematic || shm->menuOpen || Dialogue_Showing() || in.pointerMode != KVR_POINTER_WORLD ||
         !Weapon_HoverClientId(&id)) {
         Hide();

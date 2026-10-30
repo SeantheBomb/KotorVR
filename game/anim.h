@@ -19,5 +19,7 @@ struct AnimBone {
 };
 void* Anim_ModelAt(const float pos[3]);
 int Anim_BoneSegments(void* model, AnimBone* out, int max);
+// A named node of that model (e.g. "rhand", the weapon hook), world position.
+bool Anim_PartPos(void* model, const char* name, float out[3]);
 // Freeze the animation of the creature with this server object id for `seconds` (a hit landing on it).
 void Anim_HitPause(unsigned long targetId, float seconds);

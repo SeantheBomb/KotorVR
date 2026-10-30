@@ -423,6 +423,10 @@ void Cues_Shot() {
     PlayResref(snd, 1.0f, 0.97f + (rand() % 7) * 0.01f);  // a touch of pitch variety
 }
 
+void Cues_Tone(const char* resref, float gain, float ratio) {
+    if (Features().cues) PlayResref(resref, gain, ratio);
+}
+
 float Cues_Sparks(double* age, float rgb[3]) {
     *age = Now() - g_sparkAt;
     rgb[0] = g_sparkBlock ? 0.6f : 1.0f;

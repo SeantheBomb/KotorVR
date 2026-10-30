@@ -7,3 +7,5 @@
 void Hover_Update(const KvrInput& in);
 // A grip / shot acted on the hovered object: the label flashes.
 void Hover_Interacted();
+// Something else uses the label slot for a moment (block / parry results): hover stays hidden that long.
+void Hover_Suppress(double seconds);

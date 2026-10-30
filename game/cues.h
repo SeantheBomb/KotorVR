@@ -49,4 +49,6 @@ void Cues_SetWindow(bool open);
 void Cues_SaberIgnite(bool on);
 // A blaster shot leaves the barrel (the trigger was pulled): the weapon's own fire sound, right away.
 void Cues_Shot();
+// A KotOR sound by resref (kvr\sounds), once.
+void Cues_Tone(const char* resref, float gain, float ratio);
 void Cues_SaberHum(bool on, float tipSpeed);

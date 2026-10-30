@@ -21,6 +21,8 @@ bool Melee_HasCredit(DWORD target);
 DWORD Melee_TakeAttackStart();
 // Defence: is a blade within radius of a point / of a line segment (speed: the blade's recent peak tip speed).
 bool Melee_BladeNear(const float point[3], float radius, float* speed);
+// ... lying along a bar a..b: within tolerance of it and at its angle (|cos| >= minCos).
+bool Melee_BladeOnBar(const float a[3], const float b[3], float tolerance, float minCos, float* speed);
 bool Melee_BladeCrossesLine(const float a[3], const float b[3], float radius, float* speed);
 // A trigger shot along the barrel (world): credits the first enemy body it passes through.
 void Melee_Shot(const float origin[3], const float dir[3]);

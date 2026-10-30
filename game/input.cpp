@@ -24,6 +24,7 @@
 #include "anim.h"
 #include "hover.h"
 #include "pick.h"
+#include "guard.h"
 #include "melee.h"
 #include "force.h"
 #include "tutorial.h"
@@ -192,6 +193,7 @@ void Input_Update(HWND wnd) {
         Pick_Update();
         Hover_Update(in);
         Melee_Update();
+        Guard_Update();
         double now = Gestures_Now();
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key

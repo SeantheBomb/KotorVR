@@ -22,6 +22,7 @@
 //              player can see the swing land. A successful one zeroes the effect's damage before KotOR applies it.
 
 #include "combat.h"
+#include "guard.h"
 
 #include <windows.h>
 #include <cstdio>
@@ -476,6 +477,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
                     Anim_Flinch(attacker, a);
                 }
                 Cues_Fire(CUE_PERFECT_BLOCK);
+            Guard_Result(attacker, 2);
                 Log("combat: bolt from %08lX deflected back at it (%d damage, blade %.1f m/s)", attacker, dealt, speed);
             } else {
                 Cues_Fire(CUE_BLOCK);
@@ -493,14 +495,20 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
         if (dealt > 0) Cues_Fire(CUE_HURT);
         return true;
     }
-    // a blow: the strike zone in front of your chest on its side (the diamond)
+    // a blow: your blade on its block bar (guard.cpp); without a bar (no fresh data) the old strike zone in front of
+    // your chest on its side
     float zone[3] = {me[0] + dx * 0.55f, me[1] + dy * 0.55f, me[2] + 1.2f};
     float speed = 0;
-    if (melee && Melee_BladeNear(zone, g_parryZone, &speed)) {
-        bool parry = speed >= 1.6f;  // moved into the blow, not just held there
+    bool parry = false, haveBar = false, onBar = melee && Guard_Judge(attacker, &parry, &speed, &haveBar);
+    if (melee && !haveBar && Melee_BladeNear(zone, g_parryZone, &speed)) {
+        onBar = true;
+        parry = speed >= 1.6f;  // moved into the blow, not just held there
+    }
+    if (onBar) {
         if (!parry && g_guard <= 0) {
             Cues_Fire(CUE_BLOCK_FAILED);
             if (dealt > 0) Cues_Fire(CUE_HURT);
+            Guard_Result(attacker, 3);
             Log("combat: block broken (no guard left), %d damage", dealt);
             return true;
         }
@@ -519,6 +527,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
             g_lastBlockAt = t;
             HitPosture(attacker, 8, "blocked");
             Cues_Fire(CUE_BLOCK);
+            Guard_Result(attacker, 1);
             Log("combat: blocked %08lX, %d damage stopped, guard %.0f", attacker, dealt, g_guard);
         }
         return true;
@@ -530,7 +539,8 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
         return true;
     }
     if (dealt > 0) Cues_Fire(CUE_HURT);
-    Log("combat: blow from %08lX lands, %d damage (no blade in the zone)", attacker, dealt);
+    if (melee) Guard_Result(attacker, 3);
+    Log("combat: blow from %08lX lands, %d damage (no blade on the bar)", attacker, dealt);
     return true;
 }
 

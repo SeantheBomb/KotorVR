@@ -26,8 +26,11 @@ KotOR VR is early access. What we know about, roughly from most to least noticea
 - Physical combat sits on top of KotOR's turn-based rules: enemies still attack on their own 3-second rhythm, and
   your attack "rounds" run in the background. Most of the time this is invisible; sometimes a hit you expected waits
   for the next round.
-- Parries, blocks and deflections are judged from your blade position when the blow lands; very fast enemies (or
-  several at once) can be hard to read. `ParryZone` makes it more forgiving.
+- Blocks and parries are judged against the block bar when the blow lands. KotOR decides an attack only about half a
+  second before it lands, so the bar's warning is short; several enemies at once can be hard to read.
+  `BlockTolerance` makes it more forgiving.
+- The block bar takes its angle from the enemy's weapon hand; creatures without one (beasts) always show an overhead
+  bar.
 - Enemies react to hits with a flinch and the game's own hit animations — no ragdoll physics.
 - Force powers are cast through the game's own action menus: a power you don't know, or one that can't target that
   enemy, doesn't cast (the next lower rank you know is used instead).

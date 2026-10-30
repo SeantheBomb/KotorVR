@@ -317,6 +317,22 @@ bool Melee_LineOfSight(const float from[3], const float to[3], DWORD ignoreA, DW
 }
 
 // --- defence: the blade against a strike zone / a bolt's path
+bool Melee_BladeOnBar(const float a[3], const float b[3], float tolerance, float minCos, float* speed) {
+    float ax[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    float al = sqrtf(Dot(ax, ax)) + 1e-6f;
+    for (int h = 0; h < 2; h++) {
+        const Blade& bl = g_blade[h];
+        if (!bl.valid || Now() - bl.t > 0.2) continue;
+        float d[3] = {bl.tip[0] - bl.base[0], bl.tip[1] - bl.base[1], bl.tip[2] - bl.base[2]};
+        float dl = sqrtf(Dot(d, d)) + 1e-6f;
+        if (fabsf(Dot(d, ax)) / (dl * al) < minCos) continue;  // held at the bar's angle (either way round)
+        if (SegSeg(bl.base, bl.tip, a, b, nullptr) > tolerance) continue;
+        if (speed) *speed = (Now() - bl.maxAt < 0.3) ? bl.maxRecent : bl.speed;
+        return true;
+    }
+    return false;
+}
+
 bool Melee_BladeNear(const float point[3], float radius, float* speed) {
     for (int h = 0; h < 2; h++) {
         const Blade& b = g_blade[h];

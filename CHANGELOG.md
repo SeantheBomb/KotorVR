@@ -9,10 +9,12 @@
 - Menus, inventory, stores, containers and terminals on a panel with a laser; the HUD and your Force powers on your
   wrist.
 - Your character's own hands holding your real equipped weapons; lightsabers ignite in combat.
-- Physical melee (per-bone hit detection), blocks and parries by blade position with telegraphs, guard and posture,
+- Physical melee (per-bone hit detection), blocks and parries on a block bar that follows the enemy's weapon, with
+  lined-up feedback and BLOCK / PARRY / MISSED results, guard and posture,
   bolt deflection back at the shooter, cover, attack tokens.
 - Blasters aimed by hand with spread, foregrip and fire modes (Sniper Shot, Rapid Shot, Power Blast); thrown grenades.
 - Force powers by gesture: gather, then shove / lift / hold / lightning; tiers by gather time; two-handed area powers;
   powers on yourself from your chest; Saber Throw.
+- Pointing picks exactly the object your hand's ray hits (near or far); grip acts only on what's marked.
 - Combat feedback: haptics per weapon, hit-pause, flinches, sparks, KotOR's own sounds.
 - Death camera, Discord overlay protection, one-click installer that builds all VR assets from your own game files.

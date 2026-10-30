@@ -11,6 +11,7 @@
 
 #include "weapons.h"
 #include "pick.h"
+#include "guard.h"
 
 #include <GL/gl.h>
 #include <cmath>
@@ -619,6 +620,95 @@ static void ToEye(const float* worldView, const float* p, float* e) {
         e[r] = worldView[0 * 4 + r] * p[0] + worldView[1 * 4 + r] * p[1] + worldView[2 * 4 + r] * p[2] + worldView[12 + r];
 }
 
+// The block bars (guard.cpp): a glowing bar on your guard plane per incoming blow - blue, gold in the parry window,
+// solid and bright with your blade on it; a timing ring closing onto it; a faint line from the attacker's weapon hand
+// while it winds up. The result: a white burst (parry), a blue flash (block), or the bar breaking apart in red (missed).
+static void DrawGuardBars(const float worldView[16], const GuardBar* bars, int nb) {
+    for (int i = 0; i < nb; i++) {
+        const GuardBar& b = bars[i];
+        float ea[3], eb[3];
+        ToEye(worldView, b.a, ea);
+        ToEye(worldView, b.b, eb);
+        if (ea[2] > -0.1f || eb[2] > -0.1f) continue;
+        float c[3] = {(ea[0] + eb[0]) * 0.5f, (ea[1] + eb[1]) * 0.5f, (ea[2] + eb[2]) * 0.5f};
+        float rgb[3], alpha = 1.0f, spread = 0;
+        bool parryWin = b.secondsLeft <= 0.4f;
+        if (b.result == 2) {  // parried: white burst
+            rgb[0] = rgb[1] = rgb[2] = 1.0f;
+            alpha = max(0.0f, 1.0f - b.resultAge / 0.5f);
+        } else if (b.result == 1) {  // blocked: blue-white flash
+            rgb[0] = 0.7f; rgb[1] = 0.88f; rgb[2] = 1.0f;
+            alpha = max(0.0f, 1.0f - b.resultAge / 0.45f);
+        } else if (b.result == 3) {  // missed: red, breaking apart
+            rgb[0] = 1.0f; rgb[1] = 0.2f; rgb[2] = 0.15f;
+            alpha = max(0.0f, 1.0f - b.resultAge / 0.55f);
+            spread = b.resultAge * 0.5f;
+        } else if (parryWin) {
+            rgb[0] = 1.0f; rgb[1] = 0.85f; rgb[2] = 0.4f;
+        } else {
+            rgb[0] = 0.3f; rgb[1] = 0.65f; rgb[2] = 1.0f;
+        }
+        if (alpha <= 0) continue;
+        // the bar: a ribbon facing you, thicker and solid when lined up
+        float sx = eb[0] - ea[0], sy = eb[1] - ea[1], sl = sqrtf(sx * sx + sy * sy) + 1e-5f;
+        float ux = sx / sl, uy = sy / sl;
+        float thick = b.lined || b.result ? 0.016f : 0.009f;
+        float nx = -uy * thick, ny = ux * thick;
+        float fill = b.result ? 0.9f : b.lined ? 0.95f : 0.35f;
+        // (not depth-tested: in this pass the depth buffer hid it entirely - seen through, like the chevrons)
+        p_glDepthMask(GL_FALSE);
+        for (int half = 0; half < 2; half++) {
+            // missed: the two halves drift apart and fall
+            float off = half ? spread : -spread, drop = -spread * 0.6f;
+            float p0[3] = {half ? c[0] : ea[0], half ? c[1] : ea[1], half ? c[2] : ea[2]};
+            float p1[3] = {half ? eb[0] : c[0], half ? eb[1] : c[1], half ? eb[2] : c[2]};
+            for (int k = 0; k < 2; k++) {
+                float* p = k ? p1 : p0;
+                p[0] += ux * off;
+                p[1] += uy * off + drop;
+            }
+            for (int pass = 0; pass < 2; pass++) {  // a soft glow, then the core
+                float k = pass ? 1.0f : 2.2f, a = (pass ? fill : 0.15f) * alpha;
+                p_glColor4f(rgb[0], rgb[1], rgb[2], a);
+                p_glBegin(GL_TRIANGLES);
+                p_glVertex3f(p0[0] - nx * k, p0[1] - ny * k, p0[2]);
+                p_glVertex3f(p1[0] - nx * k, p1[1] - ny * k, p1[2]);
+                p_glVertex3f(p1[0] + nx * k, p1[1] + ny * k, p1[2]);
+                p_glVertex3f(p0[0] - nx * k, p0[1] - ny * k, p0[2]);
+                p_glVertex3f(p1[0] + nx * k, p1[1] + ny * k, p1[2]);
+                p_glVertex3f(p0[0] + nx * k, p0[1] + ny * k, p0[2]);
+                p_glEnd();
+            }
+        }
+        if (b.result) continue;
+        // the timing ring: closes from 2.2x the bar's half length onto it at the impact
+        float frac = b.total > 0.05f ? max(0.0f, min(1.0f, b.secondsLeft / b.total)) : 0.0f;
+        float rr = sl * 0.5f * (1.0f + 1.2f * frac);
+        if (p_glLineWidth) p_glLineWidth(3.0f);
+        p_glColor4f(rgb[0], rgb[1], rgb[2], 0.6f);
+        p_glBegin(GL_LINE_LOOP);
+        for (int k = 0; k < 32; k++) {
+            float an = k * (6.2831853f / 32);
+            p_glVertex3f(c[0] + rr * cosf(an), c[1] + rr * sinf(an), c[2]);
+        }
+        p_glEnd();
+        // "that blade, coming here": a faint line from the attacker's weapon hand while the bar still follows it
+        if (b.haveHand && !b.frozen) {
+            float eh[3];
+            ToEye(worldView, b.hand, eh);
+            if (eh[2] < -0.1f) {
+                if (p_glLineWidth) p_glLineWidth(1.5f);
+                p_glBegin(GL_LINES);
+                p_glColor4f(rgb[0], rgb[1], rgb[2], 0.35f);
+                p_glVertex3f(eh[0], eh[1], eh[2]);
+                p_glColor4f(rgb[0], rgb[1], rgb[2], 0.05f);
+                p_glVertex3f(c[0], c[1], c[2]);
+                p_glEnd();
+            }
+        }
+    }
+}
+
 // Telegraph for every attack rolled against the player, from the roll to just after the impact (v2 Phase A):
 // - a downward chevron over the attacker's head: blue = block / parry it, red = dodge it (a bolt you can't deflect);
 //   white-gold and larger in the parry window (last 0.4 s);
@@ -720,7 +810,9 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     const KvrShared* hshm = VR_Shared();
     bool showHover = hshm && hshm->input.pointerMode == KVR_POINTER_WORLD && !hshm->cinematic && !hshm->menuOpen &&
                      !Dialogue_Showing() && HoverPos(hover);
-    if (n == 0 && !anyBolt && !showHover) return;
+    GuardBar bars[8];
+    int nb = Features().cues ? Guard_Bars(bars, 8) : 0;
+    if (n == 0 && nb == 0 && !anyBolt && !showHover) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -828,37 +920,6 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         float base[3] = {blockable ? 0.3f : 1.0f, blockable ? 0.65f : 0.2f, blockable ? 1.0f : 0.15f};
         float rgb[3] = {parry ? 1.0f : base[0], parry ? 0.92f : base[1], parry ? 0.6f : base[2]};
         float e[3];
-        // strike zone: chest height, 0.55 m in front of the player towards the attacker
-        if (havePlayer) {
-            float dx = ap[0] - pp[0], dy = ap[1] - pp[1];
-            float dl = sqrtf(dx * dx + dy * dy);
-            if (dl > 0.3f) {
-                float zp[3] = {pp[0] + dx / dl * 0.55f, pp[1] + dy / dl * 0.55f, pp[2] + 1.2f};
-                ToEye(worldView, zp, e);
-                if (e[2] < -0.2f) {
-                    float a = (0.25f + 0.75f * (1.0f - frac)) * fade, z = 0.06f + 0.04f * (1.0f - frac);
-                    if (p_glLineWidth) p_glLineWidth(3.0f);
-                    p_glColor4f(rgb[0], rgb[1], rgb[2], a);
-                    p_glBegin(GL_LINE_LOOP);
-                    p_glVertex3f(e[0], e[1] + z, e[2]);
-                    p_glVertex3f(e[0] + z, e[1], e[2]);
-                    p_glVertex3f(e[0], e[1] - z, e[2]);
-                    p_glVertex3f(e[0] - z, e[1], e[2]);
-                    p_glEnd();
-                    if (parry) {  // filled in the parry window
-                        p_glColor4f(rgb[0], rgb[1], rgb[2], 0.35f * fade);
-                        p_glBegin(GL_TRIANGLES);
-                        p_glVertex3f(e[0], e[1] + z, e[2]);
-                        p_glVertex3f(e[0] + z, e[1], e[2]);
-                        p_glVertex3f(e[0], e[1] - z, e[2]);
-                        p_glVertex3f(e[0], e[1] + z, e[2]);
-                        p_glVertex3f(e[0], e[1] - z, e[2]);
-                        p_glVertex3f(e[0] - z, e[1], e[2]);
-                        p_glEnd();
-                    }
-                }
-            }
-        }
         // the chevron: over the head when the attacker is a few metres off, at its chest when it is in your face (over
         // the head was above your view - 2026-10-27 playtest)
         float adx = havePlayer ? ap[0] - pp[0] : 9, ady = havePlayer ? ap[1] - pp[1] : 9;
@@ -888,7 +949,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             continue;
         }
         float s = parry ? 0.16f : 0.11f;
-        if (left > 0) {  // timing ring: closes from 3.5x onto the chevron at the impact
+        if (left > 0 && (w[i].ranged || !melee)) {  // timing ring: closes from 3.5x onto the chevron at the impact
+            // (a blow you can block: the ring closes on its block bar instead)
             float rr = s * (1.0f + 2.5f * frac);
             if (p_glLineWidth) p_glLineWidth(3.0f);
             p_glColor4f(rgb[0], rgb[1], rgb[2], 0.7f * fade);
@@ -913,6 +975,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
         }
     }
+    DrawGuardBars(worldView, bars, nb);
     if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
         float pulse = 0.42f;
         if (p_glLineWidth) p_glLineWidth(1.5f);

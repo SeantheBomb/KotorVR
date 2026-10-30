@@ -67,15 +67,21 @@ controller and pull the trigger.
   best rank you have).
 
 ### Defence
-When an enemy commits to an attack on you, three things show:
-- a **chevron** over it with a **ring** that closes onto it at the moment the blow lands;
-- a **diamond** in front of your chest on its side — where the blow arrives;
-- gold (closed ring, filled diamond) = now.
+When an enemy commits to an attack on you:
+- a **chevron** appears over it (an arrow at the edge of your view if it's behind you);
+- a glowing **block bar** appears about half a metre in front of your chest, on its side. The bar follows the enemy's
+  weapon hand while it winds up (a faint line joins them): a level bar above centre = an overhead blow, an upright bar
+  to one side = a side blow. For the last moment it holds still;
+- a **ring** closes onto the bar at the moment the blow lands; the bar turns **gold** just before.
 
 Blue means block or parry it; red means dodge it (a bolt you can't deflect).
-- **Block:** hold your blade on the diamond. It costs **guard**; block too many in a row and your guard breaks.
-- **Parry:** swing *into* the diamond as it turns gold. The attacker staggers, it costs nothing, and it gives back a
-  little Force.
+- **Block:** lay your blade along the bar. When it's lined up the bar lights up solid, with a soft tone and a tick in
+  your hand. Keep it there when the blow lands: **BLOCK**. It costs **guard**; block too many in a row and your guard
+  breaks.
+- **Parry:** swing your blade *onto* the bar just before the blow lands: **PARRY** (a white flash). The attacker
+  staggers, it costs nothing, and it gives back a little Force.
+- Not on the bar when it lands: the bar breaks apart in red — **MISSED**, or **TOO EARLY** if you left it before the
+  blow arrived.
 - **Bolts:** a lightsaber across a blaster bolt's path deflects it; swing into it and it goes back at the shooter.
   Without a saber, lean or duck out of its way as it arrives. Behind cover (the shooter can't see your head or chest),
   bolts hit the wall.
@@ -123,7 +129,8 @@ where it lands gets it. You need grenades in your inventory.
 | Section / key | Default | What it does |
 |---|---|---|
 | `[Combat] Mode` | `contact` | `rounds` = the classic version: KotOR's rounds decide hits; your swings only time them |
-| `[Combat] ParryZone` | `0.38` | how big the block / parry spot is (m) — bigger is easier |
+| `[Combat] BlockTolerance` | `0.12` | how close your blade must be to the block bar (m) — bigger is easier |
+| `[Combat] ParryWindow` | `0.3` | how long before the blow a swing onto the bar counts as a parry (s) |
 | `[Combat] AttackTokens` | `2` | how many enemies may attack you at once |
 | `[Comfort] SnapTurn` | `0` | `1` = turn in steps instead of smoothly |
 | `[Comfort] SnapAngle` | `30` | snap step (degrees) |
