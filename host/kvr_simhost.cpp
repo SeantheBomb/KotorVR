@@ -93,6 +93,7 @@ struct Head {
 static Head g_head, g_headFrom, g_headTo;
 static double g_headT0, g_headDur;
 
+static bool g_aimHand;  // aimhand: the pointer follows the right hand
 static void QuatYawPitch(double yawDeg, double pitchDeg, float q[4]) {
     double y = yawDeg * kPi / 360.0, p = pitchDeg * kPi / 360.0;  // half angles
     // q = yaw(about +Y) * pitch(about +X)
@@ -287,8 +288,13 @@ static void PublishInput() {
     in.pointerMode = g_ctl.pointer;
     in.panelU = g_ctl.u;
     in.panelV = g_ctl.v;
-    QuatYawPitch(g_head.yaw, g_head.pitch, in.aim.quat);  // world pointer follows the head if ever used
-    in.aim.pos[0] = (float)g_head.x; in.aim.pos[1] = (float)g_head.y - 0.3f; in.aim.pos[2] = (float)g_head.z - 0.2f;
+    if (g_aimHand) {  // "aimhand": the pointer is the right hand's ray (as on a real controller)
+        QuatYawPitch(g_hand[1].yaw, g_hand[1].pitch, in.aim.quat);
+        in.aim.pos[0] = (float)g_hand[1].x; in.aim.pos[1] = (float)g_hand[1].y; in.aim.pos[2] = (float)g_hand[1].z;
+    } else {
+        QuatYawPitch(g_head.yaw, g_head.pitch, in.aim.quat);  // world pointer follows the head if ever used
+        in.aim.pos[0] = (float)g_head.x; in.aim.pos[1] = (float)g_head.y - 0.3f; in.aim.pos[2] = (float)g_head.z - 0.2f;
+    }
     if (g_swingDur > 0) {
         double t = std::min(1.0, (now - g_swingT0) / g_swingDur);
         g_hand[1].x = g_swingFrom.x + (g_swingTo.x - g_swingFrom.x) * t;
@@ -737,6 +743,8 @@ int main(int argc, char** argv) {
             RunFor(hold);
             g_ctl.trigR = 0;
             RunFor(0.2);
+        } else if (cmd == "aimhand") {
+            g_aimHand = true;
         } else if (cmd == "hand") {
             HandPose& hp = g_hand[(!args.empty() && (args[0] == "L" || args[0] == "l")) ? 0 : 1];
             Arg(args, "x", hp.x); Arg(args, "y", hp.y); Arg(args, "z", hp.z);

@@ -23,6 +23,7 @@
 #include "cues.h"
 #include "anim.h"
 #include "hover.h"
+#include "pick.h"
 #include "melee.h"
 #include "force.h"
 #include "tutorial.h"
@@ -188,6 +189,7 @@ void Input_Update(HWND wnd) {
         Tutorial_Update();
         Hud_Update();
         Anim_Update();
+        Pick_Update();
         Hover_Update(in);
         Melee_Update();
         double now = Gestures_Now();
@@ -385,17 +387,39 @@ void Input_Update(HWND wnd) {
         static bool deferR;          // grip still held when the pick settled: R on a short release, ring on a hold
         bool gripNow = world && in.gripR > 0.7f && !ringWasOpen;
         double tick = (double)GetTickCount();
-        // grip on what the hover ring marks: target it directly (no aim pick, no hidden frames); the aim pick stays
-        // the fallback when the hand points at nothing the game hovers
-        DWORD gripHover;
-        if (gripNow && !gripWas && !rangedPickWanted && g_pickStartMs < 0 && Weapon_HoverClientId(&gripHover)) {
+        // Grip acts only on what the hover ring marks - the object the hand's ray points at (pick.cpp) - as it was just
+        // before the squeeze (squeezing moves the hand: the hover of ~120 ms ago, if there was one). Nothing marked:
+        // nothing happens but a soft tick (2026-10-30 playtest: no more guessing - a blind pick or R on the game's own
+        // target sent you across the room to a door / Trask).
+        static DWORD hoverHist[16];
+        static double hoverHistT[16];
+        static int hoverHistI;
+        DWORD hoverNow = 0;
+        if (!Weapon_HoverClientId(&hoverNow)) hoverNow = 0;
+        if (!gripNow) {
+            hoverHist[hoverHistI] = hoverNow;
+            hoverHistT[hoverHistI] = tick;
+            hoverHistI = (hoverHistI + 1) & 15;
+        }
+        DWORD gripHover = 0;
+        if (gripNow && !gripWas) {
+            for (int k = 1; k <= 16 && !gripHover; k++) {  // newest first: the latest hover at least 120 ms old
+                int i = (hoverHistI - k) & 15;
+                if (hoverHistT[i] > 0 && tick - hoverHistT[i] >= 120 && tick - hoverHistT[i] < 400) gripHover = hoverHist[i];
+            }
+            if (!gripHover) gripHover = hoverNow;
+        }
+        if (gripNow && !gripWas && !rangedPickWanted && g_pickStartMs < 0 && gripHover) {
             Weapon_SetTarget(gripHover);
             Hover_Interacted();
             gripPick = true;
             gripDownMs = tick;
             deferR = true;  // short squeeze -> R, held -> the action ring
             Log("input: world grip -> target %08lX (hover)", gripHover);
-        } else if (((gripNow && !gripWas) || rangedPickWanted) && g_pickStartMs < 0) {
+        } else if (gripNow && !gripWas && !rangedPickWanted && g_pickStartMs < 0) {
+            VR_Haptic(1, 0.25f, 0.03f, 90);
+            Log("input: world grip -> nothing pointed at");
+        } else if (rangedPickWanted && g_pickStartMs < 0) {
             gripPick = !rangedPickWanted;
             gripDownMs = tick;
             deferR = false;
@@ -440,7 +464,11 @@ void Input_Update(HWND wnd) {
             ty = in.panelV * h;
             haveTarget = w > 0;
         } else if (in.pointerMode == KVR_POINTER_WORLD) {
-            haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
+            // the cursor on the point where the hand's ray is inside the object it points at; else 10 m down the ray
+            DWORD pid;
+            float hp[3], tp[3];
+            haveTarget = Pick_Hit(&pid, hp) && EngineCam_WorldToTracking(hp, tp) && VR_TrackingPointToClient(tp, &tx, &ty);
+            if (!haveTarget) haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
         }
         if (g_pickStartMs >= 0) {
             double t = tick - g_pickStartMs;

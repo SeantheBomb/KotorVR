@@ -10,6 +10,7 @@
 // Everything is read under SEH guards and refreshed four times a second.
 
 #include "weapons.h"
+#include "pick.h"
 
 #include <GL/gl.h>
 #include <cmath>
@@ -460,6 +461,8 @@ static double g_prevGunT = -1;
 static bool g_foregrip;
 static bool g_nextCharged;
 static bool g_palmValid;
+static float g_aimEye[16];  // the right controller's aim pose in eye space (pointing ray: its forward, -Z)
+static bool g_aimValid;
 static double g_lastFlash = -10;
 
 static double NowS() { return GetTickCount() / 1000.0; }
@@ -538,6 +541,7 @@ bool Weapon_HoverClientId(DWORD* id) {
         if (h == 0x7F000000 || h == 0) return false;
         BYTE* player = (BYTE*)Weapon_PlayerCreature();
         if (player && *(DWORD*)(player + 4) == (h & 0x7FFFFFFF)) return false;
+        if (!Pick_Touches(h)) return false;  // the cursor rests on something the hand doesn't point at
         *id = h;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -586,6 +590,7 @@ static bool HoverPos(float out[3]) {
         id &= 0x7FFFFFFF;  // client ids are the server's with the top bit set (0x8000000A -> 0x0A)
         BYTE* player = (BYTE*)Weapon_PlayerCreature();
         if (player && *(DWORD*)(player + 4) == id) return false;
+        if (!Pick_Touches(id)) return false;
         BYTE* o = (BYTE*)GetObj(server, id);
         if (!o) return false;
         memcpy(out, o + 0x90, 12);
@@ -687,6 +692,15 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             wt[r] = worldView[r * 4 + 0] * dt[0] + worldView[r * 4 + 1] * dt[1] + worldView[r * 4 + 2] * dt[2];
         }
         Melee_SetBlade(h, wb, wt);
+    }
+    if (g_aimValid) {  // the right hand's pointing ray, in world coordinates (pick.cpp)
+        float e[3] = {g_aimEye[12], g_aimEye[13], g_aimEye[14]}, de[3] = {-g_aimEye[8], -g_aimEye[9], -g_aimEye[10]};
+        float d[3] = {e[0] - worldView[12], e[1] - worldView[13], e[2] - worldView[14]}, o[3], dw[3];
+        for (int r = 0; r < 3; r++) {
+            o[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
+            dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
+        }
+        Pick_SetAim(o, dw);
     }
     if (g_palmValid) {  // the left hand's aim for Force powers, in world coordinates
         float e[3] = {g_palmEye[12], g_palmEye[13], g_palmEye[14]}, de[3] = {-g_palmEye[8], -g_palmEye[9], -g_palmEye[10]};
@@ -1182,6 +1196,13 @@ void Weapons_Draw(const float invEye[16]) {
         if (g_foregrip) k *= 0.45f;
         if (now - g_steadySince > 1.0) k *= 0.3f;
         g_spreadDeg = 2.5f * k;
+    }
+    g_aimValid = false;
+    if ((in.gripValid & 2) && fabsf(in.aim.quat[3]) + fabsf(in.aim.quat[0]) + fabsf(in.aim.quat[1]) + fabsf(in.aim.quat[2]) > 0.5f) {
+        float g[16];
+        PoseMatrix(in.aim.pos, in.aim.quat, g);
+        MulMat(invEye, g, g_aimEye);
+        g_aimValid = true;
     }
     g_palmValid = false;
     if (in.gripValid & 1) {

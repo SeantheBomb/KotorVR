@@ -83,3 +83,4 @@ void VR_ClientSize(int* w, int* h);
 // Project a controller aim ray (relative to the recenter origin == game camera frame) into the game's own
 // camera to get the client-space cursor position the game would pick along that ray.
 bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], float* x, float* y);
+bool VR_TrackingPointToClient(const float p[3], float* x, float* y);

@@ -748,6 +748,22 @@ bool VR_WorldPointerToClient(const float aimPos[3], const float aimQuat[4], floa
     return true;
 }
 
+// A point in tracking space (e.g. where the hand's ray enters the object it points at, pick.cpp) to the game window,
+// through the same camera frame as VR_WorldPointerToClient - a real point, so no parallax between hand and eyes.
+bool VR_TrackingPointToClient(const float p[3], float* x, float* y) {
+    if (g_texW <= 0) return false;
+    float off = EngineCam_ViewYawOffset(), co = cosf(off), so = sinf(off);
+    float a[3] = {co * p[0] + so * p[2], p[1], -so * p[0] + co * p[2]};
+    if (a[2] > -0.05f) return false;
+    double t = tan(g_gameFovy * 3.14159265358979 / 360.0);
+    double nx = (a[0] / -a[2]) / (t * g_gameAspect);
+    double ny = (a[1] / -a[2]) / t;
+    if (nx < -1 || nx > 1 || ny < -1 || ny > 1) return false;
+    *x = (float)((nx * 0.5 + 0.5) * g_texW);
+    *y = (float)((0.5 - ny * 0.5) * g_texH);
+    return true;
+}
+
 static bool g_showOwnBody;  // dead: the body is the subject of the death camera
 void VR_SetShowOwnBody(bool show) { g_showOwnBody = show; }
 bool VR_ShowingOwnBody() { return g_showOwnBody; }
