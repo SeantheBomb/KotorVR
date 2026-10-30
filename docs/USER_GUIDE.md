@@ -54,9 +54,8 @@ controller and pull the trigger.
   reply and pull the right trigger.
 - Every line is captioned, including cutscene and alien lines.
 - **B** skips the line being spoken.
-- NPCs turn to look at you while they talk.
 - Cutscenes stay in your character's eyes when you can see what the scene shows; scenes elsewhere (another room, a
-  comm call) and shots of you lying down cut to the game's camera. Movies play on a cinema screen.
+  comm call), shots of you lying down and terminal camera feeds cut to the game's camera. Movies play on a cinema screen.
 
 ## 3. Combat
 
@@ -132,7 +131,8 @@ where it lands gets it. You need grenades in your inventory.
 | `[Comfort] CutsceneFirstPerson` | `0` | `1` = never cut away from your character's eyes in cutscenes |
 | `[Feel] HitPause` | `1` | the brief freeze on a struck enemy |
 | `[Feel] HitPauseMs` | `60` | its length |
-| `[Feel] LookAtYou` | `1` | NPCs turn their heads to you in conversations |
+| `[Feel] LookAtYou` | `0` | `1` = NPCs turn their heads to you in conversations (experimental: bystanders turn too) |
+| `[Aim] Pitch` | `-20` | how far guns tip down from the controller's pointing ray (degrees); raise it if shots go low, lower it if they go high |
 | `[Features] FlatHud` | `0` | `1` = the flat HUD in front of you as in the original (Y toggles it) |
 | `[Features] Hands` / `WeaponProxies` / `Cues` | `1` | your hands / weapons in hand / combat feedback (haptics, telegraphs) |
 | `[Compat] DiscordOverlay` | `0` | Discord's in-game overlay is kept out (it froze the game); Discord itself is unaffected |

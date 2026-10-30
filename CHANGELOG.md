@@ -4,8 +4,8 @@
 
 - Head-driven first person in KotOR's own engine, stereo rendering through OpenXR, recentering, smooth / snap turning.
 - Cutscenes in your character's eyes when you can see the scene; the game's shot for scenes elsewhere and shots of you
-  lying down; movies on a cinema screen.
-- Conversations in VR: replies floating in front of the speaker, every line captioned, B to skip, NPCs look at you.
+  lying down and terminal camera feeds; movies on a cinema screen.
+- Conversations in VR: replies floating in front of the speaker, every line captioned, B to skip.
 - Menus, inventory, stores, containers and terminals on a panel with a laser; the HUD and your Force powers on your
   wrist.
 - Your character's own hands holding your real equipped weapons; lightsabers ignite in combat.

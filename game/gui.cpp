@@ -21,6 +21,9 @@ const DWORD kHudFns[] = {0x68D3B0, 0x624900};  // main interface, its persistent
 // Dialog family vtables (constructors 0x6A8B40 cinematic, 0x6A8930 letterbox, 0x6A78C0 top bar, 0x6A85B0 base).
 const DWORD kDialogVtbls[] = {0x755800, 0x755A78, 0x755790, 0x7559E0};
 
+// A terminal's camera feed (constructor 0x6A95F0; seen 2026-10-30 with the cutscene camera at fov 55).
+const DWORD kComputerCameraVtbl = 0x755958;
+
 bool IsDialogPanel(void* p) {
     DWORD vt = *(DWORD*)p;
     for (DWORD v : kDialogVtbls)
@@ -49,6 +52,7 @@ bool Read(GuiState* s, DWORD* sig) {
             if (!data[i]) continue;
             *sig = *sig * 31 + *(DWORD*)data[i];
             if (IsDialogPanel(data[i])) s->dialogPanels++;
+            if (*(DWORD*)data[i] == kComputerCameraVtbl) s->cameraView = true;
             if (!IsWorldPanel(data[i])) {
                 s->menuPanels++;
                 s->menuVtbl = *(DWORD*)data[i];

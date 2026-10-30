@@ -49,7 +49,7 @@ struct Pause {
     DWORD id;
 };
 Pause g_pause[4];
-bool g_lookAtYou = true;  // [Feel] LookAtYou
+bool g_lookAtYou = false;  // [Feel] LookAtYou=1 (off by default: other NPCs in a scene turned too)
 
 typedef void(__fastcall* FireEventFn)(BYTE* gob, void* edx, const char* name, int arg);  // thiscall, ret 8
 FireEventFn g_fireOrig;
@@ -147,7 +147,7 @@ bool Anim_Install() {
     const char* ini = Features_IniPath();
     g_enabled = GetPrivateProfileIntA("Feel", "HitPause", 1, ini) != 0;
     g_defaultPause = GetPrivateProfileIntA("Feel", "HitPauseMs", 60, ini) / 1000.0f;
-    g_lookAtYou = GetPrivateProfileIntA("Feel", "LookAtYou", 1, ini) != 0;
+    g_lookAtYou = GetPrivateProfileIntA("Feel", "LookAtYou", 0, ini) != 0;
     if (!g_enabled) {
         Log("anim: hit-pause off ([Feel] HitPause=0)");
         return false;
@@ -192,7 +192,7 @@ void QRot(const float* q, const float* v, float* o) {  // q v q*
 // 70 deg of yaw and 25 deg of pitch, all the way, not when you stand behind them.
 // The node is not keyframed in most animations, so the engine does not reset it each frame: the turn is always
 // computed from the engine's own value (remembered until the engine writes a new one), never stacked on our last one.
-// kvr.ini [Feel] LookAtYou=0 off.
+// Off by default (2026-10-30 playtest: NPCs acting in a scene turned to you too); kvr.ini [Feel] LookAtYou=1 on.
 struct HeadState {
     void* head;
     float base[4];     // the engine's local rotation

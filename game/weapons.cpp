@@ -1014,6 +1014,9 @@ struct PoseAdj {
     float m[16];
 };
 static PoseAdj g_poseAdj[WC_COUNT];
+// Guns tip down from the controller's aim ray by [Aim] Pitch degrees (2026-10-30 playtest: shots went 15-30 deg above
+// where the hand pointed); the drawn gun and its bolts turn together. Negative = down.
+static float g_aimPitch = -20.0f;
 
 static void RefreshPoseAdj() {
     static DWORD lastCheck;
@@ -1025,6 +1028,12 @@ static void RefreshPoseAdj() {
     if (!ini[0] || !GetFileAttributesExA(ini, GetFileExInfoStandard, &fa)) return;
     if (CompareFileTime(&fa.ftLastWriteTime, &lastWrite) == 0) return;
     lastWrite = fa.ftLastWriteTime;
+    {
+        char val[32];
+        GetPrivateProfileStringA("Aim", "Pitch", "-20", val, sizeof val, ini);
+        float p = -20.0f;
+        if (sscanf_s(val, "%f", &p) == 1 && p >= -60.0f && p <= 60.0f) g_aimPitch = p;
+    }
     for (int c = 0; c < WC_COUNT; c++) {
         char key[32], val[64];
         strcpy_s(key, kProfiles[c].name);
@@ -1190,7 +1199,10 @@ void Weapons_Draw(const float invEye[16]) {
         } else if (!kProfiles[c].melee) {
             float g[16];
             PoseMatrix(in.grip[h].pos, in.grip[h].quat, g);
-            MulMat(g, gripToAim, hand);
+            float a = g_aimPitch * 3.14159265f / 180.0f, cp = cosf(a), sp = sinf(a), tilted[16];
+            float Rx[16] = {1, 0, 0, 0, 0, cp, sp, 0, 0, -sp, cp, 0, 0, 0, 0, 1};
+            MulMat(gripToAim, Rx, tilted);
+            MulMat(g, tilted, hand);
         } else {
             // Power Attack: the blade's rotation drags behind the hand for a moment (weight); the hilt stays in the hand
             static float lagQ[2][4];

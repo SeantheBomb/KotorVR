@@ -13,6 +13,7 @@
 // we only compare the view matrix the engine hands to GL against the one implied by the quaternion.
 
 #include "enginecam.h"
+#include "gui.h"
 
 #include <windows.h>
 #include <cmath>
@@ -275,6 +276,24 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                     g_shotMode = 1;
                     Log("cutscene: reverse shot (%.0f deg from your facing%s, head %.2f m up) -> stay first person",
                         rel * 57.29578f, lookAtMe > 0.906f && dm < 8.0f ? ", looking at you" : "", headUp);
+                }
+            }
+        }
+        // Shots that are never first person, checked every frame (a shot can start with you standing and lay you
+        // down mid-shot - the opening in the bunk stayed in your eyes, inside the bed - 2026-10-30 playtest):
+        // you lying / sitting, and a terminal's camera feed (a filtered view of somewhere else).
+        if (!Features().cutsceneFirstPerson && g_shotMode != 2) {
+            static DWORD lastCheck;
+            DWORD t = GetTickCount();
+            if (Gui_State().cameraView) {
+                g_shotMode = 2;
+                Log("cutscene: a terminal's camera feed -> the game's shot");
+            } else if (t - lastCheck > 100) {
+                lastCheck = t;
+                float headUp = Anim_PlayerHeadHeight();
+                if (headUp > -50 && headUp < 1.15f) {
+                    g_shotMode = 2;
+                    Log("cutscene: you are lying / sitting now (head %.2f m up) -> the game's shot", headUp);
                 }
             }
         }

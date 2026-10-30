@@ -6,6 +6,7 @@ struct GuiState {
     int menuPanels;          // shown panels that are game screens (not the HUD or a conversation / cutscene panel)
     unsigned long menuVtbl;  // vtable of one of them (identifies the screen), 0 if none
     int dialogPanels;        // shown conversation / cutscene panels (a conversation or cutscene is running)
+    bool cameraView;         // a terminal's camera feed is shown (CSWGuiDialogComputerCamera)
 };
 
 // Reads the GUI manager (logs changes). Game thread.
