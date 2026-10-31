@@ -139,7 +139,7 @@ where it lands gets it. You need grenades in your inventory.
 | `[Feel] HitPause` | `1` | the brief freeze on a struck enemy |
 | `[Feel] HitPauseMs` | `60` | its length |
 | `[Feel] LookAtYou` | `0` | `1` = NPCs turn their heads to you in conversations (experimental: bystanders turn too) |
-| `[Aim] Pitch` | `-20` | how far guns tip down from the controller's pointing ray (degrees); raise it if shots go low, lower it if they go high |
+| `[Aim] Pitch` | `-30` | how far guns tip down from the controller's pointing ray (degrees); raise it if shots go low, lower it if they go high |
 | `[Features] FlatHud` | `0` | `1` = the flat HUD in front of you as in the original (Y toggles it) |
 | `[Features] Hands` / `WeaponProxies` / `Cues` | `1` | your hands / weapons in hand / combat feedback (haptics, telegraphs) |
 | `[Compat] DiscordOverlay` | `0` | Discord's in-game overlay is kept out (it froze the game); Discord itself is unaffected |

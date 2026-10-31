@@ -34,3 +34,10 @@ shot a
 grip
 wait 3
 shot b
+key escape
+wait 1
+hand yaw=30 pitch=-10
+wait 1.5
+grip
+wait 4
+shot c

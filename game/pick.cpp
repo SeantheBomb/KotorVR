@@ -11,6 +11,7 @@
 
 #include <cmath>
 
+#include "anim.h"
 #include "melee.h"
 #include "weapons.h"
 
@@ -51,12 +52,24 @@ float RayCapsule(const float* o, const float* d, float t0, float t1, const float
     return sqrtf(Dot(p, p));
 }
 
-bool Dead(void* creature) {
-    typedef int(__fastcall * GetDeadFn)(void* creature);
-    __try {
-        return ((GetDeadFn)0x4EF820)(creature) != 0;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-    return false;
+// Closest approach of the ray segment o + d*t (t in [t0, t1]) and the segment a..b: distance, and t on the ray.
+float RaySeg(const float* o, const float* d, float t0, float t1, const float* a, const float* b, float* tOut) {
+    float p0[3] = {o[0] + d[0] * t0, o[1] + d[1] * t0, o[2] + d[2] * t0};
+    float u[3] = {d[0] * (t1 - t0), d[1] * (t1 - t0), d[2] * (t1 - t0)}, v[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
+    float w[3] = {p0[0] - a[0], p0[1] - a[1], p0[2] - a[2]};
+    float A = Dot(u, u), B = Dot(u, v), C = Dot(v, v), D = Dot(u, w), E = Dot(v, w), den = A * C - B * B;
+    float sc = den > 1e-8f ? (B * E - C * D) / den : 0, tc;
+    sc = sc < 0 ? 0 : sc > 1 ? 1 : sc;
+    tc = C > 1e-8f ? (B * sc + E) / C : 0;
+    if (tc < 0 || tc > 1) {
+        tc = tc < 0 ? 0 : 1;
+        sc = A > 1e-8f ? (B * tc - D) / A : 0;
+        sc = sc < 0 ? 0 : sc > 1 ? 1 : sc;
+    }
+    float q[3];
+    for (int k = 0; k < 3; k++) q[k] = w[k] + u[k] * sc - v[k] * tc;
+    *tOut = t0 + (t1 - t0) * sc;
+    return sqrtf(Dot(q, q));
 }
 
 }  // namespace
@@ -115,14 +128,29 @@ void Pick_Update() {
                 case T_DOOR: r = 1.1f; h = 2.6f; break;
                 default: continue;
             }
-            // a dead creature stays pointable, as low as it lies (GetDead also says yes for some props: the
-            // Dantooine training droid); the game's hover decides if it can be used
-            if (type == T_CREATURE && Dead(o)) h = 0.6f;
             const float* pos = (const float*)(o + 0x90);
             float dx = pos[0] - g_o[0], dy = pos[1] - g_o[1];
             if (dx * dx + dy * dy > 40.0f * 40.0f) continue;
             float base[3] = {pos[0], pos[1], pos[2] + lift}, t;
-            float dist = RayCapsule(g_o, g_d, 0.15f, 40.0f, base, h, &t);
+            float dist = 1e9f;
+            if (type == T_CREATURE) {
+                // creatures: their skeleton as drawn (lying corpses, droids, kinrath legs), else an upright capsule
+                // (GetDead also says yes for some live props - the Dantooine training droid - so it decides nothing)
+                AnimBone bones[96];
+                void* model = Anim_ModelAt(pos);
+                int nb = model ? Anim_BoneSegments(model, bones, 96) : 0;
+                if (nb > 3) {
+                    for (int k = 0; k < nb; k++) {
+                        float bt, bd = RaySeg(g_o, g_d, 0.15f, 40.0f, bones[k].a, bones[k].b, &bt) - bones[k].radius;
+                        if (bd < dist) {
+                            dist = bd;
+                            t = bt;
+                        }
+                    }
+                    r = 0.08f;  // margin around the bones
+                }
+            }
+            if (dist > 1e8f) dist = RayCapsule(g_o, g_d, 0.15f, 40.0f, base, h, &t);
             // a little cone so small things and far ones are still easy to point at
             if (dist > r + 0.035f * t) continue;
             if (nc < 16) {

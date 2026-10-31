@@ -539,10 +539,17 @@ bool Weapon_HoverClientId(DWORD* id) {
         BYTE* in = ClientInternal();
         if (!in) return false;
         DWORD h = *(DWORD*)(in + 0x4A4);
-        if (h == 0x7F000000 || h == 0) return false;
         BYTE* player = (BYTE*)Weapon_PlayerCreature();
-        if (player && *(DWORD*)(player + 4) == (h & 0x7FFFFFFF)) return false;
-        if (!Pick_Touches(h)) return false;  // the cursor rests on something the hand doesn't point at
+        if (player && *(DWORD*)(player + 4) == (h & 0x7FFFFFFF)) h = 0x7F000000;
+        if (h == 0x7F000000 || h == 0 || !Pick_Touches(h)) {
+            // The game's cursor hover isn't on what the hand points at (2026-10-31 playtest: near crates / footlockers
+            // never resolved, only Trask and the door did - the cursor projection misses close objects): the ray
+            // pick itself is the target.
+            DWORD pid;
+            float hp[3];
+            if (!Pick_Hit(&pid, hp)) return false;
+            h = pid | 0x80000000;
+        }
         *id = h;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -586,12 +593,9 @@ static bool HoverPos(float out[3]) {
         BYTE* internal = client ? *(BYTE**)(client + 4) : nullptr;
         BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
         if (!internal || !server) return false;
-        DWORD id = *(DWORD*)(internal + 0x4A4);
-        if (id == 0x7F000000 || id == 0) return false;
+        DWORD id;
+        if (!Weapon_HoverClientId(&id)) return false;  // the game's hover, or the ray pick (see there)
         id &= 0x7FFFFFFF;  // client ids are the server's with the top bit set (0x8000000A -> 0x0A)
-        BYTE* player = (BYTE*)Weapon_PlayerCreature();
-        if (player && *(DWORD*)(player + 4) == id) return false;
-        if (!Pick_Touches(id)) return false;
         BYTE* o = (BYTE*)GetObj(server, id);
         if (!o) return false;
         memcpy(out, o + 0x90, 12);
@@ -1092,8 +1096,8 @@ struct PoseAdj {
 };
 static PoseAdj g_poseAdj[WC_COUNT];
 // Guns tip down from the controller's aim ray by [Aim] Pitch degrees (2026-10-30 playtest: shots went 15-30 deg above
-// where the hand pointed); the drawn gun and its bolts turn together. Negative = down.
-static float g_aimPitch = -20.0f;
+// where the hand pointed; -20 still high on 2026-10-31); the drawn gun and its bolts turn together. Negative = down.
+static float g_aimPitch = -30.0f;
 
 static void RefreshPoseAdj() {
     static DWORD lastCheck;
@@ -1107,9 +1111,10 @@ static void RefreshPoseAdj() {
     lastWrite = fa.ftLastWriteTime;
     {
         char val[32];
-        GetPrivateProfileStringA("Aim", "Pitch", "-20", val, sizeof val, ini);
-        float p = -20.0f;
+        GetPrivateProfileStringA("Aim", "Pitch", "-30", val, sizeof val, ini);
+        float p = -30.0f;
         if (sscanf_s(val, "%f", &p) == 1 && p >= -60.0f && p <= 60.0f) g_aimPitch = p;
+        Log("weapons: guns tip %.0f deg from the pointing ray ([Aim] Pitch)", g_aimPitch);
     }
     for (int c = 0; c < WC_COUNT; c++) {
         char key[32], val[64];
