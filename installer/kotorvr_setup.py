@@ -181,10 +181,11 @@ class Steps:
             shutil.copytree(os.path.join(PAYLOAD, "docs"), docs)
 
         self.log("Building the VR assets from your own game files (a minute or two) ...")
-        import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override  # noqa: E401
+        import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override, door_export  # noqa: E401,E501
         self.run_exporter("weapons", lambda: weapon_export.main(game, kvr))
         self.run_exporter("hands", lambda: hand_export.main(game, kvr))
         self.run_exporter("action icons", lambda: icon_export.main(game, kvr))
+        self.run_exporter("door shapes (pointing at doors)", lambda: door_export.main(game, kvr))
         argv = sys.argv
         try:
             sys.argv = ["sound_export", game]

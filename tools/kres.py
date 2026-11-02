@@ -8,7 +8,7 @@ import os
 import struct
 import sys
 
-TYPES = {"2da": 2017, "gff": 2037, "dlg": 2029, "utc": 2027, "mdl": 2002, "mdx": 3008, "ncs": 2010, "nss": 2009}
+TYPES = {"2da": 2017, "gff": 2037, "dlg": 2029, "utc": 2027, "mdl": 2002, "mdx": 3008, "ncs": 2010, "nss": 2009, "utd": 2042}
 
 
 def read_key(game):

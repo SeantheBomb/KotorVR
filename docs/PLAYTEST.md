@@ -8,6 +8,7 @@ One-time (already done on this PC), from your own game files:
 - `python tools\weapon_export.py "<game dir>" "<game dir>\kvr"`: weapon models (else simple stand-in shapes)
 - `python tools\hand_export.py "<game dir>" "<game dir>\kvr"`: your character's hands, per body model and outfit
 - `python tools\sound_export.py "<game dir>"`: the combat cue and lightsaber sounds
+- `python tools\door_export.py "<game dir>" "<game dir>\kvr"`: door shapes, so pointing anywhere on a door picks it
 
 ## Controls
 

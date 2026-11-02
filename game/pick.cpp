@@ -7,9 +7,17 @@
 // objects by id 0x4AE750, type at +8, position +0x90), each as a vertical capsule sized by its type; the nearest one in
 // line of sight wins, and the cursor goes on the point of the ray inside it - the game's own hover then resolves the
 // object you see there (usable or not stays the game's call). input.cpp only acts on a hover the ray touches.
+//
+// Doors (2026-11-02 playtest: several Endar Spire doors had to be opened with the mouse) are wide flat panels - the
+// Endar Spire's are 6.2 m across with the lock panel up to 4 m off centre - so a capsule at the door's origin missed
+// most of them, and line of sight to the origin (inside the door frame) failed. Doors are boxes from the module data
+// instead (tools/door_export.py: placement, bearing and model extent, matched by position), and sight is checked to a
+// point just in front of where the ray meets the door.
 #include "pick.h"
 
 #include <cmath>
+#include <cstdio>
+#include <vector>
 
 #include "anim.h"
 #include "melee.h"
@@ -30,6 +38,44 @@ int g_touchN;
 enum { T_CREATURE = 5, T_ITEM = 6, T_PLACEABLE = 9, T_DOOR = 10 };
 
 float Dot(const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+struct DoorBox {
+    float pos[3], c, s;  // placement, cos / sin of the bearing
+    float lo[3], hi[3];  // model-local extent
+};
+std::vector<DoorBox> g_doors;
+
+const DoorBox* FindDoor(const float* pos) {
+    for (const DoorBox& d : g_doors) {
+        float dx = d.pos[0] - pos[0], dy = d.pos[1] - pos[1], dz = d.pos[2] - pos[2];
+        if (dx * dx + dy * dy < 0.05f * 0.05f && fabsf(dz) < 0.3f) return &d;
+    }
+    return nullptr;
+}
+
+// The ray against a door's box (grown by `grow` sideways and in depth): t where it enters, or false.
+bool RayDoor(const DoorBox& d, const float* o, const float* dir, float grow, float* tOut) {
+    // into the door's frame: rotate by -bearing about z
+    float px = o[0] - d.pos[0], py = o[1] - d.pos[1], pz = o[2] - d.pos[2];
+    float lo_[3] = {px * d.c + py * d.s, -px * d.s + py * d.c, pz};
+    float ld[3] = {dir[0] * d.c + dir[1] * d.s, -dir[0] * d.s + dir[1] * d.c, dir[2]};
+    float lo[3] = {d.lo[0] - grow, d.lo[1] - grow - 0.15f, d.lo[2]};
+    float hi[3] = {d.hi[0] + grow, d.hi[1] + grow + 0.15f, d.hi[2]};
+    float t0 = 0.15f, t1 = 40.0f;
+    for (int k = 0; k < 3; k++) {
+        if (fabsf(ld[k]) < 1e-6f) {
+            if (lo_[k] < lo[k] || lo_[k] > hi[k]) return false;
+            continue;
+        }
+        float a = (lo[k] - lo_[k]) / ld[k], b = (hi[k] - lo_[k]) / ld[k];
+        if (a > b) { float x = a; a = b; b = x; }
+        if (a > t0) t0 = a;
+        if (b < t1) t1 = b;
+        if (t0 > t1) return false;
+    }
+    *tOut = t0;
+    return true;
+}
 
 // Closest approach of the ray segment o + d*t (t in [t0, t1], |d| = 1) and the vertical segment base..base+h:
 // returns the distance, and t of the closest point on the ray.
@@ -74,6 +120,34 @@ float RaySeg(const float* o, const float* d, float t0, float t1, const float* a,
 
 }  // namespace
 
+void Pick_Init(const char* gameDir) {
+    char path[MAX_PATH];
+    sprintf_s(path, "%s\\kvr\\models\\doors.txt", gameDir);
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "r") || !f) {
+        Log("pick: %s missing (tools/door_export.py): doors picked near their centre only", path);
+        return;
+    }
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        DoorBox d;
+        float b;
+        if (line[0] == '#' || sscanf_s(line, "%f %f %f %f %f %f %f %f %f %f", &d.pos[0], &d.pos[1], &d.pos[2], &b,
+                                       &d.lo[0], &d.hi[0], &d.lo[1], &d.hi[1], &d.lo[2], &d.hi[2]) != 10)
+            continue;
+        d.c = cosf(b);
+        d.s = sinf(b);
+        // a few door models carry far-flung trim (lifts, blast shutters): keep the pickable box door-sized
+        d.lo[0] = d.lo[0] < -7.0f ? -7.0f : d.lo[0];
+        d.hi[0] = d.hi[0] > 7.0f ? 7.0f : d.hi[0];
+        d.lo[2] = d.lo[2] < -0.3f ? -0.3f : d.lo[2];
+        d.hi[2] = d.hi[2] > 4.5f ? 4.5f : d.hi[2];
+        g_doors.push_back(d);
+    }
+    fclose(f);
+    Log("pick: %d door boxes", (int)g_doors.size());
+}
+
 void Pick_SetAim(const float origin[3], const float dir[3]) {
     float l = sqrtf(Dot(dir, dir));
     if (l < 1e-4f) return;
@@ -94,6 +168,7 @@ void Pick_Update() {
     typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
     struct Cand {
         DWORD id;
+        int type;
         float t, center[3];
     } cand[16];
     int nc = 0;
@@ -113,6 +188,16 @@ void Pick_Update() {
         if (n != loggedN) {
             loggedN = n;
             Log("pick: %d objects in the area", n);
+            int doors = 0, boxed = 0;
+            for (int i = 0; i < n; i++) {
+                BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, ids[i]);
+                if (!o || *(int*)(o + 8) != T_DOOR) continue;
+                doors++;
+                const float* f = (const float*)(o + 0x90);
+                if (FindDoor(f)) boxed++;
+                else Log("pick: door %08lX at (%.2f %.2f %.2f) has no box - picked near its centre", ids[i], f[0], f[1], f[2]);
+            }
+            Log("pick: %d doors here, %d with boxes", doors, boxed);
         }
         for (int i = 0; i < n; i++) {
             DWORD id = ids[i];
@@ -150,15 +235,28 @@ void Pick_Update() {
                     r = 0.08f;  // margin around the bones
                 }
             }
+            const DoorBox* box = type == T_DOOR ? FindDoor(pos) : nullptr;
+            if (box) {
+                // the door's own box, a little bigger with distance (the same cone as below)
+                if (!RayDoor(*box, g_o, g_d, 0.05f + 0.035f * sqrtf(dx * dx + dy * dy), &t)) continue;
+                dist = 0;
+            }
             if (dist > 1e8f) dist = RayCapsule(g_o, g_d, 0.15f, 40.0f, base, h, &t);
             // a little cone so small things and far ones are still easy to point at
             if (dist > r + 0.035f * t) continue;
             if (nc < 16) {
                 cand[nc].id = id;
+                cand[nc].type = type;
                 cand[nc].t = t;
-                cand[nc].center[0] = pos[0];
-                cand[nc].center[1] = pos[1];
-                cand[nc].center[2] = pos[2] + h * 0.5f;
+                if (box) {
+                    // sight to just this side of where the ray meets the door (its origin sits inside the frame)
+                    float tb = t - 0.35f > 0.15f ? t - 0.35f : 0.15f;
+                    for (int k = 0; k < 3; k++) cand[nc].center[k] = g_o[k] + g_d[k] * tb;
+                } else {
+                    cand[nc].center[0] = pos[0];
+                    cand[nc].center[1] = pos[1];
+                    cand[nc].center[2] = pos[2] + h * 0.5f;
+                }
                 nc++;
             }
         }
@@ -179,7 +277,7 @@ void Pick_Update() {
             static DWORD lastBlocked;
             if (cand[i].id != lastBlocked) {
                 lastBlocked = cand[i].id;
-                Log("pick: %08lX on the ray at %.1f m but out of sight", cand[i].id, cand[i].t);
+                Log("pick: %08lX (type %d) on the ray at %.1f m but out of sight", cand[i].id, cand[i].type, cand[i].t);
             }
             continue;
         }

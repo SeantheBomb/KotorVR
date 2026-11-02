@@ -16,7 +16,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\tools", "$stage\docs" | Out-Null
 Copy-Item "$root\game\build\dinput8.dll" $stage
 Copy-Item "$root\host\build\kvr_host.exe", "$root\host\build\openxr_loader.dll", "$root\host\build\kvr_launch.exe" $stage
-foreach ($t in 'kres', 'mdl', 'weapon_export', 'hand_export', 'icon_export', 'sound_export', 'action_names', 'vis_override') {
+foreach ($t in 'kres', 'mdl', 'weapon_export', 'hand_export', 'icon_export', 'sound_export', 'action_names', 'vis_override', 'door_export') {
     Copy-Item "$root\tools\$t.py" "$stage\tools"
 }
 Copy-Item "$root\README.md", "$root\LICENSE" "$stage\docs"

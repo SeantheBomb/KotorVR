@@ -3,6 +3,8 @@
 
 #include <windows.h>
 
+// Loads kvr/models/doors.txt (tools/door_export.py): door boxes for the ray.
+void Pick_Init(const char* gameDir);
 // The right hand's aim ray in world coordinates (weapons.cpp, each rendered eye).
 void Pick_SetAim(const float origin[3], const float dir[3]);
 // Once per frame (game thread): test the ray against the area's doors, placeables, items and creatures.
