@@ -3,7 +3,7 @@ wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks
 click u=0.559 v=0.521      # Load Game
 wait 1
 wait_calm 2 60             # the load screen reads every save thumbnail first
-click u=0.410 v=0.431      # Game 1
+click u=0.411 v=0.382      # Auto Save (Endar Spire)
 wait 0.5
 wait_calm 1.5 60
 click u=0.499 v=0.671      # Load
@@ -14,6 +14,7 @@ pointer world
 pointer world
 aimhand
 head yaw=0 pitch=0 over=0.3
+wait 14                    # Carth's comm call on load (it turns you)
 hand yaw=-60 pitch=-5
 wait 0.8
 hand yaw=-40 pitch=-5
@@ -33,6 +34,10 @@ stick rx=1 for=0.9
 wait 0.5
 hand yaw=-60 pitch=-5
 wait 0.8
+shot aimdoor
+grip                       # the door beside you (end_door07)
+wait 4
+shot gripdoor
 hand yaw=-40 pitch=-5
 wait 0.8
 hand yaw=-20 pitch=-5

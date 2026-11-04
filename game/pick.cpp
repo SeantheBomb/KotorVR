@@ -30,12 +30,18 @@ namespace {
 float g_o[3], g_d[3];
 DWORD g_aimAt;  // GetTickCount of the last aim
 DWORD g_hitId;
+int g_hitType;
 float g_hitPoint[3];
 bool g_hit;
 DWORD g_touch[16];
 int g_touchN;
 
 enum { T_CREATURE = 5, T_ITEM = 6, T_PLACEABLE = 9, T_DOOR = 10 };
+
+// Object type: the low byte at +8. The bytes above it are flags, set on objects you can't use (2026-11-03: the Endar
+// Spire's static, plot-locked end_door07 reads 0x3100000A; usable doors read 10): those count as no type, so the
+// ray passes them by as the game's own cursor does.
+int ObjType(const BYTE* o) { return (o[9] | o[10] | o[11]) ? -1 : o[8]; }
 
 float Dot(const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
@@ -170,6 +176,7 @@ void Pick_Update() {
         DWORD id;
         int type;
         float t, center[3];
+        bool inside;  // the hand starts inside it: picked only when nothing else is on the ray
     } cand[16];
     int nc = 0;
     DWORD playerId = 0;
@@ -191,7 +198,7 @@ void Pick_Update() {
             int doors = 0, boxed = 0;
             for (int i = 0; i < n; i++) {
                 BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, ids[i]);
-                if (!o || *(int*)(o + 8) != T_DOOR) continue;
+                if (!o || ObjType(o) != T_DOOR) continue;
                 doors++;
                 const float* f = (const float*)(o + 0x90);
                 if (FindDoor(f)) boxed++;
@@ -204,7 +211,7 @@ void Pick_Update() {
             if (id == playerId || id == 0x7F000000) continue;
             BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, id);
             if (!o) continue;
-            int type = *(int*)(o + 8);
+            int type = ObjType(o);
             float r, h, lift = 0;
             switch (type) {
                 case T_CREATURE: r = 0.45f; h = 1.9f; break;
@@ -238,16 +245,25 @@ void Pick_Update() {
             const DoorBox* box = type == T_DOOR ? FindDoor(pos) : nullptr;
             if (box) {
                 // the door's own box, a little bigger with distance (the same cone as below)
-                if (!RayDoor(*box, g_o, g_d, 0.05f + 0.035f * sqrtf(dx * dx + dy * dy), &t)) continue;
+                bool in = RayDoor(*box, g_o, g_d, 0.05f + 0.035f * sqrtf(dx * dx + dy * dy), &t);
+                if (!in) continue;
                 dist = 0;
             }
-            if (dist > 1e8f) dist = RayCapsule(g_o, g_d, 0.15f, 40.0f, base, h, &t);
+            bool inside = false;
+            if (dist > 1e8f) {
+                dist = RayCapsule(g_o, g_d, 0.15f, 40.0f, base, h, &t);
+                // the hand already inside its capsule (standing against a console): it would win every pick at the
+                // ray's start (2026-11-03: a computer panel out-picked the door being pointed at, every frame)
+                float hx = g_o[0] - pos[0], hy = g_o[1] - pos[1];
+                inside = hx * hx + hy * hy < r * r && g_o[2] > base[2] - r && g_o[2] < base[2] + h + r;
+            }
             // a little cone so small things and far ones are still easy to point at
             if (dist > r + 0.035f * t) continue;
             if (nc < 16) {
                 cand[nc].id = id;
                 cand[nc].type = type;
                 cand[nc].t = t;
+                cand[nc].inside = inside;
                 if (box) {
                     // sight to just this side of where the ray meets the door (its origin sits inside the frame)
                     float tb = t - 0.35f > 0.15f ? t - 0.35f : 0.15f;
@@ -265,7 +281,9 @@ void Pick_Update() {
     }
     // nearest first; the first one in line of sight from the hand is the pick, everything touched counts as touched
     for (int i = 1; i < nc; i++)
-        for (int j = i; j > 0 && cand[j].t < cand[j - 1].t; j--) {
+        for (int j = i; j > 0 && cand[j].t + (cand[j].inside ? 100.0f : 0.0f) <
+                                     cand[j - 1].t + (cand[j - 1].inside ? 100.0f : 0.0f);
+             j--) {
             Cand c = cand[j];
             cand[j] = cand[j - 1];
             cand[j - 1] = c;
@@ -283,12 +301,13 @@ void Pick_Update() {
         }
         g_hit = true;
         g_hitId = cand[i].id;
+        g_hitType = cand[i].type;
         for (int k = 0; k < 3; k++) g_hitPoint[k] = g_o[k] + g_d[k] * cand[i].t;
     }
     static DWORD lastLogged;
     if (g_hit && g_hitId != lastLogged) {
         lastLogged = g_hitId;
-        Log("pick: ray on %08lX at %.1f m", g_hitId, sqrtf((g_hitPoint[0] - g_o[0]) * (g_hitPoint[0] - g_o[0]) +
+        Log("pick: ray on %08lX (%s) at %.1f m", g_hitId, g_hitType == T_DOOR ? "door" : g_hitType == T_CREATURE ? "creature" : g_hitType == T_PLACEABLE ? "placeable" : "item", sqrtf((g_hitPoint[0] - g_o[0]) * (g_hitPoint[0] - g_o[0]) +
                                                           (g_hitPoint[1] - g_o[1]) * (g_hitPoint[1] - g_o[1]) +
                                                           (g_hitPoint[2] - g_o[2]) * (g_hitPoint[2] - g_o[2])));
     }
