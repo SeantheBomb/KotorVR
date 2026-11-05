@@ -16,6 +16,8 @@ bool Combat_PlayerAttacking();
 bool Combat_ContactMode();
 // The player's queued attack was cleared: the next swing starts a new one.
 void Combat_ResetAttacking();
+// End the player's running combat round now (its timer run out): the stick gets the character back at once.
+void Combat_EndPlayerRound();
 
 // An enemy attack on the player, from its roll until just after it lands (the telegraph).
 struct CombatWarning {

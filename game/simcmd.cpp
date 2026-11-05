@@ -6,6 +6,7 @@
 //   goto x y [x y ...]   autopilot: walk through the waypoints (world metres), facing the way it walks.
 //                        Logs "autopilot: waypoint N", "autopilot: arrived (x y)" or "autopilot: stuck at (x y)".
 //   face x y             turn the view to face a world point ("autopilot: facing (x y)")
+//   approach d           walk to the nearest enemy, stop d metres from it ("autopilot: arrived ... from the enemy")
 //   faceenemy            turn the view to the nearest live enemy
 //   facewall             face the nearest wall 2..12 m away (and aim at it)
 //   aimhint              log how far to turn the right hand so its gun barrel points at what faceenemy /
@@ -50,6 +51,8 @@ float g_faceTo[2];
 float g_posMark[3];
 float g_aimPoint[3];  // what aimhint aims the gun at (faceenemy / facewall set it)
 bool g_aimSet;
+float g_approachTo;  // > 0: the goto is chasing the nearest enemy and stops this close to it
+DWORD g_approachId;
 
 float WrapPi(float a) {
     while (a > 3.14159265f) a -= 6.2831853f;
@@ -88,12 +91,28 @@ void Run(char* line) {
         g_facing = true;
     } else if (!strcmp(cmd, "stop")) {
         g_driving = g_facing = false;
+        g_approachTo = 0;
         Log("autopilot: stopped");
     } else if (!strcmp(cmd, "pick")) {
         DWORD id = 0;
         float hp[3] = {};
         bool hit = Pick_Hit(&id, hp);
         Log("simcmd: pickstate %s %08lX at (%.2f %.2f %.2f)", Pick_HitKind(), hit ? id : 0, hp[0], hp[1], hp[2]);
+    } else if (!strcmp(cmd, "approach") && nums.size() >= 1) {
+        float e[3];
+        g_approachId = havePos ? Melee_NearestEnemy(p, e) : 0;
+        if (g_approachId) {
+            g_way.assign({e[0], e[1]});
+            g_wi = 0;
+            g_driving = true;
+            g_facing = false;
+            g_bestDist = 1e9f;
+            g_progressAt = GetTickCount();
+            g_approachTo = nums[0];
+            Log("autopilot: approaching %08lX to %.1f m", g_approachId, nums[0]);
+        } else {
+            Log("simcmd: no enemy to approach");
+        }
     } else if (!strcmp(cmd, "faceenemy")) {
         float e[3];
         DWORD id = havePos ? Melee_NearestEnemy(p, e) : 0;
@@ -217,6 +236,20 @@ void SimCmd_Update(BYTE keys[256]) {
     if (!g_driving) return;
     float p[3];
     if (!Weapon_PlayerPos(p)) return;
+    if (g_approachTo > 0) {
+        float e[3];
+        if (Melee_NearestEnemy(p, e)) {
+            g_way[0] = e[0];
+            g_way[1] = e[1];
+        }
+        float ex = g_way[0] - p[0], ey = g_way[1] - p[1];
+        if (ex * ex + ey * ey < g_approachTo * g_approachTo) {
+            g_driving = false;
+            g_approachTo = 0;
+            Log("autopilot: arrived (%.2f %.2f), %.1f m from the enemy", p[0], p[1], sqrtf(ex * ex + ey * ey));
+            return;
+        }
+    }
     float tx = g_way[g_wi * 2], ty = g_way[g_wi * 2 + 1];
     float dx = tx - p[0], dy = ty - p[1], dist = sqrtf(dx * dx + dy * dy);
     if (dist < ((g_wi + 1) * 2 >= g_way.size() ? 0.5f : 0.9f)) {  // pass through the waypoints on the way, stop at the last

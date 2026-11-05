@@ -104,9 +104,22 @@ double Now() {
 // being animated (freed, unloaded) drop out after a second; reads are guarded anyway.
 std::map<BYTE*, DWORD> g_seenGobs;
 
+// The hidden body's leftover attack animation roots the character until it ends (2026-11-05: frozen ~1 s after a
+// strike while the stick pushed away); nobody sees that body, so it is played out fast when the stick moves you.
+static double g_playerFastUntil;
+static bool g_fastBody = true;  // [Feel] FastBody=0 turns it off (for before / after comparisons)
+
+void Anim_FastForwardPlayer(float seconds) {
+    if (g_fastBody) g_playerFastUntil = Now() + seconds;
+}
+
 extern "C" void __cdecl Anim_AnimatePre(BYTE* gob, float* dt) {
     double t = Now();
     g_seenGobs[gob] = GetTickCount();
+    if (gob == g_playerGob && t < g_playerFastUntil) {
+        *dt *= 6.0f;
+        return;
+    }
     for (const Pause& p : g_pause) {
         if (t >= p.until) continue;
         __try {
@@ -148,6 +161,7 @@ bool Anim_Install() {
     g_enabled = GetPrivateProfileIntA("Feel", "HitPause", 1, ini) != 0;
     g_defaultPause = GetPrivateProfileIntA("Feel", "HitPauseMs", 60, ini) / 1000.0f;
     g_lookAtYou = GetPrivateProfileIntA("Feel", "LookAtYou", 0, ini) != 0;
+    g_fastBody = GetPrivateProfileIntA("Feel", "FastBody", 1, ini) != 0;
     if (!g_enabled) {
         Log("anim: hit-pause off ([Feel] HitPause=0)");
         return false;

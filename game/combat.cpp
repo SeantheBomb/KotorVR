@@ -796,6 +796,24 @@ bool Combat_ContactMode() { return g_contact; }
 bool Combat_PlayerAttacking() { return Now() - g_playerRolls[1] < 3.5; }
 void Combat_ResetAttacking() { g_playerRolls[0] = g_playerRolls[1] = -100; }
 
+// The player's combat round holds the character in place until its timer runs out (KotOR: an attack plays out its
+// round), even with the action queue cleared (2026-11-05: 0.5-1.3 s with the stick pushed away after a strike).
+// Run the timer out so the round ends now (round: [creature + 0x9C8], Timer +0x944, RoundLength +0x94C). A round waiting on the opponent's (Paused +0x958) keeps its timer at 0 regardless.
+void Combat_EndPlayerRound() {
+    __try {
+        BYTE* p = (BYTE*)Weapon_PlayerCreature();
+        BYTE* round = p ? *(BYTE**)(p + 0x9C8) : nullptr;
+        if (!round || !*(round + 0x934)) return;
+        long len = *(long*)(round + 0x94C), timer = *(long*)(round + 0x944);
+        if (timer < len) {
+            *(long*)(round + 0x944) = len;
+            static DWORD lastLog;
+            if (GetTickCount() - lastLog > 500) Log("combat: the player's round ended early (%ld of %ld ms) - movement is yours", timer, len);
+            lastLog = GetTickCount();
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 int Combat_IncomingWarnings(CombatWarning* out, int max) {
     double t = Now();
     int n = 0;

@@ -23,3 +23,6 @@ int Anim_BoneSegments(void* model, AnimBone* out, int max);
 bool Anim_PartPos(void* model, const char* name, float out[3]);
 // Freeze the animation of the creature with this server object id for `seconds` (a hit landing on it).
 void Anim_HitPause(unsigned long targetId, float seconds);
+// Play the controlled character's (hidden) body animations 6x fast for a moment: a finished attack animation
+// frees its movement.
+void Anim_FastForwardPlayer(float seconds);

@@ -40,6 +40,7 @@ extern void Log(const char* fmt, ...);
 // ---------------------------------------------------------------- desired state (computed per frame)
 static BYTE g_wantKeys[256];
 static double g_attackWatchAt = -10;  // an action we just started (swing / shot / use / talk): see the movement rules in Input_Update
+static bool g_stickAway;              // the left stick is pushed, and not towards the nearest enemy
 static float g_attackFrom[3];
 static void WatchAttack(double now) {
     if (Weapon_PlayerPos(g_attackFrom)) g_attackWatchAt = now;
@@ -226,8 +227,53 @@ void Input_Update(HWND wnd) {
                 Combat_ResetAttacking();
                 g_attackWatchAt = -10;
                 Log("input: stick -> queued attack cleared (movement is yours)");
+                Anim_FastForwardPlayer(0.8f);
+                Combat_EndPlayerRound();
+            }
+            // how long a push takes to move you in a fight (logged; the test harness fails on SLOW)
+            static double respAt = -1;
+            static float respFrom[3];
+            if (stickNow && !stickWas && Combat_AttackWithin(6000) && Weapon_PlayerPos(respFrom)) respAt = now;
+            if (respAt > 0) {
+                float pp[3];
+                if (!stickNow) {
+                    respAt = -1;
+                } else if (Weapon_PlayerPos(pp)) {
+                    float dx = pp[0] - respFrom[0], dy = pp[1] - respFrom[1];
+                    if (dx * dx + dy * dy > 0.15f * 0.15f || now - respAt > 3.0) {
+                        Log("input: stick response %.2f s (%s)", now - respAt, now - respAt > 0.4 ? "SLOW" : "ok");
+                        respAt = -1;
+                    }
+                }
             }
             stickWas = stickNow;
+            // ... and while the stick stays held: a swing made on the move queues the game's attack, which roots you
+            // for its animation (2026-11-05: backing off after a strike covered 40% of the normal distance). Steering
+            // towards the enemy lets the attack play out (you are closing in to strike); away or across clears it.
+            if (stickNow) {
+                float pp[3], e[3];
+                g_stickAway = true;  // no enemy around: any direction is "away"
+                if (Weapon_PlayerPos(pp) && Melee_NearestEnemy(pp, e)) {
+                    float moveYaw = EngineCam_GameYaw() - atan2f(mr, mf);  // + = left, like the game camera's yaw
+                    float ex = e[0] - pp[0], ey = e[1] - pp[1], el = sqrtf(ex * ex + ey * ey) + 1e-4f;
+                    g_stickAway = (cosf(moveYaw) * ex + sinf(moveYaw) * ey) / el <= 0.5f;
+                }
+            } else {
+                g_stickAway = false;
+            }
+            // a round that has only just started takes its timer back on the next tick: end it every frame you steer away
+            if (stickNow && g_stickAway) Combat_EndPlayerRound();
+            static double lastHeldClear = -10;
+            if (stickNow && g_stickAway && Combat_PlayerAttacking() && now - lastHeldClear > 0.05) {
+                lastHeldClear = now;
+                if (ActionRing_ClearQueue()) {
+                    Combat_ResetAttacking();
+                    g_attackWatchAt = -10;
+                    Log("input: stick held away from the fight -> queued attack cleared");
+                    Anim_FastForwardPlayer(0.8f);
+                    Combat_EndPlayerRound();
+                }
+            }
             if (now - g_attackWatchAt < 2.5) {
                 float pp[3];
                 if (Weapon_PlayerPos(pp)) {
@@ -246,7 +292,8 @@ void Input_Update(HWND wnd) {
         // no longer press the attack key, so a guard raised into a blow is never read as an attack
         if (Combat_ContactMode()) {
             DWORD startOn = Melee_TakeAttackStart();
-            if (startOn && fighting && !Combat_PlayerAttacking()) {
+            // (not while the stick steers you away: brushing the enemy as you back off re-rooted you)
+            if (startOn && fighting && !Combat_PlayerAttacking() && !g_stickAway) {
                 Weapon_SetTarget(startOn | 0x80000000);
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;

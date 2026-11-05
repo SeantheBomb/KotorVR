@@ -1,0 +1,130 @@
+# Issue 7 with a sword (playtest 2026-11-05): mid-fight the stick sometimes could not move the character, so you
+# could not close in to strike. Fixture starboard_entry (dual short swords).
+#   run_sim.ps1 -Script t_sword -Fixture starboard_entry -Cheats -AllowDiscord -Force
+# Pass: holding the stick while swinging keeps you moving - towards the enemy and away from it.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 2
+pointer world
+aimhand
+wait_new_log dialogue:~over 20   # Carth's comm call on arrival (a sync point)
+wait 2
+key grave
+type invulnerability
+key enter
+wait 1
+# baseline: how far 2 s of stick back / forward goes with no fight around
+game posmark
+stick ly=-1 for=2
+game moved 1.0
+wait 0.5
+game posmark
+stick ly=1 for=2
+game moved 1.0
+wait 0.5
+game goto 61.77 117.12 63.2 104
+wait_log incoming_attack 60
+game stop
+game faceenemy
+wait_log autopilot:~facing 10
+hand R x=0.25 y=-0.15 z=-0.30 yaw=0 pitch=30
+wait 1
+shot start
+# advance on it with the stick held, swinging on the way (the swings queue the game's attack)
+game posmark
+stick ly=1
+wait 0.6
+swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 0.8
+swing dx=0.6 dy=-0.35 dz=-0.15 over=0.16
+wait 1.2
+game moved 2.5
+game pos
+check_log advance_while_swinging moved~ok 3
+stick ly=0
+game faceenemy
+wait 1
+shot close
+# reference: backing off in the fight without a swing
+game posmark
+stick ly=-1 for=2
+game moved 1.0
+wait 0.5
+game posmark
+stick ly=1 for=2
+game moved 1.0
+wait 0.5
+game faceenemy
+wait 1
+# in reach: strike, then break away with the stick (back, side, back, side); every push must move you within 0.4 s
+stick ly=0
+mark
+game approach 1.1
+wait_log from~the~enemy 20
+game faceenemy
+wait 0.8
+hand R x=0.35 y=-0.25 z=-0.25 yaw=-45 pitch=0
+wait 0.5
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+wait 0.3
+game posmark
+stick ly=-1
+wait 1.5
+game moved 0.4
+stick ly=0
+wait 0.5
+game approach 1.1
+wait_log from~the~enemy 20
+game faceenemy
+wait 0.8
+hand R x=-0.2 y=-0.25 z=-0.25 yaw=45 pitch=0
+wait 0.5
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+wait 0.3
+game posmark
+stick lx=1
+wait 1.5
+game moved 0.4
+stick lx=0
+wait 0.5
+game approach 1.1
+wait_log from~the~enemy 20
+game faceenemy
+wait 0.8
+hand R x=0.35 y=-0.25 z=-0.25 yaw=-45 pitch=0
+wait 0.5
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+wait 0.3
+game posmark
+stick ly=-1
+wait 1.5
+game moved 0.4
+stick ly=0
+wait 0.5
+game approach 1.1
+wait_log from~the~enemy 20
+game faceenemy
+wait 0.8
+hand R x=-0.2 y=-0.25 z=-0.25 yaw=45 pitch=0
+wait 0.5
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+wait 0.3
+game posmark
+stick lx=-1
+wait 1.5
+game moved 0.4
+stick lx=0
+wait 0.5
+check_count @mark strikes_attack combat:~player~attack~roll 2 99 0.2
+check_count @mark stick_never_slow (SLOW) 0 0 0.2
+check_count @mark breakaways_move moved~ok 4 4 0.2
+shot back
