@@ -28,6 +28,14 @@
 //   pointer none|world                stop pointing / point into the world along the head direction
 //   shot <name>                       save <name>_eye0.png, <name>_eye1.png, <name>_panel.png
 //   expect_world                      fail the run unless the world is rendering
+//   game <text...>                    a debug command for the game DLL (<game>\kvr\simcmd.txt; see game/simcmd.cpp):
+//                                     goto x y [x y ...], face x y, pos, stop, ...
+//   check_log <name> <substring> <timeout>          CHECK: the substring appears in the log within <timeout> s
+//   check_no_log <name> <substring> <seconds>       CHECK: the substring does not appear for <seconds>
+//   check_count <name> <substring> <min> <max> <seconds>  CHECK: it appears min..max times in the next <seconds>
+//   mark / check_since_mark <name> <substring> <timeout>  like check_log, from the last mark (events logged early)
+//                                     '~' in a substring stands for a space. Checks print "CHECK PASS/FAIL <name>"
+//                                     and the run goes on; any FAIL makes the exit code 1.
 //   end                               stop (implicit at end of file)
 // Exit code 0 = script completed, 1 = a wait timed out or an expectation failed, 2 = setup error.
 
@@ -232,6 +240,30 @@ static long LogSize() {
 }
 
 // `from`: byte offset to start at (wait_new_log only looks at lines written after the command started)
+static int LogCount(const std::string& needle, long from) {
+    FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long end = ftell(f);
+    if (end <= from) {
+        fclose(f);
+        return 0;
+    }
+    std::string all(end - from, '\0');
+    fseek(f, from, SEEK_SET);
+    size_t n = fread(&all[0], 1, all.size(), f);
+    fclose(f);
+    all.resize(n);
+    int c = 0;
+    for (size_t q = all.find(needle); q != std::string::npos; q = all.find(needle, q + needle.size())) c++;
+    return c;
+}
+
+static std::string GameCmdPath() {
+    std::string q = kProbeLog;
+    return q.substr(0, q.rfind('\\')) + "\\simcmd.txt";
+}
+
 static bool LogContains(const std::string& needle, long from = 0) {
     FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
     if (!f) return false;
@@ -256,6 +288,8 @@ struct HandPose {
 };
 static HandPose g_hand[2] = {{-0.22, -0.40, -0.35, 0, 20, 0}, {0.22, -0.40, -0.35, 0, 20, 0}};
 static HandPose g_swingFrom, g_swingTo;
+static bool g_checkFailed;  // a check_* command failed (the run continues, the exit code says so)
+static long g_mark;         // log offset of the last "mark" command
 static double g_swingT0, g_swingDur;  // right-hand sweep in progress when g_swingDur > 0
 struct Release {
     double at;
@@ -808,6 +842,8 @@ int main(int argc, char** argv) {
             printf("[%.1f]   %s\n", Now(), ok ? "calm" : "never calm (continuing)");
         } else if (cmd == "wait_log" || cmd == "wait_new_log") {
             std::string needle = args.empty() ? "" : args[0];
+            for (auto& ch : needle)
+                if (ch == '~') ch = ' ';  // '~' stands for a space
             double timeout = args.size() > 1 ? atof(args[1].c_str()) : 60;
             long from = cmd == "wait_new_log" ? LogSize() : 0;
             bool ok = RunUntil(timeout, [&] { return LogContains(needle, from); });
@@ -861,6 +897,40 @@ int main(int argc, char** argv) {
                 bool ok = SavePng(g_shared[i], p);
                 printf("[%.1f]   %s %s\n", Now(), p.c_str(), ok ? "saved" : "(no frame)");
             }
+        } else if (cmd == "game") {
+            std::string text;
+            for (size_t i = 0; i < args.size(); i++) text += (i ? " " : "") + args[i];
+            FILE* gf = nullptr;
+            if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+                fprintf(gf, "%s\n", text.c_str());
+                fclose(gf);
+            }
+            printf("[%.1f]   -> game: %s\n", Now(), text.c_str());
+        } else if (cmd == "mark") {  // check_since_mark looks from here (an event logged before its check started)
+            g_mark = LogSize();
+        } else if (cmd == "check_log" || cmd == "check_no_log" || cmd == "check_count" || cmd == "check_since_mark") {
+            std::string name = args.size() > 0 ? args[0] : "?", needle = args.size() > 1 ? args[1] : "";
+            for (auto& ch : needle)
+                if (ch == '~') ch = ' ';
+            long from = cmd == "check_since_mark" ? g_mark : LogSize();
+            bool pass;
+            char detail[96] = "";
+            if (cmd == "check_log" || cmd == "check_since_mark") {
+                pass = RunUntil(args.size() > 2 ? atof(args[2].c_str()) : 30, [&] { return LogContains(needle, from); });
+            } else if (cmd == "check_no_log") {
+                RunFor(args.size() > 2 ? atof(args[2].c_str()) : 10);
+                int c = LogCount(needle, from);
+                pass = c == 0;
+                sprintf_s(detail, "(%d seen)", c);
+            } else {
+                int lo = args.size() > 2 ? atoi(args[2].c_str()) : 0, hi = args.size() > 3 ? atoi(args[3].c_str()) : 0;
+                RunFor(args.size() > 4 ? atof(args[4].c_str()) : 10);
+                int c = LogCount(needle, from);
+                pass = c >= lo && c <= hi;
+                sprintf_s(detail, "(%d seen, want %d..%d)", c, lo, hi);
+            }
+            printf("[%.1f]   CHECK %s %s %s\n", Now(), pass ? "PASS" : "FAIL", name.c_str(), detail);
+            if (!pass) g_checkFailed = true;
         } else if (cmd == "expect_world") {
             bool ok = InWorld();
             printf("[%.1f]   expect_world: %s\n", Now(), ok ? "ok" : "FAILED");
@@ -872,6 +942,7 @@ int main(int argc, char** argv) {
         }
     }
     fclose(sf);
+    if (result == 0 && g_checkFailed) result = 1;
     g_shm->input.active = 0;
     g_shm->host.running = 0;
     if (g_csv) fclose(g_csv);

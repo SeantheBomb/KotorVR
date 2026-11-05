@@ -27,6 +27,7 @@
 #include "movie.h"
 #include "ownsig.h"
 #include "pick.h"
+#include "simcmd.h"
 #include "compat.h"
 #include "animprobe.h"
 #include "anim.h"
@@ -576,6 +577,7 @@ static void Install() {
     Movie_Install();
     OwnSig_Init(g_dir);
     Pick_Init(g_dir);
+    SimCmd_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
     if (Features().combat && Combat_Install()) Anim_Install();
 }

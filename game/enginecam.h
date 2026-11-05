@@ -17,3 +17,6 @@ void EngineCam_Turn(float radians);
 // Our heading minus the game camera's (radians, + = ours is further left). Movement keys and mouse picking work in
 // the game camera's frame, so they rotate by this.
 float EngineCam_ViewYawOffset();
+// World headings (radians, atan2(forward y, forward x)): our view, and the game camera (its W key walks along it).
+float EngineCam_ViewYaw();
+float EngineCam_GameYaw();

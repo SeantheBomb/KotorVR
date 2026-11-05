@@ -488,6 +488,8 @@ bool EngineCam_Applied() { return g_applied; }
 void EngineCam_Turn(float radians) { g_pendingTurn += radians; }
 
 float EngineCam_ViewYawOffset() { return g_viewYawValid ? WrapPi(g_viewYaw - g_gameYaw) : 0.0f; }
+float EngineCam_ViewYaw() { return g_viewYaw; }
+float EngineCam_GameYaw() { return g_gameYaw; }
 
 __declspec(naked) static void CamStub() {
     __asm {

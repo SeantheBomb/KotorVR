@@ -31,6 +31,7 @@
 #include "dialogue.h"
 #include "hud.h"
 #include "actionring.h"
+#include "simcmd.h"
 
 #pragma comment(lib, "dxguid.lib")
 
@@ -160,6 +161,7 @@ void Input_Update(HWND wnd) {
             if (mr < -0.38f * mag) keys[DIK_Z] = 0x80;
             if (mr > 0.38f * mag) keys[DIK_C] = 0x80;
         }
+        SimCmd_Update(keys);  // test harness only (no simcmd.txt in play): its autopilot may drive the movement keys
         // turning: right stick X turns our view directly (smooth, or snap steps with [Comfort] SnapTurn=1); the game's
         // own camera keys are not used, so KotOR can neither ignore the turn nor swing the view around in combat
         {

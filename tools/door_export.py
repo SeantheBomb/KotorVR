@@ -5,7 +5,8 @@ The game only exposes a door's position at runtime; its model and bearing come f
 template (UTD GenericType -> genericdoors.2da modelname). Runtime matches doors by position.
 
 usage: python door_export.py "<game dir>" "<game dir>\\kvr"     -> <out>\\models\\doors.txt
-line:  x y z bearing xmin xmax ymin ymax zmin zmax model   (model-local extents, metres; bearing in radians)
+line:  x y z bearing xmin xmax ymin ymax zmin zmax model static   (model-local extents, metres; bearing in radians;
+       static 1: a door the game never lets you use)
 """
 import glob
 import os
@@ -123,19 +124,20 @@ def main(game=None, out=None):
                     utd = kres.extract(game, tr, "utd") if tr else None
                 except Exception:  # noqa: BLE001
                     utd = None
-            gt = gff(utd).get("GenericType") if utd else None
+            u = gff(utd) if utd else {}
+            gt = u.get("GenericType")
             if gt is None or gt >= len(rows):
                 continue
             model = rows[gt][mi].lower()
             ext = model_extent(game, model, cache)
             if not ext:
                 continue
-            lines.append("%.3f %.3f %.3f %.4f %.2f %.2f %.2f %.2f %.2f %.2f %s" % (
-                d["X"], d["Y"], d["Z"], d.get("Bearing", 0.0), *ext, model))
+            lines.append("%.3f %.3f %.3f %.4f %.2f %.2f %.2f %.2f %.2f %.2f %s %d" % (
+                d["X"], d["Y"], d["Z"], d.get("Bearing", 0.0), *ext, model, 1 if u.get("Static") else 0))
     os.makedirs(os.path.join(out, "models"), exist_ok=True)
     path = os.path.join(out, "models", "doors.txt")
     with open(path, "w") as f:
-        f.write("# x y z bearing xmin xmax ymin ymax zmin zmax model  (tools/door_export.py)\n")
+        f.write("# x y z bearing xmin xmax ymin ymax zmin zmax model static  (tools/door_export.py)\n")
         f.write("\n".join(lines) + "\n")
     print("%d doors in %d modules -> %s" % (len(lines), len(mods), path))
 

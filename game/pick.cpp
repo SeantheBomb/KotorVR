@@ -38,16 +38,18 @@ int g_touchN;
 
 enum { T_CREATURE = 5, T_ITEM = 6, T_PLACEABLE = 9, T_DOOR = 10 };
 
-// Object type: the low byte at +8. The bytes above it are flags, set on objects you can't use (2026-11-03: the Endar
-// Spire's static, plot-locked end_door07 reads 0x3100000A; usable doors read 10): those count as no type, so the
-// ray passes them by as the game's own cursor does.
-int ObjType(const BYTE* o) { return (o[9] | o[10] | o[11]) ? -1 : o[8]; }
+// Object type: the byte at +8. The three bytes after it are unrelated data that differ between sessions (the same
+// door read 0x3100000A in one run and 0x07B01B0A in the next), so they must not be part of the type: read as one int,
+// any object whose spare bytes happened to be non-zero was never pickable (2026-11-05 playtest: the Starboard
+// Section door end_door002 never reached the ray in a whole session).
+int ObjType(const BYTE* o) { return o[8]; }
 
 float Dot(const float* a, const float* b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
 struct DoorBox {
     float pos[3], c, s;  // placement, cos / sin of the bearing
     float lo[3], hi[3];  // model-local extent
+    bool isStatic;       // the door's template is Static: the game never lets you use it, so the ray ignores it
 };
 std::vector<DoorBox> g_doors;
 
@@ -138,9 +140,13 @@ void Pick_Init(const char* gameDir) {
     while (fgets(line, sizeof line, f)) {
         DoorBox d;
         float b;
-        if (line[0] == '#' || sscanf_s(line, "%f %f %f %f %f %f %f %f %f %f", &d.pos[0], &d.pos[1], &d.pos[2], &b,
-                                       &d.lo[0], &d.hi[0], &d.lo[1], &d.hi[1], &d.lo[2], &d.hi[2]) != 10)
+        char model[64] = "";
+        int st = 0;
+        if (line[0] == '#' || sscanf_s(line, "%f %f %f %f %f %f %f %f %f %f %63s %d", &d.pos[0], &d.pos[1], &d.pos[2], &b,
+                                       &d.lo[0], &d.hi[0], &d.lo[1], &d.hi[1], &d.lo[2], &d.hi[2], model,
+                                       (unsigned)sizeof model, &st) < 10)
             continue;
+        d.isStatic = st == 1;
         d.c = cosf(b);
         d.s = sinf(b);
         // a few door models carry far-flung trim (lifts, blast shutters): keep the pickable box door-sized
@@ -243,6 +249,7 @@ void Pick_Update() {
                 }
             }
             const DoorBox* box = type == T_DOOR ? FindDoor(pos) : nullptr;
+            if (box && box->isStatic) continue;  // a door the game never lets you use
             if (box) {
                 // the door's own box, a little bigger with distance (the same cone as below)
                 bool in = RayDoor(*box, g_o, g_d, 0.05f + 0.035f * sqrtf(dx * dx + dy * dy), &t);
@@ -311,6 +318,42 @@ void Pick_Update() {
                                                           (g_hitPoint[1] - g_o[1]) * (g_hitPoint[1] - g_o[1]) +
                                                           (g_hitPoint[2] - g_o[2]) * (g_hitPoint[2] - g_o[2])));
     }
+}
+
+void Pick_LogDoors() {
+    typedef void*(__fastcall * GetAreaFn)(void* obj, void*);
+    typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
+    int doors = 0, statics = 0, unboxed = 0, pickable = 0, spare = 0;
+    __try {
+        BYTE* player = (BYTE*)Weapon_PlayerCreature();
+        BYTE* area = player ? (BYTE*)((GetAreaFn)0x4CB120)(player, nullptr) : nullptr;
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        if (!area || !server) return;
+        DWORD* ids = *(DWORD**)(area + 0x190);
+        int n = *(int*)(area + 0x194);
+        for (int i = 0; ids && i < n && i < 8192; i++) {
+            BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, ids[i]);
+            if (!o || o[8] != T_DOOR) continue;
+            doors++;
+            if (o[9] | o[10] | o[11]) spare++;
+            const DoorBox* b = FindDoor((const float*)(o + 0x90));
+            if (!b) unboxed++;
+            else if (b->isStatic) statics++;
+            if (ObjType(o) == T_DOOR && !(b && b->isStatic)) pickable++;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return;
+    }
+    // every door you can use must be pickable, whatever its spare bytes hold
+    Log("simcmd: doors %d, static %d, no box %d, spare bytes set %d, pickable %d of %d usable", doors, statics, unboxed,
+        spare, pickable, doors - statics);
+}
+
+const char* Pick_HitKind() {
+    if (!g_hit) return "nothing";
+    return g_hitType == T_DOOR ? "door" : g_hitType == T_CREATURE ? "creature" : g_hitType == T_PLACEABLE ? "placeable"
+                                                                                                         : "item";
 }
 
 bool Pick_Hit(DWORD* serverId, float point[3]) {
