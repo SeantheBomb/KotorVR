@@ -1,0 +1,63 @@
+# Issue 9 (playtest 2026-11-05): swinging back and forth without pausing - flailing - must still land credited
+# hits (the blade only re-armed after slowing below 1.2 m/s, so every later touch was a glance). Kashyyyk kinraths.
+#   run_sim.ps1 -Script t_flail -Fixture dantooine_ruins -Cheats -AllowDiscord -Force
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60             # the load screen reads every save thumbnail first
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+key grave                  # cheat console
+type warp kas_m22ab
+key enter
+wait 6
+wait_world 120
+wait 3
+key grave                  # invulnerable: KotOR then skips the damage roll, so "damage stopped" reads 0; run without
+type invulnerability       # it (delete these 3 lines) for real numbers, but the party may not survive the long waits
+key enter
+pointer world
+game neareye 1
+wait_log incoming_attack 40
+game stop
+mark
+game approach 1.8
+wait_new_log autopilot: 10
+game faceenemy
+wait 0.5
+hand R x=0.35 y=-0.25 z=-0.55 yaw=-45 pitch=0
+wait 0.3
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+game approach 1.8
+wait_new_log autopilot: 10
+game faceenemy
+wait 0.5
+hand R x=0.35 y=-0.25 z=-0.55 yaw=-45 pitch=0
+wait 0.3
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+game approach 1.8
+wait_new_log autopilot: 10
+game faceenemy
+wait 0.5
+hand R x=0.35 y=-0.25 z=-0.55 yaw=-45 pitch=0
+wait 0.3
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+swing dx=-0.75 dy=0 dz=-0.2 over=0.16
+swing dx=0.75 dy=0 dz=-0.2 over=0.16
+wait 1
+check_count @mark flail_lands_hits blade~contact~on 4 99 0.2
+check_count @mark head_never_in_eyes neareye: 0 0 0.2
+shot end

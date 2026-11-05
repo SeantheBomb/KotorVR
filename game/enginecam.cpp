@@ -22,6 +22,7 @@
 #include "../common/kvr_shared.h"
 #include "features.h"
 #include "anim.h"
+#include "melee.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -315,6 +316,17 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         }
         if (g_shotMode == 6) {
             int r = VR_LosProbeResult();
+            if (r == 0) {
+                // the depth probe stops at anything - a companion standing between you and the speaker too
+                // (2026-11-05: Trask's last stand cut away to close-ups of Bandon, in plain view). The area's own
+                // line of sight (walls / level geometry, creatures ignored) decides: clear = you can see it.
+                DWORD pid = 0;
+                if (void* pc = Weapon_PlayerCreature()) pid = *(DWORD*)((BYTE*)pc + 4);
+                if (Melee_LineOfSight(headPos, g_subject, pid, 0)) {
+                    r = 1;
+                    Log("cutscene: only someone / something movable is in the way (walls are clear) -> first person");
+                }
+            }
             if (r >= 0) {
                 g_shotMode = r ? 1 : 2;
                 Log("cutscene: eye -> subject: first hit at %.1f m -> %s", VR_LosProbeDepth(),

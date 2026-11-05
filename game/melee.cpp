@@ -42,6 +42,7 @@ struct Blade {
     float maxRecent; // highest tip speed in the last 0.3 s
     double maxAt;
     bool armed = true;
+    double hitAt = -10;  // when this blade last landed a contact
 };
 Blade g_blade[2];
 
@@ -291,7 +292,9 @@ void Melee_Update() {
     for (int h = 0; h < 2; h++) {
         Blade& b = g_blade[h];
         if (!b.valid || t - b.t > 0.2) continue;
-        if (b.speed < 1.2f) b.armed = true;
+        // re-armed once it slows down after a hit - or 0.4 s after it (2026-11-05: swinging without pause never
+        // slowed below 1.2 m/s, so every later touch was a glance whatever its speed - "flailing hoping for the best")
+        if (b.speed < 1.2f || t - b.hitAt > 0.4) b.armed = true;
         // below the swing gate a touch is only a glance: shown (a faint spark), not credited
         bool glance = b.speed < 2.0f || !b.armed;
         if (glance && b.speed < 0.5f) continue;
@@ -323,13 +326,15 @@ void Melee_Update() {
                 if (t - lg > 0.5) {
                     lg = t;
                     Cues_Glance();
-                    Log("melee: glance on %08lX at %.1f m/s (below the 2.0 m/s gate)", kv.first, b.speed);
+                    Log("melee: glance on %08lX at %.1f m/s (%s)", kv.first, b.speed,
+                        b.speed < 2.0f ? "below the 2.0 m/s gate" : "the blade's last hit was under 0.4 s ago");
                 }
                 break;
             }
             auto lc = g_lastContact.find(kv.first);
             if (lc != g_lastContact.end() && t - lc->second < 0.35) continue;
             b.armed = false;
+            b.hitAt = t;
             Contact(kv.first, hit, b.speed);
             break;
         }
