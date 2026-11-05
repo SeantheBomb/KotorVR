@@ -22,6 +22,8 @@ key grave
 type invulnerability
 key enter
 wait 1
+game neareye 1
+mark
 # baseline: how far 2 s of stick back / forward goes with no fight around
 game posmark
 stick ly=-1 for=2
@@ -46,7 +48,7 @@ wait 0.6
 swing dx=-0.6 dy=-0.35 dz=-0.15 over=0.16
 wait 0.8
 swing dx=0.6 dy=-0.35 dz=-0.15 over=0.16
-wait 1.2
+wait 0.2
 game moved 2.5
 game pos
 check_log advance_while_swinging moved~ok 3
@@ -65,6 +67,7 @@ game moved 1.0
 wait 0.5
 game faceenemy
 wait 1
+check_count @mark head_never_in_eyes_walking neareye: 0 0 0.2
 # in reach: strike, then break away with the stick (back, side, back, side); every push must move you within 0.4 s
 stick ly=0
 mark
@@ -127,4 +130,5 @@ wait 0.5
 check_count @mark strikes_attack combat:~player~attack~roll 2 99 0.2
 check_count @mark stick_never_slow (SLOW) 0 0 0.2
 check_count @mark breakaways_move moved~ok 4 4 0.2
+check_count @mark head_never_in_eyes neareye: 0 0 0.2   # issue 2: no geometry within 12 cm of the eye
 shot back

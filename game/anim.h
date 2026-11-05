@@ -6,6 +6,9 @@ bool Anim_Install();
 void Anim_Update();
 // The controlled character's body model's world position (exactly where its hierarchy is drawn).
 bool Anim_PlayerBodyPos(float out[3]);
+// Where the controlled character's body has its attachment points this frame (headhook, hands, head, neck), world:
+// the head and held weapons are separate models rooted there. Returns how many were found.
+int Anim_PlayerHooks(float out[][3], int max);
 // How high the controlled character's head is above its feet (m; -99 unknown): ~1.6 standing, much less lying down.
 float Anim_PlayerHeadHeight();
 // A hit at a world point on this creature: its upper body flinches away from it for a quarter second.

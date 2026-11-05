@@ -498,6 +498,16 @@ bool Anim_PartPos(void* model, const char* name, float out[3]) {
     return false;
 }
 
+int Anim_PlayerHooks(float out[][3], int max) {
+    BYTE* g = g_playerGob;
+    if (!g) return 0;
+    static const char* kHooks[] = {"headhook", "rhand", "lhand", "head", "neck"};
+    int n = 0;
+    for (const char* h : kHooks)
+        if (n < max && Anim_PartPos(g, h, out[n])) n++;
+    return n;
+}
+
 bool Anim_PlayerBodyPos(float out[3]) {
     BYTE* g = g_playerGob;
     if (!g) return false;

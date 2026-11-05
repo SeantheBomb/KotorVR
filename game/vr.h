@@ -34,6 +34,11 @@ int VR_IsOwnBody(const float t[3], int depth);  // depth: modelview stack depth 
 // Per draw call during the world pass: true when the draw belongs to the player's own body (skip it).
 bool VR_ShouldSkipDraw();
 bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices);
+// Test harness: watch for world geometry drawn within 12 cm of the eye (logs "neareye: ...").
+// A draw of your own head (origin within 35 cm of the eye, geometry within 12 cm): skipped.
+bool VR_InsideHead(GLsizei count, GLenum type, const void* indices);
+void VR_SetNearEyeWatch(bool on);
+bool VR_NoteDrawn(GLsizei count, GLenum type, const void* indices);  // true: within 12 cm of the eye
 void VR_OnVertexPointer(GLint size, GLenum type, GLsizei stride, const void* ptr);
 // diagnostics: request a one-frame trace (true once), and the current draw origin in the camera frame
 bool VR_WantTrace();

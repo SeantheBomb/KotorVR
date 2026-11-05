@@ -13,6 +13,7 @@
 //                        facewall chose
 //   posmark / moved m    remember the position / log "moved ok" if the player has gone m metres since
 //   pos                  log the player's position and the view / game-camera headings
+//   neareye 1|0          log frames that draw world geometry within 12 cm of the eye ("neareye: ...")
 //   trace                a GL trace of the next world frame (kvr/trace_f<frame>.txt)
 //   doors                log the area's doors and how many of the usable ones the ray can pick
 //   pick                 log what the right hand's ray picks right now ("simcmd: pickstate door ...")
@@ -183,6 +184,9 @@ void Run(char* line) {
     } else if (!strcmp(cmd, "moved") && nums.size() >= 1) {
         float d = sqrtf((p[0] - g_posMark[0]) * (p[0] - g_posMark[0]) + (p[1] - g_posMark[1]) * (p[1] - g_posMark[1]));
         Log("simcmd: moved %.2f m since posmark -> %s", d, d >= nums[0] ? "moved ok" : "moved SHORT");
+    } else if (!strcmp(cmd, "neareye")) {  // "neareye 1" / "neareye 0" (numbers: the parser takes numbers)
+        VR_SetNearEyeWatch(!nums.empty() && nums[0] != 0);
+        Log("simcmd: near-eye watch %s", !nums.empty() && nums[0] != 0 ? "on" : "off");
     } else if (!strcmp(cmd, "trace")) {
         VR_TraceNextWorldFrame();
     } else if (!strcmp(cmd, "doors")) {

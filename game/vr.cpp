@@ -17,6 +17,7 @@
 #include "enginecam.h"
 #include "weapons.h"
 #include "anim.h"
+#include "melee.h"
 #include "combat.h"
 #include "features.h"
 #include "mirror.h"
@@ -371,6 +372,11 @@ static float g_nearestOwn = 1e9f;  // diagnostics: closest object origin to the 
 static int g_rootDepth = -1;        // matrix stack depth of model roots (where the player's body root matched)
 // The character's own body bones (world positions) this frame and last: held weapons and the head are separate
 // models whose root sits exactly on a bone (hand, neck). The game draws them before the body, so last frame's bones.
+static void NearEyeFrameEnd();
+static float g_hooks[8][3];  // the body's attachment points this frame (Anim_PlayerHooks)
+static int g_hookCount;
+static volatile bool g_traceNow;  // the test harness asked for a trace of the next world frame
+static float g_lastRootT[3];  // the latest model root (root depth) seen by VR_IsOwnBody, world
 static float g_ownNodes[2][128][3];
 static int g_ownNodeCount[2];
 static int g_ownNodeCur;
@@ -633,6 +639,8 @@ void VR_OnSwap(HDC dc) {
         }
     }
     g_nearestOwn = 1e9f;
+    NearEyeFrameEnd();
+    g_hookCount = Anim_PlayerHooks(g_hooks, 8);
     g_ownNodeCur ^= 1;  // this frame's bones become "last frame's"
     g_ownNodeCount[g_ownNodeCur] = 0;
     RefreshPlayerPos();
@@ -790,6 +798,23 @@ int VR_IsOwnBody(const float t[3], int depth) {
         if (exact ? (bx * bx + by * by + bz * bz < 0.05f * 0.05f) : (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f)) {
             g_rootDepth = depth;
             return 2;
+        }
+        if (depth == g_rootDepth) memcpy(g_lastRootT, t, sizeof g_lastRootT);
+        // a model rooted on one of the body's attachment points (head on the headhook, weapons in the hands), as
+        // the animation has them this frame: the bone list below misses them in attacks, where the skeleton is
+        // skinned on the GPU (2026-11-05: your own head drawn in your eyes mid-swing)
+        if (depth == g_rootDepth) {
+            // ... and anything rooted inside your own head (your head model, wherever the animation puts it):
+            // in first person nothing else has its origin within 35 cm of your eye
+            float eye[3];
+            if (!g_showOwnBody && EngineCam_EyeWorld(eye)) {
+                float ex = t[0] - eye[0], ey = t[1] - eye[1], ez = t[2] - eye[2];
+                if (ex * ex + ey * ey + ez * ez < 0.35f * 0.35f) return 2;
+            }
+            for (int i = 0; i < g_hookCount; i++) {
+                float ex = t[0] - g_hooks[i][0], ey = t[1] - g_hooks[i][1], ez = t[2] - g_hooks[i][2];
+                if (ex * ex + ey * ey + ez * ez < 0.10f * 0.10f) return 2;
+            }
         }
         int prev = g_ownNodeCur ^ 1;
         if (g_ownNodeCount[prev] > 0) {
@@ -994,6 +1019,122 @@ static void EyeToCam(const float pe[3], float oc[3]) {
     for (int r = 0; r < 3; r++) oc[r] = g_Q[r * 3 + 0] * pe[0] + g_Q[r * 3 + 1] * pe[1] + g_Q[r * 3 + 2] * pe[2] + g_t[r];
 }
 
+// Test harness (simcmd "neareye on"): world geometry drawn within 12 cm of the eye - your own head clipping into
+// view (2026-11-05 playtest). Samples a few vertices of every draw that is not hidden; logs once a second.
+static bool g_nearEyeOn;
+static int g_nearEyeDraws, g_nearEyeFrames;
+void VR_SetNearEyeWatch(bool on) {
+    g_nearEyeOn = on;
+    g_nearEyeDraws = g_nearEyeFrames = 0;
+}
+
+// Your own head, whatever hierarchy it is drawn under: a draw whose origin is within 35 cm of the eye and which has
+// geometry within 12 cm of it is skipped (2026-11-05: in attacks the head's parts were drawn in your eyes - rooted
+// away from where the body's hooks and bones say, so the model-level rules missed them). Room meshes have their
+// origins far away, so a wall you lean into stays.
+bool VR_InsideHead(GLsizei count, GLenum type, const void* indices) {
+    if (g_showOwnBody || !g_vrActive || !g_inWorldPass || !g_vtxPtr || count <= 0) return false;
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
+    float mv[16];
+    p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    if (mv[12] * mv[12] + mv[13] * mv[13] + mv[14] * mv[14] > 0.35f * 0.35f) return false;
+    __try {
+        for (int s = 0; s < 8; s++) {
+            GLsizei k = (GLsizei)((long long)count * s / 8);
+            unsigned idx = type == GL_UNSIGNED_SHORT ? ((const unsigned short*)indices)[k]
+                         : type == GL_UNSIGNED_INT ? ((const unsigned*)indices)[k] : ((const unsigned char*)indices)[k];
+            const float* v = (const float*)(g_vtxPtr + (size_t)idx * g_vtxStride);
+            float pe[3];
+            for (int r = 0; r < 3; r++) pe[r] = mv[r] * v[0] + mv[4 + r] * v[1] + mv[8 + r] * v[2] + mv[12 + r];
+            if (pe[0] * pe[0] + pe[1] * pe[1] + pe[2] * pe[2] < 0.12f * 0.12f) return true;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+bool VR_NoteDrawn(GLsizei count, GLenum type, const void* indices) {
+    if (!g_nearEyeOn || !g_vrActive || !g_inWorldPass || !g_vtxPtr || count <= 0) return false;
+    static void(APIENTRY* p_glGetFloatv)(GLenum, GLfloat*);
+    if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
+    float mv[16];
+    p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
+    __try {
+        for (int s = 0; s < 8; s++) {
+            GLsizei k = (GLsizei)((long long)count * s / 8);
+            unsigned idx = type == GL_UNSIGNED_SHORT ? ((const unsigned short*)indices)[k]
+                         : type == GL_UNSIGNED_INT ? ((const unsigned*)indices)[k] : ((const unsigned char*)indices)[k];
+            const float* v = (const float*)(g_vtxPtr + (size_t)idx * g_vtxStride);
+            float pe[3];
+            for (int r = 0; r < 3; r++) pe[r] = mv[r] * v[0] + mv[4 + r] * v[1] + mv[8 + r] * v[2] + mv[12 + r];
+            if (pe[0] * pe[0] + pe[1] * pe[1] + pe[2] * pe[2] < 0.12f * 0.12f) {
+                // an enemy's weapon swung through your view is theirs, not your avatar: not counted
+                {
+                    float e[3], hp[3];
+                    if (Melee_NearestEnemy(g_playerPos, e))
+                        if (void* em = Anim_ModelAt(e))
+                            for (const char* hn : {"rhand", "lhand"})
+                                if (Anim_PartPos(em, hn, hp)) {
+                                    float ex = g_lastRootT[0] - hp[0], ey = g_lastRootT[1] - hp[1], ez = g_lastRootT[2] - hp[2];
+                                    if (ex * ex + ey * ey + ez * ez < 0.1f * 0.1f) {
+                                        static int told;
+                                        if (told++ < 3) g_log("neareye: an enemy's weapon passed through your view (not counted)");
+                                        return false;
+                                    }
+                                }
+                }
+                g_nearEyeDraws++;
+                static int logged;
+
+                if (logged++ < 12) {
+                    // whose model: its root against your feet and your body's bones (last frame)
+                    float dx = g_lastRootT[0] - g_playerPos[0], dy = g_lastRootT[1] - g_playerPos[1], dz = g_lastRootT[2] - g_playerPos[2];
+                    float best = 99;
+                    int prev = g_ownNodeCur ^ 1;
+                    for (int i = 0; i < g_ownNodeCount[prev]; i++) {
+                        const float* n = g_ownNodes[prev][i];
+                        float ex = g_lastRootT[0] - n[0], ey = g_lastRootT[1] - n[1], ez = g_lastRootT[2] - n[2];
+                        float d = sqrtf(ex * ex + ey * ey + ez * ez);
+                        if (d < best) best = d;
+                    }
+                    float oc[3];
+                    VR_DrawOrigin(oc);  // the draw's own origin, in the tracking frame (y up, -z forward)
+                    float hk = 99;
+                    for (int h = 0; h < g_hookCount; h++) {
+                        float ex = g_lastRootT[0] - g_hooks[h][0], ey = g_lastRootT[1] - g_hooks[h][1], ez = g_lastRootT[2] - g_hooks[h][2];
+                        float d = sqrtf(ex * ex + ey * ey + ez * ez);
+                        if (d < hk) hk = d;
+                    }
+                    g_log("neareye: draw count %d, vertex at eye (%.2f %.2f %.2f); draw origin (tracking) %.2f %.2f %.2f; "
+                          "last root %.2f m from your feet (up %.2f), %.2f m from your nearest bone, %.2f m from the nearest of %d "
+                          "hooks; hook0 (%.2f %.2f %.2f) root (%.2f %.2f %.2f)",
+                          (int)count, pe[0], pe[1], pe[2], oc[0], oc[1], oc[2], sqrtf(dx * dx + dy * dy), dz, best, hk,
+                          g_hookCount, g_hooks[0][0], g_hooks[0][1], g_hooks[0][2], g_lastRootT[0], g_lastRootT[1], g_lastRootT[2]);
+                }
+                return true;
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return false;
+}
+
+static void NearEyeFrameEnd() {
+    if (!g_nearEyeOn) return;
+    static DWORD last;
+    static int framesWith;
+    static int drawsAtFrameStart;
+    if (g_nearEyeDraws > drawsAtFrameStart) framesWith++;
+    drawsAtFrameStart = g_nearEyeDraws;
+    g_nearEyeFrames++;
+    if (GetTickCount() - last > 1000) {
+        last = GetTickCount();
+        if (framesWith) g_log("neareye: %d of %d frames drew geometry within 12 cm of the eye", framesWith, g_nearEyeFrames);
+        framesWith = 0;
+        g_nearEyeFrames = 0;
+        g_nearEyeDraws = drawsAtFrameStart = 0;
+    }
+}
+
 // CPU-skinned meshes have world-space vertices under a view-only modelview, so their origin says nothing:
 // test actual vertices of the draw instead.
 bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices) {
@@ -1055,7 +1196,6 @@ static void NoteBoneParam(GLuint index, const GLfloat* v) {
 }
 
 // [Debug] TraceWorld=1 in kvr.ini: one GL trace of a world frame (kvr/trace_f<frame>.txt), in-game frames.
-static volatile bool g_traceNow;  // the test harness asked for a trace of the next world frame (simcmd "trace")
 void VR_TraceNextWorldFrame() { g_traceNow = true; }
 
 bool VR_WantTrace() {
