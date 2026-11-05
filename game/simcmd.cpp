@@ -17,6 +17,7 @@
 //   pointat x y z / pointhint   face a point / how far to turn the hand so its pointing ray is on it
 //   posmark / moved m    remember the position / log "moved ok" if the player has gone m metres since
 //   pos                  log the player's position and the view / game-camera headings
+//   god 1|0              the controlled character's hit points never drop (the test rig's invulnerability)
 //   neareye 1|0          log frames that draw world geometry within 12 cm of the eye ("neareye: ...")
 //   trace                a GL trace of the next world frame (kvr/trace_f<frame>.txt)
 //   doors                log the area's doors and how many of the usable ones the ray can pick
@@ -65,6 +66,8 @@ float g_pointFrom[3];  // where you stood when the last pointat began (the near 
 float g_approachTo;  // > 0: the goto is chasing the nearest enemy and stops this close to it
 DWORD g_approachId;
 bool g_approachEnemy;  // the approach follows the nearest enemy (else a fixed point: pointat)
+static bool g_god;
+static short g_godHp;
 
 float WrapPi(float a) {
     while (a > 3.14159265f) a -= 6.2831853f;
@@ -94,9 +97,14 @@ void Run(char* line) {
         g_wi = 0;
         g_driving = true;
         g_facing = false;
+        g_approachTo = 0;  // a route, not a fight's or pointat's approach (that would keep steering at its target)
         g_bestDist = 1e9f;
         g_progressAt = GetTickCount();
         Log("autopilot: goto %d waypoints from (%.2f %.2f)", (int)(g_way.size() / 2), p[0], p[1]);
+    } else if (!strcmp(cmd, "god")) {
+        g_god = nums.empty() || nums[0] != 0;
+        g_godHp = 0;
+        Log("simcmd: god %s", g_god ? "on" : "off");
     } else if (!strcmp(cmd, "face") && nums.size() >= 2) {
         g_faceTo[0] = nums[0];
         g_faceTo[1] = nums[1];
@@ -210,7 +218,7 @@ void Run(char* line) {
                 g_approachTo = melee ? 1.2f : 10.0f;
                 g_approachEnemy = true;
             }
-            Log("fight: closing on %08lX, %.1f m", id, d);
+            Log("fight: closing on %08lX, %.1f m, at (%.2f %.2f) from (%.2f %.2f)", id, d, e[0], e[1], p[0], p[1]);
         } else {
             g_driving = false;
             g_approachTo = 0;
@@ -342,8 +350,21 @@ void SimCmd_Init(const char* gameDir) {
 
 bool SimCmd_Driving() { return g_driving; }
 
+// "god 1": the test rig's own invulnerability (the cheat console's is a toggle, and a save or a module change flips
+// or drops it): the controlled character's hit points never go below where they were when it came on
+static void GodTick() {
+    BYTE* c = (BYTE*)Weapon_PlayerCreature();
+    if (!g_god || !c) return;
+    __try {
+        short& hp = *(short*)(c + 0xDC);  // current hit points (see combat.cpp PostureOf)
+        if (hp > g_godHp) g_godHp = hp;
+        if (hp < g_godHp) hp = g_godHp;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 void SimCmd_Update(BYTE keys[256]) {
     Poll();
+    GodTick();
     if (g_facing && !g_driving) {
         float p[3];
         if (Weapon_PlayerPos(p)) {

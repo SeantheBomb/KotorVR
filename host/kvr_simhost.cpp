@@ -34,6 +34,7 @@
 //   check_no_log <name> <substring> <seconds>       CHECK: the substring does not appear for <seconds>
 //   check_count <name> <substring> <min> <max> <seconds>  CHECK: it appears min..max times in the next <seconds>
 //   hand_adjust                       turn the right hand by the game's last "aimhint" (after: game aimhint)
+//   autotalk prefer <text[:n]> ...   replies holding these (~ = space) before the first one, each n times at most
 //   autotalk on|off                   in the background: whenever a conversation offers replies, pick the first
 //   ringpick <text> [timeout]         pick the action-ring entry containing <text> ('~' = space)
 //   fight <timeout>                   fight the nearest enemies until none is left close by: the game steps
@@ -268,6 +269,42 @@ static int LogCount(const std::string& needle, long from) {
     return c;
 }
 
+// the last line holding `needle` written after `from` ("" if none)
+static std::string LogLastLine(const std::string& needle, long from) {
+    FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
+    if (!f) return "";
+    fseek(f, 0, SEEK_END);
+    long end = ftell(f);
+    if (end <= from) {
+        fclose(f);
+        return "";
+    }
+    std::string all(end - from, '\0');
+    fseek(f, from, SEEK_SET);
+    all.resize(fread(&all[0], 1, all.size(), f));
+    fclose(f);
+    size_t q = all.rfind(needle);
+    if (q == std::string::npos) return "";
+    size_t a = all.rfind('\n', q), b = all.find('\n', q);
+    a = a == std::string::npos ? 0 : a + 1;
+    return all.substr(a, (b == std::string::npos ? all.size() : b) - a);
+}
+
+// a walkmesh route (tools/navmesh.py) from one point to another in <module>: "x y x y ..." ("" if none)
+static std::string NavRoute(const std::string& module, float x0, float y0, float x1, float y1) {
+    char cmd[512];
+    sprintf_s(cmd, "python \"C:\\Users\\SeanF\\Documents\\KotorVR\\tools\\navmesh.py\" %s %.2f %.2f %.2f %.2f 2>nul",
+              module.c_str(), x0, y0, x1, y1);
+    FILE* p = _popen(cmd, "r");
+    if (!p) return "";
+    std::string out;
+    char buf[1024];
+    while (fgets(buf, sizeof buf, p)) out += buf;
+    _pclose(p);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return out;
+}
+
 static std::string GameCmdPath() {
     std::string q = kProbeLog;
     return q.substr(0, q.rfind('\\')) + "\\simcmd.txt";
@@ -300,6 +337,11 @@ static HandPose g_swingFrom, g_swingTo;
 static bool g_checkFailed;  // a check_* command failed (the run continues, the exit code says so)
 static long g_mark;         // log offset of the last "mark" command
 static bool g_autoTalk;     // pick the first reply of every conversation (autotalk on)
+struct TalkPref {
+    std::string text;  // lower case
+    int uses;          // left; -1 = any number
+};
+static std::vector<TalkPref> g_talkPrefs;  // autotalk prefer: these replies before the first one
 static int g_talkState;     // 0 idle, 1 hovering a reply, 2 pressing the trigger
 static double g_talkAt;     // when the state last changed / the next pick may start
 static double g_swingT0, g_swingDur;  // right-hand sweep in progress when g_swingDur > 0
@@ -642,16 +684,28 @@ static void AutoTalkTick() {
         g_talkState = 0;
         g_talkAt = now + 1.0;  // the next line needs a moment to come up
     } else if (g_talkState == 0 && now > g_talkAt && p.anchor && p.pickable) {
-        int line = 0, pick = -1;
+        int line = 0, pick = -1, prefPick = -1;
+        size_t prefRank = g_talkPrefs.size();
         for (const char* t = p.text; *t;) {
-            if (*t != '#' && *t != '\n') {
-                pick = line;
-                break;
-            }
             const char* nl = strchr(t, '\n');
+            if (*t != '#' && *t != '\n') {
+                if (pick < 0) pick = line;
+                std::string lower(t, nl ? nl : t + strlen(t));
+                for (auto& ch : lower) ch = (char)tolower((unsigned char)ch);
+                for (size_t r = 0; r < prefRank; r++)
+                    if (g_talkPrefs[r].uses != 0 && lower.find(g_talkPrefs[r].text) != std::string::npos) {
+                        prefRank = r;
+                        prefPick = line;
+                        break;
+                    }
+            }
             if (!nl) break;
             t = nl + 1;
             line++;
+        }
+        if (prefPick >= 0) {
+            pick = prefPick;
+            if (g_talkPrefs[prefRank].uses > 0) g_talkPrefs[prefRank].uses--;
         }
         if (pick < 0) return;
         p.hover = pick;
@@ -1177,7 +1231,22 @@ int main(int argc, char** argv) {
             });
             printf("[%.1f]   wait_quiet '%s': %s\n", Now(), needle.c_str(), ok ? "quiet" : "STILL GOING");
         } else if (cmd == "autotalk") {
-            g_autoTalk = !args.empty() && args[0] == "on";
+            if (!args.empty() && args[0] == "prefer") {  // autotalk prefer <text[:uses]> ...: these first, in order
+                g_talkPrefs.clear();
+                for (size_t i = 1; i < args.size(); i++) {
+                    std::string t = args[i];
+                    int uses = -1;
+                    size_t c = t.rfind(':');
+                    if (c != std::string::npos && c + 1 < t.size() && isdigit((unsigned char)t[c + 1])) {
+                        uses = atoi(t.c_str() + c + 1);
+                        t.resize(c);
+                    }
+                    for (auto& ch : t) ch = ch == '~' ? ' ' : (char)tolower((unsigned char)ch);
+                    g_talkPrefs.push_back({t, uses});
+                }
+            } else {
+                g_autoTalk = !args.empty() && args[0] == "on";
+            }
             if (!g_autoTalk && g_talkState) {
                 g_ctl.trigR = 0;
                 g_shm->text[1].hover = -1;
@@ -1250,10 +1319,14 @@ int main(int argc, char** argv) {
                    how ? how : "still shut");
             if (!how) g_checkFailed = true;
         } else if (cmd == "fight") {
+            // fight <timeout> [module]: with the module, a closing-in that stops getting closer (furniture, a railing
+            // between you) walks the walkmesh route instead (tools/navmesh.py)
             double timeout = args.empty() ? 60 : atof(args[0].c_str());
+            std::string module = args.size() > 1 ? args[1] : "";
             g_ctl.pointer = KVR_POINTER_WORLD;
             double end = Now() + timeout;
-            int clearRuns = 0, swings = 0, shots = 0;
+            int clearRuns = 0, swings = 0, shots = 0, stalled = 0;
+            float bestClose = 1e9f;
             bool side = false;
             auto gameCmd = [&](const char* text) {
                 FILE* gf = nullptr;
@@ -1309,6 +1382,28 @@ int main(int argc, char** argv) {
                     RunFor(1.6);
                 } else {
                     RunFor(0.5);  // closing in (the game walks you there)
+                    float d = 0, ex = 0, ey = 0, px = 0, py = 0;
+                    std::string line = LogLastLine("fight: closing on", from);
+                    size_t q = line.find(", ");
+                    bool parsed = q != std::string::npos &&
+                                  sscanf_s(line.c_str() + q, ", %f m, at (%f %f) from (%f %f)", &d, &ex, &ey, &px, &py) == 5;
+                    if (parsed && d < bestClose - 0.3f) {
+                        bestClose = d;
+                        stalled = 0;
+                    } else if (parsed && ++stalled >= 4 && !module.empty()) {
+                        std::string route = NavRoute(module, px, py, ex, ey);
+                        printf("[%.1f]   fight: no closer than %.1f m - walkmesh route: %s\n", Now(), bestClose,
+                               route.empty() ? "(none)" : route.c_str());
+                        if (!route.empty()) {
+                            long f2 = LogSize();
+                            gameCmd(("goto " + route).c_str());
+                            RunUntil(15, [&] {
+                                return LogContains("autopilot: arrived", f2) || LogContains("autopilot: stuck", f2);
+                            });
+                        }
+                        stalled = 0;
+                        bestClose = 1e9f;
+                    }
                 }
             }
             printf("[%.1f]   fight: %s after %d swings, %d shots\n", Now(), clearRuns >= 3 ? "clear" : "TIMED OUT", swings,

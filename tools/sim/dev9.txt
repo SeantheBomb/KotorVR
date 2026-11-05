@@ -1,0 +1,42 @@
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+pointer world
+aimhand
+autotalk on
+key grave
+type invulnerability
+key enter
+game neareye 1
+wait 1
+game pos
+walk 40 43.56 118.75 45.6 120.1
+use 47.42 120.13 1.3       # to the Starboard Section (module transition)
+wait_world 120
+wait 3
+wait_talk_done 4 120       # Carth on the comm
+key grave                  # the cheat resets with the module: invulnerable again
+type invulnerability
+key enter
+wait 1
+game pos
+game doors
+walk 120 61.77 117.12 65.22 95.13
+fight 120
+walk 60 76.44 92.93 76.20 84.00
+fight 120
+opendoor 76.89 81.26 1.3
+fight 120
+wait_talk_done 4 60
+game pos
+shot starboard
+key f4
+wait 4
