@@ -51,6 +51,21 @@ check_count @mark one_pull_one_attack combat:~player~attack~roll 1 1 4
 check_count @mark bolt_stops_at_enemy m~at~the~enemy 1 1 0.2
 check_no_log idle_no_attacks combat:~player~attack~roll 12
 shot idle
+# 8: a bolt fired at a wall stops at the wall
+game facewall
+wait_new_log autopilot:~facing 10
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+mark
+trigger
+check_since_mark bolt_stops_at_wall m~at~the~wall 3
+shot wall
 # 8: four aimed shots, each a few seconds apart: a shot that hits never loses its damage
 game faceenemy
 wait 1
@@ -104,18 +119,3 @@ stick ly=1 for=2
 game moved 1.0
 check_log free_to_move moved~ok 3
 shot moved
-# 8: a bolt fired at a wall stops at the wall
-game facewall
-wait_new_log autopilot:~facing 10
-game aimhint
-wait 0.5
-hand_adjust
-wait 0.5
-game aimhint
-wait 0.5
-hand_adjust
-wait 0.6
-mark
-trigger
-check_since_mark bolt_stops_at_wall m~at~the~wall 3
-shot wall
