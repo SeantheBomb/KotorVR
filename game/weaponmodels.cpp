@@ -431,6 +431,34 @@ float WeaponModels_Length(int row, int variation) {
     return -minZ;
 }
 
+bool WeaponModels_Muzzle(int row, int variation, float out[3]) {
+    float len = WeaponModels_Length(row, variation);
+    auto pre = g_prefix.find(row);
+    if (pre == g_prefix.end() || len < 0.05f) return false;
+    char resref[64];
+    sprintf_s(resref, "%s_%03d", pre->second.c_str(), variation > 0 ? variation : 1);
+    const WModel* m = &GetModel(resref);
+    if (!m->ok) {
+        sprintf_s(resref, "%s_001", pre->second.c_str());
+        m = &GetModel(resref);
+    }
+    // the barrel's centre line: the centroid of the front 15% of the gun (the exporter turns -Z along the barrel)
+    double sx = 0, sy = 0;
+    int n = 0;
+    for (const WMesh& me : m->meshes)
+        for (size_t i = 0; i + 2 < me.pos.size(); i += 3)
+            if (me.pos[i + 2] < -0.85f * len) {
+                sx += me.pos[i];
+                sy += me.pos[i + 1];
+                n++;
+            }
+    if (n < 3) return false;
+    out[0] = (float)(sx / n);
+    out[1] = (float)(sy / n);
+    out[2] = -len;
+    return true;
+}
+
 bool WeaponModels_Draw(int row, int variation, float glow, float blade, const float* glowRgb) {
     auto pre = g_prefix.find(row);
     if (pre == g_prefix.end() || !LoadGl()) return false;

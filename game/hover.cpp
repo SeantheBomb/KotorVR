@@ -162,8 +162,15 @@ void Hover_Update(const KvrInput& in) {
     sprintf_s(text, flash ? "~#%s" : "~%s", g_name);  // '~': KotOR's own panel look; '#': brighter title on interact
     static char lastText[128];
     static DWORD lastSent;
+    // ~10 deg across at any distance (2026-11-05: 0.05 m per m + 0.12 was ~5 deg at 3 m - too small to read)
+    float width = 0.17f * dist + 0.05f;
+    if (!g_visible || strcmp(text, lastText) != 0) {
+        float deg = 2.0f * atanf(width * 0.5f / dist) * 57.29578f;
+        Log("hover: label '%s' %.2f m wide at %.1f m = %.1f deg (%s)", g_name, width, dist, deg,
+            deg >= 9.0f ? "readable" : "small");
+    }
     if (!g_visible || strcmp(text, lastText) != 0 || GetTickCount() - lastSent > 50) {  // not every frame
-        VR_ShowText(kSlot, KVR_ANCHOR_WORLD, pos, rq, 0.05f * dist + 0.12f, text, -1);
+        VR_ShowText(kSlot, KVR_ANCHOR_WORLD, pos, rq, width, text, -1);
         strcpy_s(lastText, text);
         lastSent = GetTickCount();
     }

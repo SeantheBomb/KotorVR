@@ -446,6 +446,7 @@ static std::vector<Bolt> g_bolts;
 static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix in eye space (tip along -Z)
 static float g_muzzleLen;
 static bool g_muzzleValid;
+static float g_muzzleLocal[3];  // the muzzle in the weapon's frame (on the barrel's centre line)
 static float g_barrelO[3], g_barrelD[3];  // the muzzle and barrel direction in world coordinates, last eye drawn
 static double g_barrelAt;
 static float g_lastInvEye[16];
@@ -473,6 +474,13 @@ static double NowS() { return GetTickCount() / 1000.0; }
 float Weapon_SpreadDeg() { return g_spreadDeg; }
 bool Weapon_Steady() { return g_steadySince >= 0 && NowS() - g_steadySince > 1.0; }
 void Weapons_ChargeNextShot() { g_nextCharged = true; }
+
+// this frame's muzzle in eye space
+static void MuzzleEye(float out[3]) {
+    for (int r = 0; r < 3; r++)
+        out[r] = g_muzzleEye[r] * g_muzzleLocal[0] + g_muzzleEye[4 + r] * g_muzzleLocal[1] + g_muzzleEye[8 + r] * g_muzzleLocal[2] +
+                 g_muzzleEye[12 + r];
+}
 
 bool Weapons_Barrel(float o[3], float d[3]) {
     if (NowS() - g_barrelAt > 0.5) return false;
@@ -758,8 +766,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     for (Bolt& b : g_bolts) {
         if (b.fromSet || tnow < b.t0 || !g_muzzleValid) continue;
         // muzzle in eye space -> world: inverse of the (rigid) world view
-        float me[3] = {g_muzzleEye[8] * -g_muzzleLen + g_muzzleEye[12], g_muzzleEye[9] * -g_muzzleLen + g_muzzleEye[13],
-                       g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
+        float me[3];
+        MuzzleEye(me);
         float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
         for (int r = 0; r < 3; r++) b.from[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
         if (b.alongBarrel) {  // the barrel (-Z of the weapon) in eye space -> world: to what it hits, else 30 m out
@@ -828,8 +836,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         Melee_SetBlade(h, wb, wt);
     }
     if (g_muzzleValid) {  // the barrel this frame, in world coordinates (the test harness aims with it)
-        float me[3] = {g_muzzleEye[8] * -g_muzzleLen + g_muzzleEye[12], g_muzzleEye[9] * -g_muzzleLen + g_muzzleEye[13],
-                       g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
+        float me[3];
+        MuzzleEye(me);
         float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
         float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]};
         for (int r = 0; r < 3; r++) {
@@ -1403,21 +1411,25 @@ void Weapons_Draw(const float invEye[16]) {
             memcpy(g_muzzleEye, mv, sizeof g_muzzleEye);
             g_muzzleLen = WeaponModels_Length(row, var);
             if (g_muzzleLen < 0.1f) g_muzzleLen = 0.25f;
+            if (!WeaponModels_Muzzle(row, var, g_muzzleLocal)) {
+                g_muzzleLocal[0] = g_muzzleLocal[1] = 0;
+                g_muzzleLocal[2] = -g_muzzleLen;
+            }
             g_muzzleValid = true;
             if (NowS() - g_lastFlash < 0.07) {  // muzzle flash: a hot star at the tip
                 p_glDisable(GL_TEXTURE_2D);
                 p_glEnable(GL_BLEND);
                 p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
                 p_glDepthMask(GL_FALSE);
-                float z = -g_muzzleLen, r = 0.05f;
+                float mx = g_muzzleLocal[0], my = g_muzzleLocal[1], z = g_muzzleLocal[2], r = 0.05f;
                 p_glBegin(GL_TRIANGLES);
                 for (int k = 0; k < 6; k++) {
                     float a0 = k * 1.0472f, a1 = a0 + 0.35f;
                     p_glColor4f(1.0f, 0.9f, 0.7f, 1.0f);
-                    p_glVertex3f(0, 0, z);
+                    p_glVertex3f(mx, my, z);
                     p_glColor4f(1.0f, 0.4f, 0.2f, 0.0f);
-                    p_glVertex3f(r * cosf(a0), r * sinf(a0), z - 0.02f);
-                    p_glVertex3f(r * cosf(a1), r * sinf(a1), z - 0.02f);
+                    p_glVertex3f(mx + r * cosf(a0), my + r * sinf(a0), z - 0.02f);
+                    p_glVertex3f(mx + r * cosf(a1), my + r * sinf(a1), z - 0.02f);
                 }
                 p_glEnd();
                 p_glDepthMask(GL_TRUE);

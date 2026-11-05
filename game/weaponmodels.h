@@ -13,6 +13,8 @@ bool WeaponModels_Draw(int row, int variation, float glow = 0, float blade = 1, 
 // unknown.
 bool WeaponModels_ResRef(int row, int variation, char* out, size_t size);
 float WeaponModels_Length(int row, int variation);
+// A gun's muzzle in its model frame: the end of the barrel's centre line (the barrel sits above the grip).
+bool WeaponModels_Muzzle(int row, int variation, float out[3]);
 // Hands from the character's own body model (exported by tools/hand_export.py to <game>\kvr\hands), drawn in the
 // current modelview = the hand bone's frame (fingers along -Z). side 0 left / 1 right; curl 0 open .. 1 fist for the
 // middle / ring / little fingers and thumb (grip), index separately (trigger). texture "" = the model's own.

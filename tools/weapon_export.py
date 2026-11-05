@@ -70,13 +70,49 @@ def bake(model):
     return out
 
 
-def grip_frame(meshes):
-    """Rotation rows mapping root space -> grip frame (tip along -Z, 'up' along +Y)."""
+GUN_WORDS = ("blstr", "pstl", "rfl", "crbn", "bowc", "rptn", "dsrpt")
+
+
+def is_gun(resref):
+    r = resref.lower()
+    return any(w in r for w in GUN_WORDS) and "gren" not in r
+
+
+def barrel_axis(pts, fwd):
+    """A gun's barrel direction: the line through the centroids of slices across its front half (least squares).
+    The farthest point from the grip (the muzzle tip) is not on the barrel's axis line from the grip - the barrel
+    sits above the hand - so 'grip -> tip' ran 8-17 deg off the visible barrel (2026-11-05)."""
+    proj = [sum(p[i] * fwd[i] for i in range(3)) for p in pts]
+    lo, hi = min(proj), max(proj)
+    cs = []
+    for k in range(8):
+        a = lo + (hi - lo) * (0.45 + 0.07 * k)
+        b = a + (hi - lo) * 0.07
+        sl = [p for p, s in zip(pts, proj) if a <= s < b]
+        if len(sl) >= 3:
+            cs.append([sum(p[i] for p in sl) / len(sl) for i in range(3)])
+    if len(cs) < 3:
+        return None
+    m = [sum(c[i] for c in cs) / len(cs) for i in range(3)]
+    cov = [[sum((c[i] - m[i]) * (c[j] - m[j]) for c in cs) for j in range(3)] for i in range(3)]
+    v = fwd[:]
+    for _ in range(50):  # principal direction (power iteration)
+        v = norm([sum(cov[i][j] * v[j] for j in range(3)) for i in range(3)]) or fwd
+    if sum(v[i] * fwd[i] for i in range(3)) < 0:
+        v = [-x for x in v]
+    return v
+
+
+def grip_frame(meshes, gun=False):
+    """Rotation rows mapping root space -> grip frame (tip along -Z, 'up' along +Y). Guns: -Z along the barrel."""
     pts = [p for _, _, pos, _, _ in meshes for p in pos]
     blade = [p for _, f, pos, _, _ in meshes if f for p in pos]
     tip_src = blade or pts
     tip = max(tip_src, key=lambda p: p[0] ** 2 + p[1] ** 2 + p[2] ** 2)
     fwd = norm(tip) or [0, 0, 1]
+    if gun:
+        for _ in range(6):  # re-slice along each new estimate until it settles
+            fwd = barrel_axis(pts, fwd) or fwd
     c = [sum(p[i] for p in pts) / len(pts) for i in range(3)]
     side = [c[i] - fwd[i] * sum(c[k] * fwd[k] for k in range(3)) for i in range(3)]
     up = norm(side)
@@ -180,7 +216,7 @@ def main(game, out):
             if not meshes:
                 print(f"{r}: no renderable meshes")
                 continue
-            rows = blade_edge_up(meshes, grip_frame(meshes))
+            rows = blade_edge_up(meshes, grip_frame(meshes, is_gun(r)))
             write_model(os.path.join(out, "models", r + ".kvrw"), meshes, rows)
             textures.update(t for t, *_ in meshes)
             print(f"{r}: {len(meshes)} meshes, {sum(len(x[2]) for x in meshes)} verts")

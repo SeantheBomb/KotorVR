@@ -25,7 +25,7 @@ game goto 61.77 117.12 63.2 104
 wait_log incoming_attack 60
 game stop
 game faceenemy
-wait_log autopilot:~facing 10
+wait_new_log autopilot:~facing 10
 hand R x=0.20 y=-0.15 z=-0.35 yaw=0 pitch=0
 wait 1
 game faceenemy

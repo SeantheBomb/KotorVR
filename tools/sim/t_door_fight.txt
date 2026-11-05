@@ -28,7 +28,7 @@ game pos
 game doors
 shot at_door
 game face 76.89 81.26
-wait_log autopilot:~facing 10
+wait_new_log autopilot:~facing 10
 hand R x=0.20 y=-0.10 z=-0.35 yaw=0 pitch=5
 wait 1
 game pick
