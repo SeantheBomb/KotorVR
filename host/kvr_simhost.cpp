@@ -34,6 +34,14 @@
 //   check_no_log <name> <substring> <seconds>       CHECK: the substring does not appear for <seconds>
 //   check_count <name> <substring> <min> <max> <seconds>  CHECK: it appears min..max times in the next <seconds>
 //   hand_adjust                       turn the right hand by the game's last "aimhint" (after: game aimhint)
+//   autotalk on|off                   in the background: whenever a conversation offers replies, pick the first
+//   ringpick <text> [timeout]         pick the action-ring entry containing <text> ('~' = space)
+//   fight <timeout>                   fight the nearest enemies until none is left close by: the game steps
+//                                     ("fight: engaged melee|ranged" / "fight: clear"), this swings or aims + shoots
+//   use <x> <y> <z> | npc [ring <text>]   point the right hand at a world point (npc: the nearest friendly one)
+//   opendoor <x> <y> <z>              grip a door; if it stays shut, Security from the ring; then the party
+//                                     member's (Tab). CHECK per door and grip it (or hold the grip and pick
+//                                     <text> from the action ring)
 //   mark / check_since_mark <name> <substring> <timeout>  like check_log, from the last mark (events logged early)
 //                                     '~' in a substring stands for a space. Checks print "CHECK PASS/FAIL <name>"
 //                                     and the run goes on; any FAIL makes the exit code 1.
@@ -291,6 +299,9 @@ static HandPose g_hand[2] = {{-0.22, -0.40, -0.35, 0, 20, 0}, {0.22, -0.40, -0.3
 static HandPose g_swingFrom, g_swingTo;
 static bool g_checkFailed;  // a check_* command failed (the run continues, the exit code says so)
 static long g_mark;         // log offset of the last "mark" command
+static bool g_autoTalk;     // pick the first reply of every conversation (autotalk on)
+static int g_talkState;     // 0 idle, 1 hovering a reply, 2 pressing the trigger
+static double g_talkAt;     // when the state last changed / the next pick may start
 static double g_swingT0, g_swingDur;  // right-hand sweep in progress when g_swingDur > 0
 struct Release {
     double at;
@@ -593,7 +604,65 @@ static void RecordTick() {
     if (!WriteFile(g_recPipe, g_recBuf.data(), (DWORD)g_recBuf.size(), &n, nullptr)) RecordStop();
 }
 
+static void HandAdjust() {
+    FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
+    std::string all;
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f), from = n > 65536 ? n - 65536 : 0;
+        all.resize(n - from);
+        fseek(f, from, SEEK_SET);
+        all.resize(fread(&all[0], 1, all.size(), f));
+        fclose(f);
+    }
+    size_t at = all.rfind("aimhint dyaw=");
+    float dy = 0, dp = 0;
+    if (at != std::string::npos && sscanf_s(all.c_str() + at, "aimhint dyaw=%f dpitch=%f", &dy, &dp) == 2) {
+        g_hand[1].yaw += dy;
+        g_hand[1].pitch += dp;
+        printf("[%.1f]   hand R turned by yaw %.2f pitch %.2f -> yaw %.2f pitch %.2f\n", Now(), dy, dp, g_hand[1].yaw,
+               g_hand[1].pitch);
+    } else {
+        printf("[%.1f]   hand_adjust: no aimhint in the log\n", Now());
+    }
+}
+
+// autotalk: hover the conversation panel's first reply line, pull the trigger, wait, repeat
+static void AutoTalkTick() {
+    if (!g_autoTalk) return;
+    double now = Now();
+    KvrTextPanel& p = g_shm->text[1];
+    if (g_talkState == 1 && now - g_talkAt > 0.15) {
+        g_ctl.trigR = 1;
+        g_talkState = 2;
+        g_talkAt = now;
+    } else if (g_talkState == 2 && now - g_talkAt > 0.15) {
+        g_ctl.trigR = 0;
+        p.hover = -1;
+        g_talkState = 0;
+        g_talkAt = now + 1.0;  // the next line needs a moment to come up
+    } else if (g_talkState == 0 && now > g_talkAt && p.anchor && p.pickable) {
+        int line = 0, pick = -1;
+        for (const char* t = p.text; *t;) {
+            if (*t != '#' && *t != '\n') {
+                pick = line;
+                break;
+            }
+            const char* nl = strchr(t, '\n');
+            if (!nl) break;
+            t = nl + 1;
+            line++;
+        }
+        if (pick < 0) return;
+        p.hover = pick;
+        g_talkState = 1;
+        g_talkAt = now;
+        printf("[%.1f]   autotalk: reply line %d\n", now, pick);
+    }
+}
+
 static void Tick() {
+    AutoTalkTick();
     PublishHead();
     PublishInput();
     PullAll();
@@ -639,6 +708,99 @@ template <class F> static bool RunUntil(double timeout, F cond) {
     }
     return false;
 }
+
+static void GameCmd(const std::string& text) {
+    FILE* gf = nullptr;
+    if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+        fprintf(gf, "%s\n", text.c_str());
+        fclose(gf);
+    }
+}
+
+// use <x> <y> <z> | npc [ring <text>]: see the command list
+static void UseCmd(const std::vector<std::string>& args) {
+    g_ctl.pointer = KVR_POINTER_WORLD;  // (a menu click left the pointer on the panel)
+    // point the hand's ray at a world point (the game turns you and says how far to turn the hand), grip
+    bool npc = !args.empty() && args[0] == "npc";  // use npc: the nearest friendly character (talk)
+    std::string pt = npc ? std::string("npc") : (args.size() >= 3 ? args[0] + " " + args[1] + " " + args[2] : std::string("0 0 0"));
+    auto gameCmd = [&](const std::string& text) {
+        FILE* gf = nullptr;
+        if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+            fprintf(gf, "%s\n", text.c_str());
+            fclose(gf);
+        }
+    };
+    long fromUse = LogSize();
+    gameCmd(npc ? std::string("pointatnpc") : "pointat " + pt);
+    bool faced = RunUntil(20, [&] { return LogContains("autopilot: facing", fromUse); });  // walked up, turned
+    if (!faced) printf("[%.1f]   use: never faced the target\n", Now());
+    RunFor(0.3);
+    for (int k = 0; k < 3; k++) {
+        long from = LogSize();
+        gameCmd("pointhint");
+        RunUntil(1.0, [&] { return LogContains("aimhint dyaw=", from); });
+        HandAdjust();
+        RunFor(0.3);
+    }
+    std::string ring;
+    for (size_t i = npc ? 1 : 3; i + 1 < args.size(); i++)
+        if (args[i] == "ring") ring = args[i + 1];
+    if (ring.empty()) {
+        g_ctl.gripR = 1;
+        RunFor(0.2);
+        g_ctl.gripR = 0;
+        RunFor(0.3);
+    } else {
+        g_ctl.gripR = 1;  // held: the target's action ring
+        RunFor(0.8);
+        g_ctl.gripR = 0;
+        RunFor(0.3);
+        // (the ring stays up; pick from it like ringpick)
+        std::string want = ring;
+        for (auto& ch : want) ch = (ch == '~') ? ' ' : (char)tolower((unsigned char)ch);
+        int pick = -1;
+        RunUntil(3, [&] {
+            KvrTextPanel& p = g_shm->text[2];
+            if (!p.anchor) return false;
+            std::string txt(p.text);
+            for (auto& ch : txt) ch = (char)tolower((unsigned char)ch);
+            size_t f = txt.find(want);
+            if (f == std::string::npos) return false;
+            pick = 0;
+            for (size_t i = 0; i < f; i++) pick += txt[i] == '\n';
+            return true;
+        });
+        if (pick >= 0) {
+            g_shm->text[2].hover = pick;
+            RunFor(0.15);
+            g_ctl.trigR = 1;
+            RunFor(0.15);
+            g_ctl.trigR = 0;
+            g_shm->text[2].hover = -1;
+        }
+        printf("[%.1f]   use: ring '%s' %s\n", Now(), ring.c_str(), pick >= 0 ? "picked" : "NOT FOUND");
+    }
+    printf("[%.1f]   use %s done\n", Now(), pt.c_str());
+}
+
+// no conversation / cutscene for <quiet> seconds
+static bool WaitTalkDone(double quiet, double timeout) {
+    double freeSince = Now();
+    return RunUntil(timeout, [&] {
+        if (g_shm->text[1].anchor || g_shm->cinematic) freeSince = Now();
+        return Now() - freeSince >= quiet;
+    });
+}
+
+// the doorway at (x, y): open? (the game's line of sight through it)
+static bool DoorOpen(const std::string& x, const std::string& y) {
+    // walk through it: the only sure test (line of sight past some doorways ends in the frame)
+    long from = LogSize();
+    GameCmd("passdoor " + x + " " + y);
+    bool done = RunUntil(12, [&] { return LogContains("autopilot: arrived", from) || LogContains("autopilot: stuck", from); });
+    return done && LogContains("autopilot: arrived", from);
+}
+
 
 // key=value argument parsing
 static bool Arg(const std::vector<std::string>& a, const char* key, double& out) {
@@ -924,26 +1086,7 @@ int main(int argc, char** argv) {
             }
             printf("[%.1f]   -> game: %s\n", Now(), text.c_str());
         } else if (cmd == "hand_adjust") {  // turn the right hand by the game's last "aimhint dyaw= dpitch=" line
-            FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
-            std::string all;
-            if (f) {
-                fseek(f, 0, SEEK_END);
-                long n = ftell(f), from = n > 65536 ? n - 65536 : 0;
-                all.resize(n - from);
-                fseek(f, from, SEEK_SET);
-                all.resize(fread(&all[0], 1, all.size(), f));
-                fclose(f);
-            }
-            size_t at = all.rfind("aimhint dyaw=");
-            float dy = 0, dp = 0;
-            if (at != std::string::npos && sscanf_s(all.c_str() + at, "aimhint dyaw=%f dpitch=%f", &dy, &dp) == 2) {
-                g_hand[1].yaw += dy;
-                g_hand[1].pitch += dp;
-                printf("[%.1f]   hand R turned by yaw %.2f pitch %.2f -> yaw %.2f pitch %.2f\n", Now(), dy, dp, g_hand[1].yaw,
-                       g_hand[1].pitch);
-            } else {
-                printf("[%.1f]   hand_adjust: no aimhint in the log\n", Now());
-            }
+            HandAdjust();
         } else if (cmd == "check_bright") {  // CHECK: the left eye's mean brightness reaches <min> within <timeout> s
             std::string name = args.size() > 0 ? args[0] : "?";
             double minL = args.size() > 1 ? atof(args[1].c_str()) : 10, timeout = args.size() > 2 ? atof(args[2].c_str()) : 5;
@@ -988,6 +1131,189 @@ int main(int argc, char** argv) {
                 RunFor(0.25);
                 printf("[%.1f]   luma %.1f\n", Now(), MeanLuma(g_shared[0]));
             }
+        } else if (cmd == "walk") {  // walk <timeout> x y [x y ...]: the game's autopilot there; CHECK fails if stuck
+            double timeout = args.empty() ? 60 : atof(args[0].c_str());
+            std::string way;
+            for (size_t i = 1; i < args.size(); i++) way += " " + args[i];
+            long from = LogSize();
+            FILE* gf = nullptr;
+            if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+                fprintf(gf, "goto%s\n", way.c_str());
+                fclose(gf);
+            }
+            std::string res = "TIMED OUT";
+            RunUntil(timeout, [&] {
+                if (LogContains("autopilot: arrived", from)) { res = "arrived"; return true; }
+                if (LogContains("autopilot: stuck", from)) { res = "STUCK"; return true; }
+                return false;
+            });
+            printf("[%.1f]   walk%s: %s\n", Now(), way.c_str(), res.c_str());
+            if (res != "arrived") {
+                printf("[%.1f]   CHECK FAIL walk%s\n", Now(), way.c_str());
+                g_checkFailed = true;
+            }
+        } else if (cmd == "wait_talk_done") {  // wait_talk_done <seconds> <timeout>: no conversation / cutscene for <seconds>
+            double quiet = args.size() > 0 ? atof(args[0].c_str()) : 4, timeout = args.size() > 1 ? atof(args[1].c_str()) : 300;
+            double freeSince = Now();
+            bool ok = RunUntil(timeout, [&] {
+                if (g_shm->text[1].anchor || g_shm->cinematic) freeSince = Now();
+                return Now() - freeSince >= quiet;
+            });
+            printf("[%.1f]   wait_talk_done: %s\n", Now(), ok ? "done" : "STILL TALKING");
+            if (!ok) g_checkFailed = true;
+        } else if (cmd == "wait_quiet") {  // wait_quiet <substring> <seconds> <timeout>: no new such line for <seconds>
+            std::string needle = args.empty() ? "" : args[0];
+            for (auto& ch : needle)
+                if (ch == '~') ch = ' ';
+            double quiet = args.size() > 1 ? atof(args[1].c_str()) : 5, timeout = args.size() > 2 ? atof(args[2].c_str()) : 120;
+            long from = LogSize();
+            double lastSeen = Now();
+            bool ok = RunUntil(timeout, [&] {
+                if (LogContains(needle, from)) {
+                    from = LogSize();
+                    lastSeen = Now();
+                }
+                return Now() - lastSeen >= quiet;
+            });
+            printf("[%.1f]   wait_quiet '%s': %s\n", Now(), needle.c_str(), ok ? "quiet" : "STILL GOING");
+        } else if (cmd == "autotalk") {
+            g_autoTalk = !args.empty() && args[0] == "on";
+            if (!g_autoTalk && g_talkState) {
+                g_ctl.trigR = 0;
+                g_shm->text[1].hover = -1;
+                g_talkState = 0;
+            }
+        } else if (cmd == "ringpick") {
+            std::string want = args.empty() ? "" : args[0];
+            for (auto& ch : want) ch = (ch == '~') ? ' ' : (char)tolower((unsigned char)ch);
+            double timeout = args.size() > 1 ? atof(args[1].c_str()) : 3;
+            int pick = -1;
+            RunUntil(timeout, [&] {
+                KvrTextPanel& p = g_shm->text[2];
+                if (!p.anchor) return false;
+                std::string txt(p.text);
+                int line = 0;
+                size_t at = 0;
+                while (at <= txt.size()) {
+                    size_t nl = txt.find('\n', at);
+                    std::string l = txt.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+                    for (auto& ch : l) ch = (char)tolower((unsigned char)ch);
+                    if (!want.empty() && l.find(want) != std::string::npos) {
+                        pick = line;
+                        return true;
+                    }
+                    if (nl == std::string::npos) break;
+                    at = nl + 1;
+                    line++;
+                }
+                return false;
+            });
+            if (pick >= 0) {
+                g_shm->text[2].hover = pick;
+                RunFor(0.15);
+                g_ctl.trigR = 1;
+                RunFor(0.15);
+                g_ctl.trigR = 0;
+                g_shm->text[2].hover = -1;
+                RunFor(0.2);
+            }
+            printf("[%.1f]   ringpick '%s': %s\n", Now(), want.c_str(), pick >= 0 ? "picked" : "NOT FOUND");
+        } else if (cmd == "use") {
+            UseCmd(args);
+        } else if (cmd == "opendoor" && args.size() >= 3) {
+            // open a door the way the level wants: grip it; else Security from the ring; else the party member
+            // with the skill (Tab), as the Endar Spire's tutorial has it. CHECK fails if it stays shut.
+            std::vector<std::string> at(args.begin(), args.begin() + 3), ring = at;
+            ring.push_back("ring");
+            ring.push_back("secur");
+            const char* how = nullptr;
+            UseCmd(at);
+            RunFor(2.5);
+            WaitTalkDone(3, 120);
+            if (DoorOpen(at[0], at[1])) how = "grip";
+            if (!how) {
+                UseCmd(ring);
+                RunFor(5);
+                WaitTalkDone(3, 120);
+                if (DoorOpen(at[0], at[1])) how = "security";
+            }
+            if (!how) {
+                FocusGame();
+                TapKey(VK_TAB);  // the party member with the skill
+                RunFor(2);
+                UseCmd(ring);
+                RunFor(6);
+                WaitTalkDone(3, 120);
+                if (DoorOpen(at[0], at[1])) how = "party member's security";
+            }
+            printf("[%.1f]   CHECK %s opendoor %s %s (%s)\n", Now(), how ? "PASS" : "FAIL", at[0].c_str(), at[1].c_str(),
+                   how ? how : "still shut");
+            if (!how) g_checkFailed = true;
+        } else if (cmd == "fight") {
+            double timeout = args.empty() ? 60 : atof(args[0].c_str());
+            g_ctl.pointer = KVR_POINTER_WORLD;
+            double end = Now() + timeout;
+            int clearRuns = 0, swings = 0, shots = 0;
+            bool side = false;
+            auto gameCmd = [&](const char* text) {
+                FILE* gf = nullptr;
+                if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+                    fprintf(gf, "%s\n", text);
+                    fclose(gf);
+                }
+            };
+            while (!g_quit && Now() < end) {
+                long from = LogSize();
+                gameCmd("fightstep");
+                std::string state;
+                RunUntil(1.5, [&] {
+                    if (LogContains("fight: clear", from)) { state = "clear"; return true; }
+                    if (LogContains("fight: engaged melee", from)) { state = "melee"; return true; }
+                    if (LogContains("fight: engaged ranged", from)) { state = "ranged"; return true; }
+                    if (LogContains("fight: closing", from)) { state = "closing"; return true; }
+                    return false;
+                });
+                if (state == "clear") {
+                    if (++clearRuns >= 3) break;  // three quiet steps in a row: the fight is over
+                    RunFor(1.0);
+                    continue;
+                }
+                clearRuns = 0;
+                if (state == "melee") {
+                    HandPose& h = g_hand[1];
+                    h.x = side ? -0.2 : 0.35; h.y = -0.25; h.z = -0.45; h.yaw = side ? 45 : -45; h.pitch = 0; h.roll = 0;
+                    RunFor(0.25);
+                    g_swingFrom = g_hand[1];
+                    g_swingTo = g_hand[1];
+                    g_swingTo.x += side ? 0.75 : -0.75;
+                    g_swingTo.z += -0.2;
+                    g_swingDur = 0.16;
+                    g_swingT0 = Now();
+                    RunFor(0.3);
+                    g_hand[1] = g_swingFrom;
+                    side = !side;
+                    swings++;
+                    RunFor(0.5);
+                } else if (state == "ranged") {
+                    for (int k = 0; k < 2; k++) {
+                        long f2 = LogSize();
+                        gameCmd("aimhint");
+                        RunUntil(1.0, [&] { return LogContains("aimhint dyaw=", f2); });
+                        HandAdjust();
+                        RunFor(0.25);
+                    }
+                    g_ctl.trigR = 1;
+                    RunFor(0.15);
+                    g_ctl.trigR = 0;
+                    shots++;
+                    RunFor(1.6);
+                } else {
+                    RunFor(0.5);  // closing in (the game walks you there)
+                }
+            }
+            printf("[%.1f]   fight: %s after %d swings, %d shots\n", Now(), clearRuns >= 3 ? "clear" : "TIMED OUT", swings,
+                   shots);
+            if (clearRuns < 3) g_checkFailed = true;
         } else if (cmd == "mark") {  // check_since_mark looks from here (an event logged before its check started)
             g_mark = LogSize();
         } else if (cmd == "check_log" || cmd == "check_no_log" || cmd == "check_count" || cmd == "check_since_mark") {

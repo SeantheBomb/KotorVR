@@ -1,0 +1,40 @@
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+pointer world
+aimhand
+autotalk on
+key grave
+type invulnerability
+key enter
+game neareye 1
+wait 2
+walk 40 38.36 20.59
+use 40.80 20.71 1.3        # end_door02
+wait 3
+wait_talk_done 4 120
+shot door2
+key tab                    # Trask: his Security skill (his tutorial line)
+wait 2
+use 40.80 20.71 1.3 ring secur
+wait 6
+wait_talk_done 4 120
+shot door2b
+wait 1
+mark
+fight 150                  # the Sith boarding party beyond the door
+check_count @mark sword_fight_landed_hits blade~contact~on 1 999 0.1
+check_count @mark own_head_never_in_eyes neareye: 0 0 0.1
+wait_talk_done 4 60
+game pos
+shot after_fight1
+key f4
+wait 4

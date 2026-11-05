@@ -22,6 +22,7 @@
 #include "../common/kvr_shared.h"
 #include "features.h"
 #include "anim.h"
+#include "dialogue.h"
 #include "melee.h"
 #include "vr.h"
 #include "weapons.h"
@@ -322,9 +323,19 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                 // line of sight (walls / level geometry, creatures ignored) decides: clear = you can see it.
                 DWORD pid = 0;
                 if (void* pc = Weapon_PlayerCreature()) pid = *(DWORD*)((BYTE*)pc + 4);
+                float sp[3];
                 if (Melee_LineOfSight(headPos, g_subject, pid, 0)) {
                     r = 1;
                     Log("cutscene: only someone / something movable is in the way (walls are clear) -> first person");
+                } else if (Dialogue_SpeakerPos(sp)) {
+                    // a wide shot's centre can be a far wall (22 m, past Bandon): the scene is still in plain view
+                    // when the one you are talking with is (Trask's last stand, 2026-11-05)
+                    sp[2] += 1.4f;
+                    float dx = sp[0] - headPos[0], dy = sp[1] - headPos[1];
+                    if (dx * dx + dy * dy < 25.0f * 25.0f && Melee_LineOfSight(headPos, sp, pid, 0)) {
+                        r = 1;
+                        Log("cutscene: the speaker is in plain view (%.1f m) -> first person", sqrtf(dx * dx + dy * dy));
+                    }
                 }
             }
             if (r >= 0) {

@@ -14,5 +14,7 @@ bool Dialogue_Active();
 bool Dialogue_SkipClick();
 // Our conversation panel is up (any line, with or without replies).
 bool Dialogue_Showing();
+// Where the conversation's owner (the one you talk with) stands, world feet position.
+bool Dialogue_SpeakerPos(float out[3]);
 // Seconds since the last conversation ended (huge if none yet).
 double Dialogue_EndedAgo();

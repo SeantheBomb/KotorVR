@@ -95,14 +95,19 @@ $code = if ($sim.HasExited) { $sim.ExitCode } else { -1 }
 if (-not $KeepGame) {
     Get-Process swkotor -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 1
     if ($SaveFixture) {
-        $newest = Get-ChildItem "$game\saves" -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        # the save folder holding the most recently written file (an overwritten quicksave keeps its folder's date)
+        $newestFile = Get-ChildItem "$game\saves" -Directory | Get-ChildItem -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $newest = if ($newestFile) { Get-Item $newestFile.DirectoryName } else { $null }
         $fx = Join-Path $root "fixtures\saves\$SaveFixture"
-        if ($newest -and $newest.LastWriteTime -gt (Get-Item $out).CreationTime) {
+        if ($newest -and $newestFile.LastWriteTime -gt (Get-Item $out).CreationTime -and $newest.FullName -ne (Get-Item "$game\saves").FullName) {
             if (Test-Path $fx) { Remove-Item $fx -Recurse -Force }
             New-Item -ItemType Directory -Force $fx | Out-Null
             Copy-Item $newest.FullName $fx -Recurse
             Write-Host "fixture saved: $SaveFixture <- $($newest.Name)"
-        } else { Write-Host "WARNING: no save written during the run; fixture $SaveFixture not saved" }
+        } else {
+            Write-Host "WARNING: no save written during the run; fixture $SaveFixture not saved"
+            if ($newestFile) { Write-Host "  (newest save file: $($newestFile.FullName) at $($newestFile.LastWriteTime); run began $((Get-Item $out).CreationTime))" }
+        }
     }
     Copy-Item $iniSnapshot "$game\swkotor.ini" -Force
     # only replace the live saves with a complete snapshot (same save folders as when the run started)

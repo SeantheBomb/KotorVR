@@ -404,5 +404,10 @@ bool Dialogue_SkipClick() { return false; }
 
 double Dialogue_EndedAgo() { return g_endedAt ? (GetTickCount() - g_endedAt) / 1000.0 : 1e9; }
 
+bool Dialogue_SpeakerPos(float out[3]) {
+    DWORD owner = SpeakerOf(g_replyPanel ? g_replyPanel : g_panel);
+    return owner && Weapon_ObjectPos(owner & 0x7FFFFFFF, out);
+}
+
 bool Dialogue_Showing() { return g_showing;
 }

@@ -1,0 +1,51 @@
+# The whole Endar Spire, start to escape pod, played by the harness (playtest 2026-11-05: "this one level tests
+# almost every system"). Every issue check runs along the way.
+#   run_sim.ps1 -Script tutorial -Cheats -AllowDiscord -Force -TimeoutSec 1800
+wait_menu 90
+wait_calm 8 120
+click u=0.572 v=0.499
+wait 1
+wait_calm 1.5 60
+click u=0.466 v=0.498
+wait 1
+wait_calm 1.5 60
+click u=0.597 v=0.391
+wait 1
+wait_calm 1.5 60
+click u=0.613 v=0.437
+wait 1
+wait_calm 1.5 60
+click u=0.391 v=0.676
+wait 1
+wait_calm 1.5 60
+click u=0.597 v=0.455
+wait 1
+wait_calm 1.5 60
+click u=0.418 v=0.675
+wait 1
+wait_calm 1.5 60
+click u=0.601 v=0.486
+wait 1
+wait_calm 1.5 60
+wait_world 180
+wait_new_log movie:~closed 200          # the opening movie
+pointer world
+aimhand
+mark
+game neareye 1
+autotalk on
+key grave
+type invulnerability
+key enter
+wait_new_log dialogue: 60
+wait_talk_done 4 300                    # Trask's opening conversation (all of it), answered with the first reply each time
+check_count @mark own_head_never_in_eyes neareye: 0 0 0.1
+game pos
+game doors
+shot after_trask
+key f4                                  # milestone quicksave (run_sim -SaveFixture spire_bunk)
+wait 4
+# 1. the bunk room's footlocker
+use 10.8 21.9 0.5
+wait 2
+shot footlocker

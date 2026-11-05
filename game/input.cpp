@@ -218,7 +218,7 @@ void Input_Update(HWND wnd) {
         // Movement stays yours. (1) Pushing the stick while the game is still running an attack for you clears it
         // (the HUD's clear-queue button): an attack on a target that can't be reached used to leave the character
         // unable to walk after a fight. (2) An action we start (swing, shot, use, open, talk) must never walk you to
-        // the target: if the character travels > 0.8 m with the stick idle in the next 2.5 s, that walk is cancelled
+        // the target: if the character travels > 1.6 m with the stick idle in the next 2.5 s, that walk is cancelled
         // and a double tick says "too far - step closer".
         {
             static bool stickWas;
@@ -278,7 +278,7 @@ void Input_Update(HWND wnd) {
                 float pp[3];
                 if (Weapon_PlayerPos(pp)) {
                     float dx = pp[0] - g_attackFrom[0], dy = pp[1] - g_attackFrom[1];
-                    if (mag < 0.3f && dx * dx + dy * dy > 0.8f * 0.8f && ActionRing_ClearQueue()) {
+                    if (mag < 0.3f && dx * dx + dy * dy > 1.6f * 1.6f && ActionRing_ClearQueue()) {  // (a step to a door's use point is fine: 2026-11-05)
                         Combat_ResetAttacking();
                         g_attackWatchAt = -10;
                         Log("input: action would walk you to the target -> cancelled (step closer)");

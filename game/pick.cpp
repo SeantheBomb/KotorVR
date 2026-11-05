@@ -170,6 +170,13 @@ void Pick_SetAim(const float origin[3], const float dir[3]) {
     g_aimAt = GetTickCount();
 }
 
+bool Pick_Aim(float o[3], float d[3]) {
+    if (!Pick_Active()) return false;
+    memcpy(o, g_o, sizeof g_o);
+    memcpy(d, g_d, sizeof g_d);
+    return true;
+}
+
 bool Pick_Active() { return g_aimAt && GetTickCount() - g_aimAt < 300; }
 
 void Pick_Update() {
@@ -318,6 +325,49 @@ void Pick_Update() {
                                                           (g_hitPoint[1] - g_o[1]) * (g_hitPoint[1] - g_o[1]) +
                                                           (g_hitPoint[2] - g_o[2]) * (g_hitPoint[2] - g_o[2])));
     }
+}
+
+bool Pick_DoorNormal(float x, float y, float n[2]) {
+    for (const DoorBox& d : g_doors) {
+        float dx = d.pos[0] - x, dy = d.pos[1] - y;
+        if (dx * dx + dy * dy < 0.3f * 0.3f) {
+            n[0] = -d.s;  // the door's local +y in the world (its panel runs along local x)
+            n[1] = d.c;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Pick_NearestFriend(float out[3]) {
+    typedef void*(__fastcall * GetAreaFn)(void* obj, void*);
+    typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
+    float best = 15.0f * 15.0f;
+    bool found = false;
+    __try {
+        BYTE* player = (BYTE*)Weapon_PlayerCreature();
+        BYTE* area = player ? (BYTE*)((GetAreaFn)0x4CB120)(player, nullptr) : nullptr;
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        if (!area || !server) return false;
+        DWORD pid = *(DWORD*)(player + 4);
+        const float* pp = (const float*)(player + 0x90);
+        DWORD* ids = *(DWORD**)(area + 0x190);
+        int n = *(int*)(area + 0x194);
+        for (int i = 0; ids && i < n && i < 8192; i++) {
+            if (ids[i] == pid) continue;
+            BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, ids[i]);
+            if (!o || ObjType(o) != T_CREATURE || Melee_IsEnemy(ids[i])) continue;
+            const float* f = (const float*)(o + 0x90);
+            float dx = f[0] - pp[0], dy = f[1] - pp[1], d = dx * dx + dy * dy;
+            if (d < best) {
+                best = d;
+                memcpy(out, f, 12);
+                found = true;
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return found;
 }
 
 void Pick_LogDoors() {

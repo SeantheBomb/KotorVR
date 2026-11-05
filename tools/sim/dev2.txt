@@ -1,0 +1,44 @@
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+pointer world
+aimhand
+autotalk on
+key grave
+type invulnerability
+key enter
+wait 1
+# 2. the bunk room's door: locked down; Trask has the override codes - talk to him, take control of him, open it
+use 21.12 20.71 1.3
+wait 2
+wait_talk_done 3 30
+use npc                    # talk to Trask
+wait_new_log dialogue: 10
+wait_talk_done 4 120
+key tab                    # take control of Trask
+wait 2
+shot as_trask
+use 21.12 20.71 1.3        # Trask opens it
+wait 3
+wait_talk_done 4 120       # "Now that the door's open..." - and back to you
+shot door1
+game pos
+key f4
+wait 4
+walk 40 38.36 20.59
+use 40.80 20.71 1.3        # end_door02
+wait 3
+wait_talk_done 4 120
+shot door2
+game pos
+game doors
+walk 30 43.95 20.71 46.00 27.50 45.00 30.00
+shot corridor
