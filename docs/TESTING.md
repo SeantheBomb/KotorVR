@@ -34,3 +34,22 @@ loaded, so the kinrath ~14 m from the entry are still alive (Game1 already clear
 `key <name>`, `type <text>`, `wait_log <substring> <timeout>` (whole log), `wait_new_log <substring> <timeout>`
 (only lines written after it starts; a sync point, never fails the run). Haptic requests print as `haptic L/R ...`. Runs drive the real mouse and keyboard focus:
 they only work while nobody is using the PC.
+
+## Issue tests with fixtures and checks (2026-11-05)
+
+Fixture saves (`fixtures/saves/<name>`, the only save in the list during a run; scripts load the top row):
+`starboard_entry` (Starboard Section entry after Trask's sacrifice, dual short swords), `starboard_pistol` (same,
+blaster pistol), `dantooine_ruins` (Game1). Build more with `-SaveFixture <name>` (the run's F4 quicksave).
+
+    .\tools\run_sim.ps1 -Script t_door -Fixture starboard_entry -Cheats -AllowDiscord -Force
+
+`-Cheats` turns the cheat console on and the enemy-sighted autopause off for that run only. Checks print
+`CHECK PASS/FAIL <name>`; any FAIL makes the run fail. Tests: `t_door` (issues 1, 10), `t_blaster` (6, 7, 8),
+`t_sword` (2, 7), `t_start` (4, new game), `t_floor` / `t_floorscan` / `t_corpse` (3), `t_flail` (9, WIP);
+`python tools\check_guns.py "<game dir>"` (5). Routes for `game goto`: `python tools\navmesh.py <module> x0 y0 x1 y1`.
+
+Harness commands to the game (`game <cmd>`, game/simcmd.cpp): `goto x y ...`, `approach d`, `face x y`,
+`faceenemy`, `facewall`, `aimhint` (+ simhost `hand_adjust`), `pos`, `posmark` / `moved m`, `pick`, `doors`,
+`neareye 1`, `trace`, `stop`. Checks: `check_log`, `check_no_log`, `check_count`, `mark` + `check_since_mark` /
+`@mark`, `check_bright`, `check_dark_time` (saves a picture + the game's position per dark episode), `lumatrace`.
+A real play session's probe.log is kept in `traces\play\` before a run replaces it.
