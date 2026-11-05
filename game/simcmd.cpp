@@ -6,6 +6,11 @@
 //   goto x y [x y ...]   autopilot: walk through the waypoints (world metres), facing the way it walks.
 //                        Logs "autopilot: waypoint N", "autopilot: arrived (x y)" or "autopilot: stuck at (x y)".
 //   face x y             turn the view to face a world point ("autopilot: facing (x y)")
+//   faceenemy            turn the view to the nearest live enemy
+//   facewall             face the nearest wall 2..12 m away (and aim at it)
+//   aimhint              log how far to turn the right hand so its gun barrel points at what faceenemy /
+//                        facewall chose
+//   posmark / moved m    remember the position / log "moved ok" if the player has gone m metres since
 //   pos                  log the player's position and the view / game-camera headings
 //   doors                log the area's doors and how many of the usable ones the ray can pick
 //   pick                 log what the right hand's ray picks right now ("simcmd: pickstate door ...")
@@ -24,6 +29,7 @@
 #include <dinput.h>
 
 #include "enginecam.h"
+#include "melee.h"
 #include "pick.h"
 #include "weapons.h"
 
@@ -41,6 +47,9 @@ float g_bestDist;
 DWORD g_progressAt;
 bool g_facing;
 float g_faceTo[2];
+float g_posMark[3];
+float g_aimPoint[3];  // what aimhint aims the gun at (faceenemy / facewall set it)
+bool g_aimSet;
 
 float WrapPi(float a) {
     while (a > 3.14159265f) a -= 6.2831853f;
@@ -85,6 +94,74 @@ void Run(char* line) {
         float hp[3] = {};
         bool hit = Pick_Hit(&id, hp);
         Log("simcmd: pickstate %s %08lX at (%.2f %.2f %.2f)", Pick_HitKind(), hit ? id : 0, hp[0], hp[1], hp[2]);
+    } else if (!strcmp(cmd, "faceenemy")) {
+        float e[3];
+        DWORD id = havePos ? Melee_NearestEnemy(p, e) : 0;
+        if (id) {
+            g_faceTo[0] = e[0];
+            g_faceTo[1] = e[1];
+            g_facing = true;
+            g_aimPoint[0] = e[0];
+            g_aimPoint[1] = e[1];
+            g_aimPoint[2] = e[2] + 1.15f;  // chest
+            g_aimSet = true;
+            Log("simcmd: nearest enemy %08lX at (%.2f %.2f), %.1f m", id, e[0], e[1],
+                sqrtf((e[0] - p[0]) * (e[0] - p[0]) + (e[1] - p[1]) * (e[1] - p[1])));
+        } else {
+            Log("simcmd: no enemy");
+        }
+    } else if (!strcmp(cmd, "aimhint")) {
+        // how far to turn the right hand (yaw left+, pitch up+, degrees) so the barrel points at the nearest
+        // enemy's chest; yaw / pitch changes of the hand turn the barrel the same way (simhost hand_adjust)
+        float bo[3], bd[3];
+        DWORD id = g_aimSet ? 1 : 0;
+        if (g_aimSet && Weapons_Barrel(bo, bd)) {
+            float t[3] = {g_aimPoint[0] - bo[0], g_aimPoint[1] - bo[1], g_aimPoint[2] - bo[2]};
+            float tl = sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+            float dyaw = WrapPi(atan2f(t[1], t[0]) - atan2f(bd[1], bd[0])) * 57.29578f;
+            float dpitch = (asinf(t[2] / tl) - asinf(bd[2] > 1 ? 1 : bd[2] < -1 ? -1 : bd[2])) * 57.29578f;
+            Log("simcmd: aimhint dyaw=%.2f dpitch=%.2f (%.1f m)", dyaw, dpitch, tl);
+        } else {
+            Log("simcmd: aimhint none (target %d, barrel %d)", (int)id, Weapons_Barrel(bo, bd) ? 1 : 0);
+        }
+    } else if (!strcmp(cmd, "facewall")) {
+        // the nearest wall 2..12 m away (16 headings, the area's line of sight at chest height): face it, aim at it
+        DWORD pid = 0;
+        if (void* pc = Weapon_PlayerCreature()) pid = *(DWORD*)((BYTE*)pc + 4);
+        float best = 1e9f, bh = 0;
+        float o[3] = {p[0], p[1], p[2] + 1.15f};
+        for (int k = 0; havePos && k < 16; k++) {
+            float h = k * 6.2831853f / 16, dir[3] = {cosf(h), sinf(h), 0};
+            float lo = 0, hi = 12;
+            float e[3] = {o[0] + dir[0] * hi, o[1] + dir[1] * hi, o[2]};
+            if (Melee_LineOfSight(o, e, pid, 0)) continue;
+            for (int i = 0; i < 10; i++) {
+                float m = (lo + hi) * 0.5f, q[3] = {o[0] + dir[0] * m, o[1] + dir[1] * m, o[2]};
+                if (Melee_LineOfSight(o, q, pid, 0)) lo = m;
+                else hi = m;
+            }
+            if (hi >= 2.0f && hi < best) {
+                best = hi;
+                bh = h;
+            }
+        }
+        if (best < 1e8f) {
+            g_aimPoint[0] = o[0] + cosf(bh) * best;
+            g_aimPoint[1] = o[1] + sinf(bh) * best;
+            g_aimPoint[2] = o[2];
+            g_aimSet = true;
+            g_faceTo[0] = g_aimPoint[0];
+            g_faceTo[1] = g_aimPoint[1];
+            g_facing = true;
+            Log("simcmd: wall %.1f m away at heading %.0f", best, bh * 57.29578f);
+        } else {
+            Log("simcmd: no wall within 12 m");
+        }
+    } else if (!strcmp(cmd, "posmark")) {
+        memcpy(g_posMark, p, sizeof g_posMark);
+    } else if (!strcmp(cmd, "moved") && nums.size() >= 1) {
+        float d = sqrtf((p[0] - g_posMark[0]) * (p[0] - g_posMark[0]) + (p[1] - g_posMark[1]) * (p[1] - g_posMark[1]));
+        Log("simcmd: moved %.2f m since posmark -> %s", d, d >= nums[0] ? "moved ok" : "moved SHORT");
     } else if (!strcmp(cmd, "doors")) {
         Pick_LogDoors();
     } else if (!strcmp(cmd, "pos")) {

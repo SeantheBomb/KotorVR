@@ -33,6 +33,7 @@
 //   check_log <name> <substring> <timeout>          CHECK: the substring appears in the log within <timeout> s
 //   check_no_log <name> <substring> <seconds>       CHECK: the substring does not appear for <seconds>
 //   check_count <name> <substring> <min> <max> <seconds>  CHECK: it appears min..max times in the next <seconds>
+//   hand_adjust                       turn the right hand by the game's last "aimhint" (after: game aimhint)
 //   mark / check_since_mark <name> <substring> <timeout>  like check_log, from the last mark (events logged early)
 //                                     '~' in a substring stands for a space. Checks print "CHECK PASS/FAIL <name>"
 //                                     and the run goes on; any FAIL makes the exit code 1.
@@ -906,13 +907,37 @@ int main(int argc, char** argv) {
                 fclose(gf);
             }
             printf("[%.1f]   -> game: %s\n", Now(), text.c_str());
+        } else if (cmd == "hand_adjust") {  // turn the right hand by the game's last "aimhint dyaw= dpitch=" line
+            FILE* f = _fsopen(kProbeLog, "rb", _SH_DENYNO);
+            std::string all;
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long n = ftell(f), from = n > 65536 ? n - 65536 : 0;
+                all.resize(n - from);
+                fseek(f, from, SEEK_SET);
+                all.resize(fread(&all[0], 1, all.size(), f));
+                fclose(f);
+            }
+            size_t at = all.rfind("aimhint dyaw=");
+            float dy = 0, dp = 0;
+            if (at != std::string::npos && sscanf_s(all.c_str() + at, "aimhint dyaw=%f dpitch=%f", &dy, &dp) == 2) {
+                g_hand[1].yaw += dy;
+                g_hand[1].pitch += dp;
+                printf("[%.1f]   hand R turned by yaw %.2f pitch %.2f -> yaw %.2f pitch %.2f\n", Now(), dy, dp, g_hand[1].yaw,
+                       g_hand[1].pitch);
+            } else {
+                printf("[%.1f]   hand_adjust: no aimhint in the log\n", Now());
+            }
         } else if (cmd == "mark") {  // check_since_mark looks from here (an event logged before its check started)
             g_mark = LogSize();
         } else if (cmd == "check_log" || cmd == "check_no_log" || cmd == "check_count" || cmd == "check_since_mark") {
+            // "@mark" as the first argument: count from the last mark instead of from now
+            bool fromMark = cmd == "check_since_mark" || (!args.empty() && args[0] == "@mark");
+            if (!args.empty() && args[0] == "@mark") args.erase(args.begin());
             std::string name = args.size() > 0 ? args[0] : "?", needle = args.size() > 1 ? args[1] : "";
             for (auto& ch : needle)
                 if (ch == '~') ch = ' ';
-            long from = cmd == "check_since_mark" ? g_mark : LogSize();
+            long from = fromMark ? g_mark : LogSize();
             bool pass;
             char detail[96] = "";
             if (cmd == "check_log" || cmd == "check_since_mark") {

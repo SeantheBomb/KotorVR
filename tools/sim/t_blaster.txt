@@ -1,0 +1,121 @@
+# Issues 6 + 7 (playtest 2026-11-05): idle with a blaster in a fight, the character kept shooting on its own (the
+# game's attack action repeating), and in fights the stick sometimes could not move the character.
+#   run_sim.ps1 -Script t_blaster -Fixture starboard_pistol -Cheats -AllowDiscord -Force
+# Pass: one trigger pull = exactly one game attack; none while idle afterwards; the stick moves you mid-fight;
+# bolts stop at the enemy / wall they hit, and hits keep their damage (issue 8).
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 2
+pointer world
+aimhand
+wait_new_log dialogue:~over 20   # Carth's comm call on arrival (the entry autosave only; a sync point)
+wait 2
+key grave
+type invulnerability
+key enter
+wait 1
+# down the corridor towards the first Sith trooper (65.3 92.9) until it opens fire
+game goto 61.77 117.12 63.2 104
+wait_log incoming_attack 60
+game stop
+game faceenemy
+wait_log autopilot:~facing 10
+hand R x=0.20 y=-0.15 z=-0.35 yaw=0 pitch=0
+wait 1
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 1
+shot aim
+# 6: one pull, one shot
+mark
+trigger
+check_count @mark one_pull_one_attack combat:~player~attack~roll 1 1 4
+check_count @mark bolt_stops_at_enemy m~at~the~enemy 1 1 0.2
+check_no_log idle_no_attacks combat:~player~attack~roll 12
+shot idle
+# 8: four aimed shots, each a few seconds apart: a shot that hits never loses its damage
+game faceenemy
+wait 1
+mark
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+trigger
+wait 3.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+trigger
+wait 3.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+trigger
+wait 3.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+trigger
+wait 3.5
+check_count @mark hits_keep_damage without~contact 0 0 0.2
+# 7: the stick moves you while the fight goes on (after a shot, with the game's attack possibly still queued)
+trigger
+wait 0.4
+game posmark
+stick ly=1 for=2
+game moved 1.0
+check_log free_to_move moved~ok 3
+shot moved
+# 8: a bolt fired at a wall stops at the wall
+game facewall
+wait_log autopilot:~facing 10
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.6
+mark
+trigger
+check_since_mark bolt_stops_at_wall m~at~the~wall 3
+shot wall

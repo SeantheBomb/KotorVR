@@ -16,7 +16,7 @@ wait_world 120
 wait 2
 pointer world
 aimhand
-wait_log dialogue:~over 40         # Carth's comm call on arrival
+wait_new_log dialogue:~over 20   # Carth's comm call on arrival (the entry autosave only; a sync point)
 wait 2
 game pos
 game doors

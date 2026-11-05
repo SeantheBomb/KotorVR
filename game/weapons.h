@@ -57,6 +57,8 @@ bool Weapon_ObjectPos(DWORD serverId, float out[3]);
 float Weapon_SpreadDeg();
 bool Weapon_Steady();
 void Weapons_ChargeNextShot();
+// The ranged weapon in the right hand: its muzzle and barrel direction in world coordinates (false if none).
+bool Weapons_Barrel(float o[3], float d[3]);
 // The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
 // with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
 void Weapons_FireBolt(const float targetWorld[3], float delay);

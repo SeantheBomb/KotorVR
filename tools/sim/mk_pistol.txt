@@ -1,0 +1,35 @@
+# Fixture builder: starboard_entry with the Blaster pistol in the right hand, left hand empty -> starboard_pistol
+#   run_sim.ps1 -Script mk_pistol -Fixture starboard_entry -SaveFixture starboard_pistol -Cheats -AllowDiscord -Force
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 2
+wait_log dialogue:~over 40
+wait 2
+key u                     # equipment screen
+wait 2
+click u=0.408 v=0.523     # LEFT weapon slot (lower row, left)
+wait 1.5
+click u=0.604 v=0.412     # None
+wait 0.8
+click u=0.500 v=0.671     # OK
+wait 1.5
+click u=0.478 v=0.523     # RIGHT weapon slot (lower row, right)
+wait 1.5
+click u=0.604 v=0.624     # Blaster pistol (one row lower once the left short sword is back in the list)
+wait 0.8
+click u=0.500 v=0.671     # OK
+wait 1.5
+shot equipped
+click u=0.601 v=0.671     # Close
+wait 2
+key f4                    # quicksave -> run_sim -SaveFixture
+wait 6

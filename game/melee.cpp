@@ -55,6 +55,8 @@ struct Credit {
     double at;
     float speed;   // swing speed (1 for shots)
     bool head;     // a head hit (shots)
+    double ttl;    // how long it stands: a swing's blow lands at once; a shot's game attack only rolls at its next
+                   // round (up to 3 s), so a shot's credit lasts longer (2026-11-05: hits with no damage)
 };
 std::map<DWORD, Credit> g_credit;
 std::map<DWORD, double> g_lastContact;
@@ -196,18 +198,41 @@ bool Melee_IsEnemy(DWORD id) {
     return f == 1 || f == 3 || f == 6 || f == 7 || f == 11 || f == 15;
 }
 
+DWORD Melee_NearestEnemy(const float from[3], float out[3]) {
+    DWORD best = 0;
+    float bd = 1e18f;
+    for (auto& kv : g_fighters) {
+        if (!Melee_IsEnemy(kv.first)) continue;
+        BYTE* c = (BYTE*)Weapon_CreatureById(kv.first);
+        if (!c) continue;
+        const float* p = (const float*)(c + 0x90);
+        float dx = p[0] - from[0], dy = p[1] - from[1], d = dx * dx + dy * dy;
+        if (d < bd) {
+            bd = d;
+            best = kv.first;
+            for (int k = 0; k < 3; k++) out[k] = p[k];
+        }
+    }
+    return best;
+}
+
 bool Melee_TakeCredit(DWORD target, float* speed, bool* head) {
     auto it = g_credit.find(target);
-    if (it == g_credit.end() || Now() - it->second.at > 1.6) return false;
+    if (it == g_credit.end() || Now() - it->second.at > it->second.ttl) return false;
     if (speed) *speed = it->second.speed;
     if (head) *head = it->second.head;
     g_credit.erase(it);
     return true;
 }
 
+float Melee_CreditAge(DWORD target) {
+    auto it = g_credit.find(target);
+    return it == g_credit.end() ? -1.0f : (float)(Now() - it->second.at);
+}
+
 bool Melee_HasCredit(DWORD target) {
     auto it = g_credit.find(target);
-    return it != g_credit.end() && Now() - it->second.at <= 1.6;
+    return it != g_credit.end() && Now() - it->second.at <= it->second.ttl;
 }
 
 static DWORD g_startAttackOn;
@@ -220,7 +245,7 @@ DWORD Melee_TakeAttackStart() {
 static void Contact(DWORD id, const float point[3], float speed) {
     double t = Now();
     g_lastContact[id] = t;
-    g_credit[id] = {t, speed, false};
+    g_credit[id] = {t, speed, false, 1.6};
     Anim_HitPause(id, speed > 5.0f ? 0.09f : 0.06f);
     Anim_Flinch(id, point);
     Cues_Contact(speed);
@@ -458,7 +483,7 @@ DWORD Melee_TakeShotTarget() {
 }
 
 // --- ranged: the barrel ray against enemy bodies
-void Melee_Shot(const float origin[3], const float dir[3]) {
+float Melee_Shot(const float origin[3], const float dir[3]) {
     float best = 40.0f;
     DWORD bestId = 0;
     bool head = false;
@@ -499,12 +524,13 @@ void Melee_Shot(const float origin[3], const float dir[3]) {
     }
     if (!bestId) {
         Log("melee: shot hit no enemy");
-        return;
+        return -1;
     }
-    g_credit[bestId] = {Now(), 1.0f, head};
+    g_credit[bestId] = {Now(), 1.0f, head, 4.0};
     g_shotTarget = bestId;
     Anim_HitPause(bestId, head ? 0.09f : 0.05f);
     float hit[3] = {origin[0] + dir[0] * best, origin[1] + dir[1] * best, origin[2] + dir[2] * best};
     Anim_Flinch(bestId, hit);
     Log("melee: shot on %08lX at %.1f m%s", bestId, best, head ? " (head)" : "");
+    return best;
 }

@@ -446,6 +446,8 @@ static std::vector<Bolt> g_bolts;
 static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix in eye space (tip along -Z)
 static float g_muzzleLen;
 static bool g_muzzleValid;
+static float g_barrelO[3], g_barrelD[3];  // the muzzle and barrel direction in world coordinates, last eye drawn
+static double g_barrelAt;
 static float g_lastInvEye[16];
 // this frame's melee weapons in eye space (grip at the origin, blade along -Z) and their blade lengths: the weapon
 // pass hands them to the contact combat (melee.cpp) in world coordinates
@@ -471,6 +473,13 @@ static double NowS() { return GetTickCount() / 1000.0; }
 float Weapon_SpreadDeg() { return g_spreadDeg; }
 bool Weapon_Steady() { return g_steadySince >= 0 && NowS() - g_steadySince > 1.0; }
 void Weapons_ChargeNextShot() { g_nextCharged = true; }
+
+bool Weapons_Barrel(float o[3], float d[3]) {
+    if (NowS() - g_barrelAt > 0.5) return false;
+    memcpy(o, g_barrelO, sizeof g_barrelO);
+    memcpy(d, g_barrelD, sizeof g_barrelD);
+    return true;
+}
 
 void Weapons_FireAlongBarrel() {
     Bolt b{};
@@ -521,6 +530,26 @@ static BYTE* ClientInternal() {
         return client ? *(BYTE**)(client + 4) : nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
     return nullptr;
+}
+
+// How far along a ray the first wall is (the area's line-of-sight test, bisected to ~5 cm), or -1 for none within
+// `maxDist`.
+static float BarrelWallDistance(const float o[3], const float d[3], float maxDist) {
+    void* p = Weapon_PlayerCreature();
+    DWORD pid = 0;
+    __try {
+        pid = p ? *(DWORD*)((BYTE*)p + 4) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    float end[3] = {o[0] + d[0] * maxDist, o[1] + d[1] * maxDist, o[2] + d[2] * maxDist};
+    if (Melee_LineOfSight(o, end, pid, 0)) return -1;
+    float lo = 0.0f, hi = maxDist;
+    for (int i = 0; i < 10; i++) {
+        float mid = (lo + hi) * 0.5f;
+        float m[3] = {o[0] + d[0] * mid, o[1] + d[1] * mid, o[2] + d[2] * mid};
+        if (Melee_LineOfSight(o, m, pid, 0)) lo = mid;
+        else hi = mid;
+    }
+    return hi;
 }
 
 // Where the cursor's ray (which follows the hand) meets the world: the mouse-over point, internal +0x4A8.
@@ -749,21 +778,32 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                 for (float& v : dw) v /= l;
             }
             for (int r = 0; r < 3; r++) b.to[r] = b.from[r] + dw[r] * 30.0f;
-            Melee_Shot(b.from, dw);  // v2: where the barrel points decides what the shot hits
-            // the cursor follows the hand, so the game's own mouse-over point is where this shot meets a wall or a
-            // body (no more bolts flying through walls); used when it lies along the barrel
-            float hit[3];
-            DWORD hovered;
-            // the mouse-over point only for walls / floors: on a hovered body (a corpse!) it pulled every bolt there
-            if (!Weapon_HoverClientId(&hovered) && CursorWorldHit(hit)) {
-                float v[3] = {hit[0] - b.from[0], hit[1] - b.from[1], hit[2] - b.from[2]};
-                float dist = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-                float along = dist > 0.01f ? (v[0] * dw[0] + v[1] * dw[1] + v[2] * dw[2]) / dist : 0;
-                if (dist > 0.4f && dist < 40.0f && along > 0.995f) {
-                    memcpy(b.to, hit, sizeof b.to);
-                    b.impact = true;
+            // the bolt you see stops at what it hits (2026-11-05: bolts flew on through enemies and walls - the old
+            // wall test used the game cursor, which follows the pointing ray, not the barrel 30 deg below it):
+            // the enemy the barrel ray meets (v2: that decides what the shot hits), else the first wall or the floor
+            float range = 30.0f;
+            const char* why = "nothing";
+            float enemyAt = Melee_Shot(b.from, dw);
+            if (enemyAt > 0) {
+                range = enemyAt;
+                why = "enemy";
+            }
+            float wallAt = BarrelWallDistance(b.from, dw, range);
+            if (wallAt > 0 && wallAt < range) {
+                range = wallAt;
+                why = "wall";
+            }
+            float pp[3];
+            if (dw[2] < -0.02f && Weapon_PlayerPos(pp)) {  // the floor (the player's feet level)
+                float tf = (pp[2] - b.from[2]) / dw[2];
+                if (tf > 0.3f && tf < range) {
+                    range = tf;
+                    why = "floor";
                 }
             }
+            for (int r = 0; r < 3; r++) b.to[r] = b.from[r] + dw[r] * range;
+            b.impact = range < 29.9f;
+            Log("weapons: bolt along the barrel stops after %.1f m at the %s", range, why);
         }
         b.fromSet = true;
         g_lastFlash = tnow;
@@ -786,6 +826,17 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             wt[r] = worldView[r * 4 + 0] * dt[0] + worldView[r * 4 + 1] * dt[1] + worldView[r * 4 + 2] * dt[2];
         }
         Melee_SetBlade(h, wb, wt);
+    }
+    if (g_muzzleValid) {  // the barrel this frame, in world coordinates (the test harness aims with it)
+        float me[3] = {g_muzzleEye[8] * -g_muzzleLen + g_muzzleEye[12], g_muzzleEye[9] * -g_muzzleLen + g_muzzleEye[13],
+                       g_muzzleEye[10] * -g_muzzleLen + g_muzzleEye[14]};
+        float d[3] = {me[0] - worldView[12], me[1] - worldView[13], me[2] - worldView[14]};
+        float de[3] = {-g_muzzleEye[8], -g_muzzleEye[9], -g_muzzleEye[10]};
+        for (int r = 0; r < 3; r++) {
+            g_barrelO[r] = worldView[r * 4 + 0] * d[0] + worldView[r * 4 + 1] * d[1] + worldView[r * 4 + 2] * d[2];
+            g_barrelD[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
+        }
+        g_barrelAt = NowS();
     }
     if (g_aimValid) {  // the right hand's pointing ray, in world coordinates (pick.cpp)
         float e[3] = {g_aimEye[12], g_aimEye[13], g_aimEye[14]}, de[3] = {-g_aimEye[8], -g_aimEye[9], -g_aimEye[10]};

@@ -32,6 +32,7 @@
 #include <set>
 #include <vector>
 
+#include "actionring.h"
 #include "anim.h"
 #include "cues.h"
 #include "features.h"
@@ -257,6 +258,10 @@ static int LiveAttackersBesides(DWORD aid) {
 }
 
 // ---------------------------------------------------------------- 1. the roll
+// One trigger pull = one shot: when the queued ranged attack has rolled, clear the game's attack queue this long after
+// (the bolt and its damage play out first; the next round would otherwise fire on its own).
+static const double kShotClearDelay = 0.9;
+static double g_clearShotAt = -1;
 extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     *kForcedRoll = 0;
     g_lastAttack = GetTickCount() | 1;
@@ -264,6 +269,12 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     if (!player) return;
     void* target = targetObj ? AsCreature(targetObj) : nullptr;
     Melee_NoteAttack(ObjectId(attacker), ObjectId(targetObj));
+    if (attacker == player) {
+        Log("combat: player attack roll on %08lX", ObjectId(targetObj));  // every one (tests count)
+        // one trigger pull, one shot (2026-11-05): a ranged attack queued by a shot would otherwise repeat round after
+        // round with the gun idle; Combat_Update clears the queue once this attack has played out
+        if (!Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE) g_clearShotAt = Now() + kShotClearDelay;
+    }
     if (g_contact) {
         DWORD aid = ObjectId(attacker), tid = ObjectId(targetObj);
         if (attacker == player) {
@@ -376,7 +387,9 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
         bool head = false;
         int dealt = 0;
         for (int i = 0; i < 15; i++) dealt += ints[i] > 0 ? ints[i] : 0;
+        float age = Melee_CreditAge(object);
         if (!Melee_TakeCredit(object, &speed, &head)) {
+            Log("combat: (credit for %08lX: %s %.2f s)", object, age < 0 ? "none," : "aged", age);
             for (int i = 0; i < 15; i++)
                 if (ints[i] > 0) ints[i] = 0;
             Log("combat: player blow on %08lX without contact -> no damage (%d stopped)", object, dealt);
@@ -683,6 +696,13 @@ bool Combat_AttackWithin(unsigned long ms) {
 // Once per frame: warnings for attacks about to land, the player's rhythm window, stale entries.
 void Combat_Update() {
     double t = Now();
+    if (g_clearShotAt > 0 && t >= g_clearShotAt) {
+        g_clearShotAt = -1;
+        if (ActionRing_ClearQueue()) {
+            Combat_ResetAttacking();
+            Log("combat: shot done - the game's attack cleared (one pull, one shot)");
+        }
+    }
     bool fighting = Combat_AttackWithin(6000);
     if (g_contact) {
         static double last = t;
@@ -710,7 +730,10 @@ void Combat_Update() {
             __try {
                 result = *(int*)(pr.record + 0x5C);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
-            if (result == 4 && Melee_HasCredit(pr.target)) {
+            // (melee only: a blade can be blocked; for a shot this ate the hit's credit and the blow that then landed
+            // did no damage - 2026-11-05)
+            bool melee = Weapon_Profile(Weapon_Right()).melee || Weapon_Right() == WC_NONE;
+            if (melee && result == 4 && Melee_HasCredit(pr.target)) {
                 Melee_TakeCredit(pr.target, nullptr, nullptr);
                 HitPosture(pr.target, 20, "blocked your blow");
                 Cues_Fire(CUE_BLOCK);
