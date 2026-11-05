@@ -1,0 +1,33 @@
+# Issue 3 scanner (playtest 2026-11-05, video 10:27: the hall floor went black under a corpse for ~1 s): walk the
+# Starboard Section looking down - standing, then crouched - and record every moment the view goes dark (a
+# screenshot + the game's position for each).
+#   run_sim.ps1 -Script t_floorscan -Fixture starboard_entry -Cheats -AllowDiscord -Force -TimeoutSec 600
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 2
+pointer world
+wait_new_log dialogue:~over 20   # Carth's comm call on arrival (a sync point)
+wait 2
+key grave
+type invulnerability
+key enter
+wait 1
+head yaw=0 pitch=-55 over=0.5
+game goto 61.77 117.12 65.22 95.13 76.40 92.90 76.20 84.00
+check_dark_time scan_standing_out 18 40 0.0
+game goto 73.83 95.53 64.84 95.72 62.40 86.00 60.42 118.88 50.50 120.10
+check_dark_time scan_standing_back 18 40 0.0
+head yaw=0 pitch=-60 y=-0.55 over=0.5
+game goto 61.77 117.12 65.22 95.13 76.40 92.90 76.20 84.00
+check_dark_time scan_crouched_out 18 40 0.0
+game goto 73.83 95.53 64.84 95.72 62.40 86.00 60.42 118.88 50.50 120.10
+check_dark_time scan_crouched_back 18 40 0.0

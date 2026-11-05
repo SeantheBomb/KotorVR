@@ -1,0 +1,192 @@
+# Issue 3, the case from the video (10:27): after a fight, looking down at a Sith corpse, the hall floor went black.
+#   run_sim.ps1 -Script t_corpse -Fixture starboard_pistol -Cheats -AllowDiscord -Force -TimeoutSec 400
+# Pass: standing on / next to the corpse and looking around it, the view never goes dark.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 2
+pointer world
+aimhand
+wait_new_log dialogue:~over 20   # Carth's comm call on arrival (the entry autosave only; a sync point)
+wait 2
+key grave
+type invulnerability
+key enter
+wait 1
+game goto 61.77 117.12 63.2 104
+wait_log incoming_attack 60
+game stop
+game faceenemy
+wait_log autopilot:~facing 10
+hand R x=0.20 y=-0.15 z=-0.35 yaw=0 pitch=0
+wait 1
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+game faceenemy
+wait 0.6
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+game aimhint
+wait 0.4
+hand_adjust
+wait 0.4
+trigger
+wait 2.5
+wait 2
+game pos
+# onto the corpse (it fell where it stood, ~65.3 92.9) and look down all around it
+game goto 64.9 95.2 65.3 93.6
+wait_log autopilot:~arrived 20
+head yaw=0 pitch=-60 over=0.5
+game face 65.34 92.95
+wait 1
+shot corpse
+head yaw=-180 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_0 18 1 0.0
+head yaw=-135 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_1 18 1 0.0
+head yaw=-90 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_2 18 1 0.0
+head yaw=-45 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_3 18 1 0.0
+head yaw=0 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_4 18 1 0.0
+head yaw=45 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_5 18 1 0.0
+head yaw=90 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_6 18 1 0.0
+head yaw=135 pitch=-60 over=0.4
+check_dark_time corpse_floor_stand_7 18 1 0.0
+head yaw=-180 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_0 18 1 0.0
+head yaw=-135 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_1 18 1 0.0
+head yaw=-90 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_2 18 1 0.0
+head yaw=-45 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_3 18 1 0.0
+head yaw=0 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_4 18 1 0.0
+head yaw=45 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_5 18 1 0.0
+head yaw=90 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_6 18 1 0.0
+head yaw=135 pitch=-65 y=-0.55 over=0.4
+check_dark_time corpse_floor_crouch_7 18 1 0.0
+shot after

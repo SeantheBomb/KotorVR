@@ -778,7 +778,16 @@ int VR_IsOwnBody(const float t[3], int depth) {
         float d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < g_nearestOwn) g_nearestOwn = d2;
         float h2 = dx * dx + dy * dy;
-        if (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f) {  // the body hierarchy's root (feet): hide it whole
+        // the body hierarchy's root (feet): hide it whole. Matched against where the body model is actually drawn
+        // (within 5 cm): the old 25 cm radius around the creature also caught any model whose origin you stood on -
+        // a room's origin is a point on its floor, and walking over it hid the whole room (floor gone, space below;
+        // 2026-11-05)
+        float bp[3];
+        static int oldRadius = -1;  // [Debug] OldOwnBodyRadius=1: the old rule (before / after comparisons)
+        if (oldRadius < 0) oldRadius = GetPrivateProfileIntA("Debug", "OldOwnBodyRadius", 0, Features_IniPath());
+        bool exact = !oldRadius && Anim_PlayerBodyPos(bp);
+        float bx = t[0] - bp[0], by = t[1] - bp[1], bz = t[2] - bp[2];
+        if (exact ? (bx * bx + by * by + bz * bz < 0.05f * 0.05f) : (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f)) {
             g_rootDepth = depth;
             return 2;
         }
@@ -1046,7 +1055,14 @@ static void NoteBoneParam(GLuint index, const GLfloat* v) {
 }
 
 // [Debug] TraceWorld=1 in kvr.ini: one GL trace of a world frame (kvr/trace_f<frame>.txt), in-game frames.
+static volatile bool g_traceNow;  // the test harness asked for a trace of the next world frame (simcmd "trace")
+void VR_TraceNextWorldFrame() { g_traceNow = true; }
+
 bool VR_WantTrace() {
+    if (g_traceNow && g_worldThisFrame && g_vrActive) {
+        g_traceNow = false;
+        return true;
+    }
     static int want = -1;
     if (want < 0) want = Features().traceWorld ? 1 : 0;
     static bool done;

@@ -1,0 +1,36 @@
+# Issue 4 (playtest 2026-11-05): a new game opens on a black view until Trask walks in.
+#   run_sim.ps1 -Script t_start -AllowDiscord -Force
+# Pass: after the opening movie the view is never black for more than 1.5 s (until Trask's conversation).
+wait_menu 90
+wait_calm 8 120
+click u=0.572 v=0.499
+wait 1
+wait_calm 1.5 60
+click u=0.466 v=0.498
+wait 1
+wait_calm 1.5 60
+click u=0.597 v=0.391
+wait 1
+wait_calm 1.5 60
+click u=0.613 v=0.437
+wait 1
+wait_calm 1.5 60
+click u=0.391 v=0.676
+wait 1
+wait_calm 1.5 60
+click u=0.597 v=0.455
+wait 1
+wait_calm 1.5 60
+click u=0.418 v=0.675
+wait 1
+wait_calm 1.5 60
+click u=0.601 v=0.486
+wait 1
+wait_calm 1.5 60
+wait_world 180
+wait_new_log movie:~closed 120         # the opening movie after the world loads (shown on the cinema screen) ends
+wait 3
+shot dark
+game trace
+check_dark_time never_black_after_movie 12 15 1.5
+shot later

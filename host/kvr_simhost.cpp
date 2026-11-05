@@ -466,6 +466,22 @@ static bool SavePng(SharedTex& s, const std::string& path) {
     return ok;
 }
 
+// Mean brightness (0..255) of the latest frame of a shared texture, sampled on an 8-pixel grid; -1 if none.
+static double MeanLuma(SharedTex& s) {
+    if (!s.have || !s.staging) return -1;
+    D3D11_MAPPED_SUBRESOURCE m;
+    if (FAILED(g_ctx->Map(s.staging, 0, D3D11_MAP_READ, 0, &m))) return -1;
+    UINT w = s.meta.width ? s.meta.width : g_shm->texWidth, h = s.meta.height ? s.meta.height : g_shm->texHeight;
+    double sum = 0;
+    long n = 0;
+    for (UINT y = 0; y < h; y += 8) {
+        const BYTE* row = (const BYTE*)m.pData + size_t(y) * m.RowPitch;
+        for (UINT x = 0; x < w; x += 8, n++) sum += 0.299 * row[x * 4] + 0.587 * row[x * 4 + 1] + 0.114 * row[x * 4 + 2];
+    }
+    g_ctx->Unmap(s.staging, 0);
+    return n ? sum / n : -1;
+}
+
 // ---------------------------------------------------------------- main loop helpers
 // the game's haptic requests, logged as "haptic L/R ..." (scripts check them with wait_out)
 static void LogHaptics() {
@@ -927,6 +943,50 @@ int main(int argc, char** argv) {
                        g_hand[1].pitch);
             } else {
                 printf("[%.1f]   hand_adjust: no aimhint in the log\n", Now());
+            }
+        } else if (cmd == "check_bright") {  // CHECK: the left eye's mean brightness reaches <min> within <timeout> s
+            std::string name = args.size() > 0 ? args[0] : "?";
+            double minL = args.size() > 1 ? atof(args[1].c_str()) : 10, timeout = args.size() > 2 ? atof(args[2].c_str()) : 5;
+            double t0 = Now(), l = -1;
+            bool pass = RunUntil(timeout, [&] { l = MeanLuma(g_shared[0]); return l >= minL; });
+            printf("[%.1f]   CHECK %s %s (eye brightness %.1f after %.1f s, want >= %.1f)\n", Now(), pass ? "PASS" : "FAIL",
+                   name.c_str(), l, Now() - t0, minL);
+            if (!pass) g_checkFailed = true;
+        } else if (cmd == "check_dark_time") {  // CHECK: over <seconds>, the eye is darker than <min> for <= <maxDark> s
+            std::string name = args.size() > 0 ? args[0] : "?";
+            double minL = args.size() > 1 ? atof(args[1].c_str()) : 10, span = args.size() > 2 ? atof(args[2].c_str()) : 10;
+            double maxDark = args.size() > 3 ? atof(args[3].c_str()) : 1;
+            double until = Now() + span, dark = 0, lowest = 1e9;
+            bool wasDark = false;
+            int episode = 0;
+            while (Now() < until) {
+                RunFor(0.1);
+                double l = MeanLuma(g_shared[0]);
+                bool isDark = l >= 0 && l < minL;
+                if (isDark) dark += 0.1;
+                if (isDark && !wasDark && episode < 20) {  // where it happened: the game logs its position; a picture
+                    FILE* gf = nullptr;
+                    if (fopen_s(&gf, GameCmdPath().c_str(), "a") == 0 && gf) {
+                        fprintf(gf, "pos\n");
+                        fclose(gf);
+                    }
+                    char nm[64];
+                    sprintf_s(nm, "\\dark_%s_%d_eye0.png", name.c_str(), episode++);
+                    SavePng(g_shared[0], g_out + nm);
+                    printf("[%.1f]   dark (%.1f) - asked the game for its position, saved%s\n", Now(), l, nm);
+                }
+                wasDark = isDark;
+                if (l >= 0 && l < lowest) lowest = l;
+            }
+            bool pass = dark <= maxDark;
+            printf("[%.1f]   CHECK %s %s (dark %.1f s of %.0f s, darkest %.1f, want <= %.1f s below %.1f)\n", Now(),
+                   pass ? "PASS" : "FAIL", name.c_str(), dark, span, lowest, maxDark, minL);
+            if (!pass) g_checkFailed = true;
+        } else if (cmd == "lumatrace") {  // the left eye's brightness every 0.25 s for <seconds> (diagnostics)
+            double until = Now() + (args.empty() ? 5 : atof(args[0].c_str()));
+            while (Now() < until) {
+                RunFor(0.25);
+                printf("[%.1f]   luma %.1f\n", Now(), MeanLuma(g_shared[0]));
             }
         } else if (cmd == "mark") {  // check_since_mark looks from here (an event logged before its check started)
             g_mark = LogSize();

@@ -147,7 +147,10 @@ static void APIENTRY h_glMultMatrixf(const GLfloat* m) { FIRST("glMultMatrixf");
         memcpy(g_ownMat[g_mvDepth], t, sizeof t);
         VR_OwnNode(t + 12);
     }
-    if (g_mode == GL_MODELVIEW && g_hideDepth < 0) {
+    // (a pure rotation is the camera's view, never a model root: with you lying in the opening's bunk the eye sat on
+    // your body's root and the view itself was hidden as "your body" - the whole world went black, 2026-11-05)
+    bool pureRotation = m[12] == 0.0f && m[13] == 0.0f && m[14] == 0.0f;
+    if (g_mode == GL_MODELVIEW && g_hideDepth < 0 && !pureRotation) {
         int own = VR_IsOwnBody(m + 12, g_mvDepth);
         if (own == 2) {
             g_hideDepth = g_mvDepth;

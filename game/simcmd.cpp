@@ -13,6 +13,7 @@
 //                        facewall chose
 //   posmark / moved m    remember the position / log "moved ok" if the player has gone m metres since
 //   pos                  log the player's position and the view / game-camera headings
+//   trace                a GL trace of the next world frame (kvr/trace_f<frame>.txt)
 //   doors                log the area's doors and how many of the usable ones the ray can pick
 //   pick                 log what the right hand's ray picks right now ("simcmd: pickstate door ...")
 //   stop                 stop the autopilot
@@ -32,6 +33,7 @@
 #include "enginecam.h"
 #include "melee.h"
 #include "pick.h"
+#include "vr.h"
 #include "weapons.h"
 
 extern void Log(const char* fmt, ...);
@@ -181,6 +183,8 @@ void Run(char* line) {
     } else if (!strcmp(cmd, "moved") && nums.size() >= 1) {
         float d = sqrtf((p[0] - g_posMark[0]) * (p[0] - g_posMark[0]) + (p[1] - g_posMark[1]) * (p[1] - g_posMark[1]));
         Log("simcmd: moved %.2f m since posmark -> %s", d, d >= nums[0] ? "moved ok" : "moved SHORT");
+    } else if (!strcmp(cmd, "trace")) {
+        VR_TraceNextWorldFrame();
     } else if (!strcmp(cmd, "doors")) {
         Pick_LogDoors();
     } else if (!strcmp(cmd, "pos")) {
@@ -252,7 +256,7 @@ void SimCmd_Update(BYTE keys[256]) {
     }
     float tx = g_way[g_wi * 2], ty = g_way[g_wi * 2 + 1];
     float dx = tx - p[0], dy = ty - p[1], dist = sqrtf(dx * dx + dy * dy);
-    if (dist < ((g_wi + 1) * 2 >= g_way.size() ? 0.5f : 0.9f)) {  // pass through the waypoints on the way, stop at the last
+    if (dist < ((g_wi + 1) * 2 >= g_way.size() ? 0.2f : 0.9f)) {  // pass through the waypoints on the way, stop at the last
         g_wi++;
         g_bestDist = 1e9f;
         g_progressAt = GetTickCount();

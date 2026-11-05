@@ -37,6 +37,7 @@ bool VR_ShouldSkipElements(GLsizei count, GLenum type, const void* indices);
 void VR_OnVertexPointer(GLint size, GLenum type, GLsizei stride, const void* ptr);
 // diagnostics: request a one-frame trace (true once), and the current draw origin in the camera frame
 bool VR_WantTrace();
+void VR_TraceNextWorldFrame();  // GL trace of the next world frame (kvr/trace_f<frame>.txt), on demand
 void VR_DrawOrigin(float out[3]);
 // The loader shares freshly created pbuffer contexts with the main one; the NVIDIA driver faults if the
 // main context holds interop-registered objects at that point. Tear the export down first.
