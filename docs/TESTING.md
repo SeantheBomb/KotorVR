@@ -53,3 +53,22 @@ Harness commands to the game (`game <cmd>`, game/simcmd.cpp): `goto x y ...`, `a
 `neareye 1`, `trace`, `stop`. Checks: `check_log`, `check_no_log`, `check_count`, `mark` + `check_since_mark` /
 `@mark`, `check_bright`, `check_dark_time` (saves a picture + the game's position per dark episode), `lumatrace`.
 A real play session's probe.log is kept in `traces\play\` before a run replaces it.
+
+## The whole Endar Spire, played by the rig (tools/sim/tutorial.txt)
+
+New game to the escape pod, unattended (~18 min of game, ~20 min with loading): Trask's briefing, footlocker and
+equipment, the bunk door through Trask (Tab), Trask's Security on the locked door, every fight, level-up, Trask's last
+stand, the Starboard Section (footlocker spikes, the security computer's overload by number keys, the squad, Carth),
+the escape pod. Checks along the way: every door opens (`opendoor`), the opening is never black (issue 4), Trask's
+scene stays first person (11); at the end over the whole level: nothing of your body within 12 cm of the eye (2),
+tooltips readable (10), the stick never slow to free you (7), sword hits land.
+
+    .\tools\run_sim.ps1 -Script tutorial -Cheats -AllowDiscord -Force -TimeoutSec 3000
+
+Tools it relies on: `game god 1` (the rig's invulnerability; the console cheat is a toggle that saves and module
+changes flip), `fight <timeout> <module>` (closes on the nearest hostile - one that has not swung yet included - and
+walks the walkmesh route when something stands between), `autotalk on` / `autotalk prefer <text[:n]> ...`,
+`use x y z | npc [ring <text>]`, `opendoor x y z` (grip, then Security, then the party member's), `mark <name>` +
+`@<name>` for a check over one stretch. Segments for debugging one part: fixtures `spire_bunk`, `spire_trask`,
+`spire_door1`, `spire_room3`, `spire_mid`, `spire_bridge`, `spire_after_trask`, `spire_starboard`; party switch
+(issue 2b): `t_switch -Fixture spire_trask`. Runs take the mouse and the foreground: only when the PC is idle.
