@@ -17,6 +17,8 @@ const char* Pick_HitKind();
 void Pick_LogDoors();
 // The nearest creature in the area that is not you and not an enemy (within 15 m): its position (test harness).
 bool Pick_NearestFriend(float out[3]);
+// The nearest living hostile creature in sight within <range> m (server id, 0 if none).
+DWORD Pick_NearestHostile(float range, float out[3]);
 // The door at (x, y) (doors.txt): the world direction through it (its panel's normal).
 bool Pick_DoorNormal(float x, float y, float n[2]);
 // Whether the ray passes through / close to this object this frame (any of them, not only the nearest).

@@ -60,6 +60,7 @@
 #include <cstring>
 #include <share.h>
 #include <tlhelp32.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -336,6 +337,7 @@ static HandPose g_hand[2] = {{-0.22, -0.40, -0.35, 0, 20, 0}, {0.22, -0.40, -0.3
 static HandPose g_swingFrom, g_swingTo;
 static bool g_checkFailed;  // a check_* command failed (the run continues, the exit code says so)
 static long g_mark;         // log offset of the last "mark" command
+static std::map<std::string, long> g_marks;  // "mark <name>": checks count from it with @<name>
 static bool g_autoTalk;     // pick the first reply of every conversation (autotalk on)
 struct TalkPref {
     std::string text;  // lower case
@@ -1410,15 +1412,21 @@ int main(int argc, char** argv) {
                    shots);
             if (clearRuns < 3) g_checkFailed = true;
         } else if (cmd == "mark") {  // check_since_mark looks from here (an event logged before its check started)
-            g_mark = LogSize();
+            if (args.empty()) g_mark = LogSize();
+            else g_marks[args[0]] = LogSize();  // mark <name>: a second window, @<name> in a check
         } else if (cmd == "check_log" || cmd == "check_no_log" || cmd == "check_count" || cmd == "check_since_mark") {
             // "@mark" as the first argument: count from the last mark instead of from now
             bool fromMark = cmd == "check_since_mark" || (!args.empty() && args[0] == "@mark");
-            if (!args.empty() && args[0] == "@mark") args.erase(args.begin());
+            long markAt = g_mark;
+            if (!args.empty() && args[0].size() > 1 && args[0][0] == '@' && args[0] != "@mark") {
+                fromMark = true;
+                markAt = g_marks.count(args[0].substr(1)) ? g_marks[args[0].substr(1)] : 0;
+            }
+            if (!args.empty() && args[0][0] == '@') args.erase(args.begin());
             std::string name = args.size() > 0 ? args[0] : "?", needle = args.size() > 1 ? args[1] : "";
             for (auto& ch : needle)
                 if (ch == '~') ch = ' ';
-            long from = fromMark ? g_mark : LogSize();
+            long from = fromMark ? markAt : LogSize();
             bool pass;
             char detail[96] = "";
             if (cmd == "check_log" || cmd == "check_since_mark") {

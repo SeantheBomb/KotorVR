@@ -31,21 +31,197 @@ wait_world 180
 wait_new_log movie:~closed 200          # the opening movie
 pointer world
 aimhand
-mark
-game neareye 1
 autotalk on
-key grave
-type invulnerability
-key enter
+check_dark_time never_black_after_movie 12 15 1.5   # issue 4: the opening is never black
+mark                                    # from here: whole-level checks (at the end)
+game neareye 1
+game god 1                              # the rig's invulnerability (holds through saves and module changes)
 wait_new_log dialogue: 60
 wait_talk_done 4 300                    # Trask's opening conversation (all of it), answered with the first reply each time
-check_count @mark own_head_never_in_eyes neareye: 0 0 0.1
 game pos
 game doors
 shot after_trask
-key f4                                  # milestone quicksave (run_sim -SaveFixture spire_bunk)
-wait 4
-# 1. the bunk room's footlocker
+# 1. the bunk room: footlocker, equipment, Trask's briefing, party selection
 use 10.8 21.9 0.5
 wait 2
 shot footlocker
+click u=0.499 v=0.584      # Get Items
+wait 1.5
+key u                      # equipment
+wait 2
+click u=0.478 v=0.523      # right weapon slot
+wait 1.5
+shot eq_list
+click u=0.604 v=0.465      # second row: the short sword
+wait 0.8
+click u=0.500 v=0.671      # OK
+wait 1.5
+click u=0.443 v=0.477      # body slot
+wait 1.5
+click u=0.604 v=0.465      # clothing
+wait 0.8
+click u=0.500 v=0.671      # OK
+wait 1.5
+shot equipped
+click u=0.601 v=0.671      # Close
+wait 2
+wait_new_log dialogue: 30
+wait_talk_done 4 120
+game pos
+game doors
+shot after_equip
+wait_talk_done 6 60
+shot party_select
+click u=0.500 v=0.671      # party selection (Trask's last reply opens it; he is in already): OK
+wait 3
+wait_talk_done 4 30
+# 2. the bunk room's door: locked down; Trask has the override codes - talk to him, take control of him, open it
+use 21.12 20.71 1.3
+wait 2
+wait_talk_done 3 30
+use npc                    # talk to Trask
+wait_new_log dialogue: 10
+wait_talk_done 4 120
+key tab                    # take control of Trask
+wait 2
+shot as_trask
+use 21.12 20.71 1.3        # Trask opens it
+wait 3
+wait_talk_done 4 120       # "Now that the door's open..." - and back to you
+shot door1
+game pos
+# 3. the locked door: Trask's Security; the Sith boarding party
+walk 40 38.36 20.59
+use 40.80 20.71 1.3        # end_door02
+wait 3
+wait_talk_done 4 120
+shot door2
+key tab                    # Trask: his Security skill (his tutorial line)
+wait 2
+use 40.80 20.71 1.3 ring secur
+wait 6
+wait_talk_done 4 120
+shot door2b
+wait 1
+fight 150 m01aa                  # the Sith boarding party beyond the door
+wait_talk_done 4 60
+game pos
+shot after_fight1
+# 4. the corridors: doors and fights
+game pos
+walk 60 46.2 48.6
+opendoor 46.57 50.81 1.3
+fight 120 m01aa
+walk 60 45.16 53.38 44.84 53.49 42.82 54.28 43.5 64.6
+opendoor 43.86 66.96 1.3
+fight 120 m01aa
+walk 90 42.58 80.03 29.56 85.94
+fight 120 m01aa
+wait_talk_done 4 120
+game pos
+shot mid
+# 5. to the bridge
+game pos
+walk 60 21.92 81.75 29.18 86.74 29.18 104.20
+opendoor 29.18 106.03 1.3
+fight 120 m01aa
+wait_talk_done 4 120
+walk 60 29.18 133.80
+opendoor 29.18 135.62 1.3
+fight 150 m01aa
+wait_talk_done 4 180
+game pos
+shot bridge
+# 6. level up, the last doors, Trask's last stand
+game pos
+walk 60 32.66 149.24 38.62 150.31 39.56 137.5
+wait_talk_done 3 60
+key p                      # level up first ("You must level up before you pass through the door")
+wait 2
+click u=0.409 v=0.497      # Auto Level Up
+wait 1.5
+click u=0.499 v=0.524      # OK
+wait 2
+shot levelled
+click u=0.601 v=0.671      # Close
+wait 2
+opendoor 39.56 135.62 1.3
+fight 90 m01aa
+walk 40 39.56 127.2
+opendoor 39.56 125.38 1.3
+fight 90 m01aa
+mark trask
+walk 60 40.87 123.28 43.56 118.75 42.28 111.2
+wait_new_log dialogue: 20
+wait_talk_done 5 240                # Trask's last stand
+check_count @trask trask_scene_never_cuts_away hidden,~cut~to~the~game 0 0 0.1   # issue 11
+game pos
+shot after_trask
+# 7. the Starboard Section
+game pos
+walk 40 43.56 118.75 45.6 120.1
+use 47.42 120.13 1.3       # to the Starboard Section (module transition)
+wait_world 120
+wait 3
+wait_talk_done 4 120       # Carth on the comm
+game pos
+game doors
+walk 120 61.77 117.12 65.22 95.13
+fight 120 m01ab
+walk 60 76.44 92.93 76.20 84.00
+fight 120 m01ab
+opendoor 76.89 81.26 1.3
+fight 120 m01ab
+wait_talk_done 4 60
+game pos
+shot starboard
+# 8. the footlocker's spikes, the security computer, the squad, Carth, the escape pod
+game pos
+fight 60 m01ab
+wait 4
+fight 60 m01ab              # the soldiers behind the console
+wait 3
+wait_talk_done 4 90         # Carth on the comm: the droid or the terminal
+use 74.52 72.89 1.0         # footlocker: computer spikes and repair parts
+wait 7                      # (the walk round the console: the container screen comes up late)
+shot locker
+click u=0.499 v=0.584       # Get Items
+wait 2
+shot locker_after
+pointer world
+use 82.92 66.46 1.0         # security computer (its own screen, replies by number key)
+wait 3
+shot comp0
+key 2                       # View starboard transport module.
+wait 2
+key 1                       # (continue)
+wait 2
+shot comp1
+key 3                       # [Computer] Overload power conduit.
+wait 3
+shot comp2
+key 1
+wait 3
+key 1
+wait 3
+key 1                       # logging out opens the door to the squad's room
+wait 3
+wait_talk_done 5 120
+game pos
+shot m01ab_comp
+opendoor 79.60 65.11 1.3
+fight 90 m01ab
+opendoor 82.32 48.96 1.3
+wait 3
+wait_talk_done 5 120        # Carth
+game pos
+shot m01ab_carth
+use 85.29 41.13 1.0         # the escape pod
+wait_new_log movie:~playing 60    # the escape pod's launch
+shot m01ab_pod
+# the whole level
+check_count @mark own_head_never_in_eyes neareye: 0 0 0.1       # issue 2
+check_count @mark tooltips_never_small (small) 0 0 0.1          # issue 10
+check_count @mark tooltips_shown (readable) 1 999 0.1
+check_count @mark stick_never_slow (SLOW) 0 0 0.1               # issue 7
+check_count @mark sword_fights_land blade~contact~on 10 9999 0.1

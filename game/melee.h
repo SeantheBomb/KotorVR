@@ -13,6 +13,8 @@ void Melee_NoteAttack(DWORD attacker, DWORD target);
 bool Melee_IsEnemy(DWORD id);
 // The nearest live enemy (Melee_IsEnemy) to a point: its id and position; 0 when there is none.
 DWORD Melee_NearestEnemy(const float from[3], float out[3]);
+// A living creature of a hostile faction, fighting yet or not.
+bool Melee_HostileAlive(DWORD id);
 // Once per frame (game thread): blade contacts.
 void Melee_Update();
 // A contact / aimed shot credited this enemy in the last 1.6 s: the player's blow / bolt landing on it may count

@@ -370,6 +370,41 @@ bool Pick_NearestFriend(float out[3]) {
     return found;
 }
 
+// the nearest living hostile creature within <range> m that the player can see (the test rig's fights: one that has
+// not swung yet is not in Melee_NearestEnemy's list)
+DWORD Pick_NearestHostile(float range, float out[3]) {
+    typedef void*(__fastcall * GetAreaFn)(void* obj, void*);
+    typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);
+    float best = range * range;
+    DWORD found = 0;
+    __try {
+        BYTE* player = (BYTE*)Weapon_PlayerCreature();
+        BYTE* area = player ? (BYTE*)((GetAreaFn)0x4CB120)(player, nullptr) : nullptr;
+        BYTE* app = *(BYTE**)0x7A39FC;
+        BYTE* server = app ? *(BYTE**)(app + 8) : nullptr;
+        if (!area || !server) return 0;
+        DWORD pid = *(DWORD*)(player + 4);
+        const float* pp = (const float*)(player + 0x90);
+        float eye[3] = {pp[0], pp[1], pp[2] + 1.5f};
+        DWORD* ids = *(DWORD**)(area + 0x190);
+        int n = *(int*)(area + 0x194);
+        for (int i = 0; ids && i < n && i < 8192; i++) {
+            if (ids[i] == pid) continue;
+            BYTE* o = (BYTE*)((GetObject_t)0x4AE750)(server, ids[i]);
+            if (!o || ObjType(o) != T_CREATURE || !Melee_HostileAlive(ids[i])) continue;
+            const float* f = (const float*)(o + 0x90);
+            float dx = f[0] - pp[0], dy = f[1] - pp[1], d = dx * dx + dy * dy;
+            float chest[3] = {f[0], f[1], f[2] + 1.2f};
+            if (d < best && Melee_LineOfSight(eye, chest, pid, ids[i])) {
+                best = d;
+                memcpy(out, f, 12);
+                found = ids[i];
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return found;
+}
+
 void Pick_LogDoors() {
     typedef void*(__fastcall * GetAreaFn)(void* obj, void*);
     typedef void*(__thiscall * GetObject_t)(void* server, DWORD id);

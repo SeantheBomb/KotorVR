@@ -201,6 +201,7 @@ void Run(char* line) {
         // one step of a scripted fight: close in on the nearest enemy, face it, say how to attack (kvr_simhost fight)
         float e[3];
         DWORD id = havePos ? Melee_NearestEnemy(p, e) : 0;
+        if (!id && havePos) id = Pick_NearestHostile(12.0f, e);  // one standing there that has not swung yet
         float d = id ? sqrtf((e[0] - p[0]) * (e[0] - p[0]) + (e[1] - p[1]) * (e[1] - p[1])) : 1e9f;
         bool melee = Weapon_Profile(Weapon_Right()).melee || Weapon_Right() == WC_NONE;
         if (!id || d > 25.0f) {

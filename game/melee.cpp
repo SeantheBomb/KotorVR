@@ -10,6 +10,7 @@
 // Credit: each contact / aimed shot hit credits that enemy for 1.6 s; combat.cpp lets the player's next landing
 // blow / bolt on it through (graded by the d20 and the swing speed) and turns uncredited ones into misses.
 #include "melee.h"
+#include "pick.h"
 
 #include <windows.h>
 
@@ -199,6 +200,13 @@ bool Melee_IsEnemy(DWORD id) {
     return f == 1 || f == 3 || f == 6 || f == 7 || f == 11 || f == 15;
 }
 
+// a living creature of a hostile faction, whether or not it has fought yet (Melee_IsEnemy needs it in a fight)
+bool Melee_HostileAlive(DWORD id) {
+    if (IsDead(id)) return false;
+    int f = FactionOf(id);
+    return f == 1 || f == 3 || f == 6 || f == 7 || f == 11 || f == 15;
+}
+
 DWORD Melee_NearestEnemy(const float from[3], float out[3]) {
     DWORD best = 0;
     float bd = 1e18f;
@@ -259,6 +267,14 @@ void Melee_Update() {
     // forget stale fighters / credits
     for (auto it = g_fighters.begin(); it != g_fighters.end();)
         it = t - it->second.seen > 40 ? g_fighters.erase(it) : std::next(it);
+    // a hostile standing within reach that has not fought yet still takes a cut (only fighters have hit volumes)
+    static double lastIdleScan;
+    if (t - lastIdleScan > 0.5) {
+        lastIdleScan = t;
+        float e[3];
+        DWORD idle = Pick_NearestHostile(5.0f, e);
+        if (idle) g_fighters[idle].seen = t;
+    }
     static double lastDiag;
     if (t - lastDiag > 2.0) {  // diagnostics: blade state and the nearest enemy
         lastDiag = t;

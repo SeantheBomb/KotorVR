@@ -1038,7 +1038,13 @@ bool VR_InsideHead(GLsizei count, GLenum type, const void* indices) {
     if (!p_glGetFloatv) p_glGetFloatv = (decltype(p_glGetFloatv))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glGetFloatv");
     float mv[16];
     p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
-    if (mv[12] * mv[12] + mv[13] * mv[13] + mv[14] * mv[14] > 0.35f * 0.35f) return false;
+    if (mv[12] * mv[12] + mv[13] * mv[13] + mv[14] * mv[14] > 0.35f * 0.35f) {
+        // ... or rooted at your own feet: a body mesh the hierarchy match missed (switching characters, then the
+        // new one using a door: its body drawn with your eye inside its head; 2026-11-05 tutorial run)
+        float r[3];  // the draw's origin relative to the eye, tracking frame (y up)
+        for (int k = 0; k < 3; k++) r[k] = g_Q[k * 3 + 0] * mv[12] + g_Q[k * 3 + 1] * mv[13] + g_Q[k * 3 + 2] * mv[14];
+        if (r[0] * r[0] + r[2] * r[2] > 0.25f * 0.25f || r[1] > -1.0f || r[1] < -2.2f) return false;
+    }
     __try {
         for (int s = 0; s < 8; s++) {
             GLsizei k = (GLsizei)((long long)count * s / 8);
