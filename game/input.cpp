@@ -297,13 +297,23 @@ void Input_Update(HWND wnd) {
         if (Combat_ContactMode()) {
             DWORD startOn = Melee_TakeAttackStart();
             // (not while the stick steers you away: brushing the enemy as you back off re-rooted you)
-            if (startOn && fighting && !Combat_PlayerAttacking() && !g_stickAway) {
+            // (a hostile you cut opens the fight even when nobody is in a round yet: one standing passive took cuts
+            // forever while "not fighting" kept the attack from starting; 2026-11-05 tutorial run)
+            bool opens = startOn && inWorld && Melee_IsEnemy(startOn);
+            if (startOn && (fighting || opens) && !Combat_PlayerAttacking() && !g_stickAway) {
                 Weapon_SetTarget(startOn | 0x80000000);
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
                 g_attackPin = startOn;
                 WatchAttack(now);
                 Log("input: blade contact -> attack %08lX", startOn);
+            } else if (startOn) {
+                static double lastWhy = -10;
+                if (now - lastWhy > 1.0) {  // a contact that starts nothing: why (stuck-fight diagnosis)
+                    lastWhy = now;
+                    Log("input: blade contact on %08lX starts no attack (%s%s%s)", startOn, fighting ? "" : "not fighting ",
+                        Combat_PlayerAttacking() ? "already attacking " : "", g_stickAway ? "stick away" : "");
+                }
             }
         }
         if (Gestures_TakeSwing(&swingQ) && fighting && !Combat_ContactMode()) {
