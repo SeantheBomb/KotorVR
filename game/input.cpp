@@ -83,6 +83,10 @@ static float g_autoTx, g_autoTy;
 // keys pressed by gestures for a few frames
 // gesture key press: held for a fixed time (a few frames is only ~16 ms at 250 fps), then released
 static double g_gestureKeyAt = -1;
+// the creature (server id) a contact / shot attack was just started on: while its R is down the cursor stays on it, so
+// the key can't land on a corpse or prop the hand ray slid onto (it opened a corpse's loot mid-fight: the game sat
+// paused behind the panel and the fight never moved; 2026-11-05 tutorial run)
+static DWORD g_attackPin;
 static BYTE g_gestureKey;
 static POINT g_targetScreen;
 static DWORD g_lastCursorInfoTick;
@@ -297,6 +301,7 @@ void Input_Update(HWND wnd) {
                 Weapon_SetTarget(startOn | 0x80000000);
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
+                g_attackPin = startOn;
                 WatchAttack(now);
                 Log("input: blade contact -> attack %08lX", startOn);
             }
@@ -321,6 +326,7 @@ void Input_Update(HWND wnd) {
                 Weapon_SetTarget(hit | 0x80000000);
                 g_gestureKey = DIK_R;
                 g_gestureKeyAt = now;
+                g_attackPin = hit;
                 WatchAttack(now);
                 Log("input: shot hit %08lX -> target + attack", hit);
                 pendingShotTarget = -10;
@@ -520,6 +526,20 @@ void Input_Update(HWND wnd) {
             float hp[3], tp[3];
             haveTarget = Pick_Hit(&pid, hp) && EngineCam_WorldToTracking(hp, tp) && VR_TrackingPointToClient(tp, &tx, &ty);
             if (!haveTarget) haveTarget = VR_WorldPointerToClient(in.aim.pos, in.aim.quat, &tx, &ty);
+            if (g_attackPin && g_gestureKeyAt >= 0 && g_gestureKey == DIK_R) {
+                float op[3];
+                if (Weapon_ObjectPos(g_attackPin, op)) {
+                    op[2] += 1.1f;  // chest
+                    float ptx, pty;
+                    if (EngineCam_WorldToTracking(op, tp) && VR_TrackingPointToClient(tp, &ptx, &pty)) {
+                        tx = ptx;
+                        ty = pty;
+                        haveTarget = true;
+                    }
+                }
+            } else {
+                g_attackPin = 0;
+            }
         }
         if (g_pickStartMs >= 0) {
             double t = tick - g_pickStartMs;

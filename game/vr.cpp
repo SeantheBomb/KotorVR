@@ -1039,11 +1039,11 @@ bool VR_InsideHead(GLsizei count, GLenum type, const void* indices) {
     float mv[16];
     p_glGetFloatv(GL_MODELVIEW_MATRIX, mv);
     if (mv[12] * mv[12] + mv[13] * mv[13] + mv[14] * mv[14] > 0.35f * 0.35f) {
-        // ... or rooted at your own feet: a body mesh the hierarchy match missed (switching characters, then the
+        // ... or rooted in the column under your head (chest to feet): a body mesh the hierarchy match missed (switching characters, then the
         // new one using a door: its body drawn with your eye inside its head; 2026-11-05 tutorial run)
         float r[3];  // the draw's origin relative to the eye, tracking frame (y up)
         for (int k = 0; k < 3; k++) r[k] = g_Q[k * 3 + 0] * mv[12] + g_Q[k * 3 + 1] * mv[13] + g_Q[k * 3 + 2] * mv[14];
-        if (r[0] * r[0] + r[2] * r[2] > 0.25f * 0.25f || r[1] > -1.0f || r[1] < -2.2f) return false;
+        if (r[0] * r[0] + r[2] * r[2] > 0.25f * 0.25f || r[1] > -0.3f || r[1] < -2.2f) return false;  // chest to feet
     }
     __try {
         for (int s = 0; s < 8; s++) {
@@ -1105,12 +1105,19 @@ bool VR_NoteDrawn(GLsizei count, GLenum type, const void* indices) {
                     float d = sqrtf(ex * ex + ey * ey + ez * ez);
                     if (d < hk) hk = d;
                 }
-                // a prop you walked your face into (rooted on the floor an arm's length or more away, on none of your
-                // bones): scenery, not your body. A stale root far off (a character you just switched from) still counts
-                float feet = sqrtf(dx * dx + dy * dy);
-                if (feet > 0.75f && feet < 3.0f && fabsf(dz) < 0.3f && best > 0.75f && hk > 0.75f) {
+                // only your own body counts: its models are rooted in your head (within 35 cm of the eye) or in the
+                // column under it. A pillar or console you walked your face into, or an enemy pressed against you mid-
+                // fight, is rooted off to the side: logged, not counted (2026-11-05 tutorial runs)
+                float org[3];
+                VR_DrawOrigin(org);
+                for (int k = 0; k < 3; k++) org[k] -= g_t[k];  // relative to the eye
+                bool head = org[0] * org[0] + org[1] * org[1] + org[2] * org[2] < 0.35f * 0.35f;
+                bool column = org[0] * org[0] + org[2] * org[2] < 0.3f * 0.3f && org[1] < 0;
+                if (!head && !column) {
                     static int told;
-                    if (told++ < 3) g_log("neareye: scenery against your face, rooted %.2f m away (not counted)", feet);
+                    if (told++ < 5)
+                        g_log("neareye: something else at your face, rooted %.2f m to the side (not counted)",
+                              sqrtf(org[0] * org[0] + org[2] * org[2]));
                     return false;
                 }
                 g_nearEyeDraws++;
