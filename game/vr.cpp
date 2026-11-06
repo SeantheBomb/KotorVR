@@ -1089,28 +1089,36 @@ bool VR_NoteDrawn(GLsizei count, GLenum type, const void* indices) {
                                     }
                                 }
                 }
+                // whose model: its root against your feet and your body's bones (last frame)
+                float dx = g_lastRootT[0] - g_playerPos[0], dy = g_lastRootT[1] - g_playerPos[1], dz = g_lastRootT[2] - g_playerPos[2];
+                float best = 99;
+                int prev = g_ownNodeCur ^ 1;
+                for (int i = 0; i < g_ownNodeCount[prev]; i++) {
+                    const float* n = g_ownNodes[prev][i];
+                    float ex = g_lastRootT[0] - n[0], ey = g_lastRootT[1] - n[1], ez = g_lastRootT[2] - n[2];
+                    float d = sqrtf(ex * ex + ey * ey + ez * ez);
+                    if (d < best) best = d;
+                }
+                float hk = 99;
+                for (int h = 0; h < g_hookCount; h++) {
+                    float ex = g_lastRootT[0] - g_hooks[h][0], ey = g_lastRootT[1] - g_hooks[h][1], ez = g_lastRootT[2] - g_hooks[h][2];
+                    float d = sqrtf(ex * ex + ey * ey + ez * ez);
+                    if (d < hk) hk = d;
+                }
+                // a prop you walked your face into (rooted on the floor an arm's length or more away, on none of your
+                // bones): scenery, not your body. A stale root far off (a character you just switched from) still counts
+                float feet = sqrtf(dx * dx + dy * dy);
+                if (feet > 0.75f && feet < 3.0f && fabsf(dz) < 0.3f && best > 0.75f && hk > 0.75f) {
+                    static int told;
+                    if (told++ < 3) g_log("neareye: scenery against your face, rooted %.2f m away (not counted)", feet);
+                    return false;
+                }
                 g_nearEyeDraws++;
                 static int logged;
 
                 if (logged++ < 12) {
-                    // whose model: its root against your feet and your body's bones (last frame)
-                    float dx = g_lastRootT[0] - g_playerPos[0], dy = g_lastRootT[1] - g_playerPos[1], dz = g_lastRootT[2] - g_playerPos[2];
-                    float best = 99;
-                    int prev = g_ownNodeCur ^ 1;
-                    for (int i = 0; i < g_ownNodeCount[prev]; i++) {
-                        const float* n = g_ownNodes[prev][i];
-                        float ex = g_lastRootT[0] - n[0], ey = g_lastRootT[1] - n[1], ez = g_lastRootT[2] - n[2];
-                        float d = sqrtf(ex * ex + ey * ey + ez * ez);
-                        if (d < best) best = d;
-                    }
                     float oc[3];
                     VR_DrawOrigin(oc);  // the draw's own origin, in the tracking frame (y up, -z forward)
-                    float hk = 99;
-                    for (int h = 0; h < g_hookCount; h++) {
-                        float ex = g_lastRootT[0] - g_hooks[h][0], ey = g_lastRootT[1] - g_hooks[h][1], ez = g_lastRootT[2] - g_hooks[h][2];
-                        float d = sqrtf(ex * ex + ey * ey + ez * ez);
-                        if (d < hk) hk = d;
-                    }
                     g_log("neareye: draw count %d, vertex at eye (%.2f %.2f %.2f); draw origin (tracking) %.2f %.2f %.2f; "
                           "last root %.2f m from your feet (up %.2f), %.2f m from your nearest bone, %.2f m from the nearest of %d "
                           "hooks; hook0 (%.2f %.2f %.2f) root (%.2f %.2f %.2f)",
