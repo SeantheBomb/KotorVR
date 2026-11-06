@@ -1198,11 +1198,25 @@ int main(int argc, char** argv) {
                 fclose(gf);
             }
             std::string res = "TIMED OUT";
-            RunUntil(timeout, [&] {
-                if (LogContains("autopilot: arrived", from)) { res = "arrived"; return true; }
-                if (LogContains("autopilot: stuck", from)) { res = "STUCK"; return true; }
-                return false;
-            });
+            double walkEnd = Now() + timeout;
+            for (int attempt = 0; attempt < 2; attempt++) {
+                res = "TIMED OUT";
+                RunUntil(walkEnd - Now(), [&] {
+                    if (LogContains("autopilot: arrived", from)) { res = "arrived"; return true; }
+                    if (LogContains("autopilot: stuck", from)) { res = "STUCK"; return true; }
+                    return false;
+                });
+                if (res != "STUCK" || attempt) break;
+                // a party member in the corridor moves on: give it a moment, then go again (2026-11-06 repeat run)
+                printf("[%.1f]   walk: stuck - retrying in 2 s\n", Now());
+                RunFor(2.0);
+                from = LogSize();
+                FILE* rf = nullptr;
+                if (fopen_s(&rf, GameCmdPath().c_str(), "a") == 0 && rf) {
+                    fprintf(rf, "goto%s\n", way.c_str());
+                    fclose(rf);
+                }
+            }
             printf("[%.1f]   walk%s: %s\n", Now(), way.c_str(), res.c_str());
             if (res != "arrived") {
                 printf("[%.1f]   CHECK FAIL walk%s\n", Now(), way.c_str());
