@@ -9,6 +9,8 @@ bool Combat_AttackWithin(unsigned long ms);
 void Combat_Update();
 // The player's next attack roll is less than 0.6 s away: an attack gesture now is "on the beat" (+4).
 bool Combat_InPerfectWindow();
+// The creature is winding up an attack on you (its blow lands within 0.6 s, or just landed): no opening.
+bool Combat_Threatening(unsigned long attacker);
 // The controlled character is already attacking (rolled within the last 3.5 s): KotOR repeats the attack every
 // round by itself, so gestures only count for timing; pressing attack again just fills its action queue.
 bool Combat_PlayerAttacking();

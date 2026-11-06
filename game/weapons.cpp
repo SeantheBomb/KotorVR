@@ -875,7 +875,10 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                      !Dialogue_Showing() && HoverPos(hover);
     GuardBar bars[8];
     int nb = Features().cues ? Guard_Bars(bars, 8) : 0;
-    if (n == 0 && nb == 0 && !anyBolt && !showHover) return;
+    bool meleeHeld = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
+    float openAt[3];
+    bool showOpen = Melee_OpeningTarget(openAt) != 0 && meleeHeld && !(hshm && hshm->cinematic) && !Dialogue_Showing();
+    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -952,6 +955,22 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glVertex3f(pe[0][0] - ox * k, pe[0][1] - oy * k, pe[0][2]);
             p_glVertex3f(pe[1][0] + ox * k, pe[1][1] + oy * k, pe[1][2]);
             p_glVertex3f(pe[0][0] + ox * k, pe[0][1] + oy * k, pe[0][2]);
+            p_glEnd();
+        }
+    }
+    if (showOpen) {  // issue 9: an open enemy's chest - a soft gold ring, breathing; cut through it
+        float c[3] = {openAt[0], openAt[1], openAt[2] + 1.2f}, e[3];
+        ToEye(worldView, c, e);
+        if (e[2] < -0.2f) {
+            float k = 0.55f + 0.25f * (float)sin(tnow * 2 * 3.14159265 * 1.5);
+            if (p_glLineWidth) p_glLineWidth(3.0f);
+            p_glBegin(GL_LINES);
+            for (int i = 0; i < 32; i++) {
+                float a0 = i / 32.0f * 6.2831853f, a1 = (i + 1) / 32.0f * 6.2831853f;
+                p_glColor4f(1.0f, 0.8f, 0.35f, k);
+                p_glVertex3f(e[0] + cosf(a0) * 0.22f, e[1] + sinf(a0) * 0.32f, e[2]);
+                p_glVertex3f(e[0] + cosf(a1) * 0.22f, e[1] + sinf(a1) * 0.32f, e[2]);
+            }
             p_glEnd();
         }
     }

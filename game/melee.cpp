@@ -200,6 +200,26 @@ bool Melee_IsEnemy(DWORD id) {
     return f == 1 || f == 3 || f == 6 || f == 7 || f == 11 || f == 15;
 }
 
+#include "combat.h"
+#include "features.h"
+
+// Issue 9 (2026-11-05 playtest: "confusion about when and where to strike"): an enemy within reach that is not
+// winding up an attack on you is OPEN - its chest glows (weapons.cpp) and the sword hand gets a soft pulse. A cut
+// counts through its trunk (hips to head) while it is open; a touch elsewhere, too slow, or into its attack gets a
+// dull grey spark and a low double buzz instead ([Features] StrikeCue=0: any touch counts, as before).
+static DWORD g_openId;
+static float g_openPos[3];
+
+static bool InTrunk(const float p[3], const float* a, const float* b, const float* prevTip) {
+    float lo[3] = {p[0], p[1], p[2] + 0.65f}, hi[3] = {p[0], p[1], p[2] + 1.85f};
+    return SegSeg(a, b, lo, hi, nullptr) <= 0.32f || SegSeg(prevTip, b, lo, hi, nullptr) <= 0.32f;
+}
+
+DWORD Melee_OpeningTarget(float out[3]) {
+    if (g_openId) memcpy(out, g_openPos, sizeof g_openPos);
+    return g_openId;
+}
+
 // a living creature of a hostile faction, whether or not it has fought yet (Melee_IsEnemy needs it in a fight)
 bool Melee_HostileAlive(DWORD id) {
     if (IsDead(id)) return false;
@@ -275,6 +295,18 @@ void Melee_Update() {
         DWORD idle = Pick_NearestHostile(5.0f, e);
         if (idle) g_fighters[idle].seen = t;
     }
+    {  // the opening: the nearest enemy within reach, not winding up on you
+        float pp[3], e[3];
+        DWORD id = Features().strikeCue && Weapon_PlayerPos(pp) ? Melee_NearestEnemy(pp, e) : 0;
+        float dx = id ? e[0] - pp[0] : 0, dy = id ? e[1] - pp[1] : 0;
+        if (id && (dx * dx + dy * dy > 2.2f * 2.2f || Combat_Threatening(id))) id = 0;
+        if (id && id != g_openId) {
+            Cues_Opening();
+            Log("melee: opening on %08lX at %.1f m", id, sqrtf(dx * dx + dy * dy));
+        }
+        g_openId = id;
+        if (id) memcpy(g_openPos, e, sizeof g_openPos);
+    }
     static double lastDiag;
     if (t - lastDiag > 2.0) {  // diagnostics: blade state and the nearest enemy
         lastDiag = t;
@@ -336,12 +368,33 @@ void Melee_Update() {
                 touched = d <= 0.34f || sweep <= 0.34f;
             }
             if (!touched) continue;
+            // the strike cue: through the trunk, while it is open
+            const char* noCount = nullptr;
+            if (!glance && Features().strikeCue) {
+                if (!InTrunk(p, b.base, b.tip, b.prevTip)) noCount = "outside the trunk";
+                else if (Combat_Threatening(kv.first)) noCount = "into its attack - block, then cut";
+            }
+            if (noCount) {
+                static std::map<DWORD, double> lastMiss;
+                double& lm = lastMiss[kv.first];
+                if (t - lm > 0.5) {
+                    lm = t;
+                    Cues_NoCount();
+                    Log("melee: cut on %08lX does not count (%s) at %.1f m/s", kv.first, noCount, b.speed);
+                }
+                if (noCount[0] == 'i') {  // into its attack: this swing is spent
+                    b.armed = false;
+                    b.hitAt = t;
+                }
+                break;
+            }
             if (glance) {
                 static std::map<DWORD, double> lastGlance;
                 double& lg = lastGlance[kv.first];
                 if (t - lg > 0.5) {
                     lg = t;
-                    Cues_Glance();
+                    if (Features().strikeCue) Cues_NoCount();
+                    else Cues_Glance();
                     Log("melee: glance on %08lX at %.1f m/s (%s)", kv.first, b.speed,
                         b.speed < 2.0f ? "below the 2.0 m/s gate" : "the blade's last hit was under 0.4 s ago");
                 }

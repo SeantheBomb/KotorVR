@@ -45,7 +45,7 @@ blaster pistol), `dantooine_ruins` (Game1). Build more with `-SaveFixture <name>
 
 `-Cheats` turns the cheat console on and the enemy-sighted autopause off for that run only. Checks print
 `CHECK PASS/FAIL <name>`; any FAIL makes the run fail. Tests: `t_door` (issues 1, 10), `t_blaster` (6, 7, 8),
-`t_sword` (2, 7), `t_start` (4, new game), `t_floor` / `t_floorscan` / `t_corpse` (3), `t_flail` (9, WIP);
+`t_sword` (2, 7), `t_start` (4, new game), `t_floor` / `t_floorscan` / `t_corpse` (3), `t_strike` (9: the strike cue), `t_flail` (9, WIP);
 `python tools\check_guns.py "<game dir>"` (5). Routes for `game goto`: `python tools\navmesh.py <module> x0 y0 x1 y1`.
 
 Harness commands to the game (`game <cmd>`, game/simcmd.cpp): `goto x y ...`, `approach d`, `face x y`,

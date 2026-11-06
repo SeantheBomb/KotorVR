@@ -247,10 +247,12 @@ double g_tintUntil = -10;
 float g_spark;
 double g_sparkAt = -10;
 bool g_sparkBlock;  // blue-white (a block) rather than hot orange (a hit)
-void Spark(float v, bool block = false) {
+bool g_sparkDull;   // grey: a cut that did not count
+void Spark(float v, bool block = false, bool dull = false) {
     g_spark = v;
     g_sparkAt = Now();
     g_sparkBlock = block;
+    g_sparkDull = dull;
 }
 
 void Flash(float v) {
@@ -393,6 +395,18 @@ void Cues_Glance() {  // the blade touched a body too slowly to count: a faint s
     Spark(0.25f, true);
 }
 
+void Cues_NoCount() {
+    if (!Features().cues) return;
+    Haptic(0, 1, 0.35f, 0.04f, 70);  // low thud-thud: unlike the hit's bright buzz
+    Haptic(0.07, 1, 0.3f, 0.04f, 70);
+    Spark(0.3f, false, true);
+}
+
+void Cues_Opening() {
+    if (!Features().cues) return;
+    Haptic(0, 1, 0.22f, 0.07f, 110);
+}
+
 void Cues_Contact(float speed) {  // the blade bit into a body: a burn-through buzz scaled by the swing
     if (!Features().cues) return;
     float k = speed > 6.0f ? 1.0f : speed / 6.0f;
@@ -435,9 +449,9 @@ void Cues_Tone(const char* resref, float gain, float ratio) {
 
 float Cues_Sparks(double* age, float rgb[3]) {
     *age = Now() - g_sparkAt;
-    rgb[0] = g_sparkBlock ? 0.6f : 1.0f;
-    rgb[1] = g_sparkBlock ? 0.85f : 0.6f;
-    rgb[2] = g_sparkBlock ? 1.0f : 0.2f;
+    rgb[0] = g_sparkDull ? 0.45f : g_sparkBlock ? 0.6f : 1.0f;
+    rgb[1] = g_sparkDull ? 0.45f : g_sparkBlock ? 0.85f : 0.6f;
+    rgb[2] = g_sparkDull ? 0.45f : g_sparkBlock ? 1.0f : 0.2f;
     if (!Features().cues || *age > 0.45) return 0;
     return g_spark * (float)(1.0 - *age / 0.45);
 }

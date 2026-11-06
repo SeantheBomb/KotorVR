@@ -30,6 +30,7 @@ void Features_Load(const char* gameDir) {
     g_flags.hands = GetPrivateProfileIntA("Features", "Hands", 1, path) != 0;
     g_flags.modelCull = GetPrivateProfileIntA("Features", "ModelCull", 1, path) != 0;
     g_flags.cues = GetPrivateProfileIntA("Features", "Cues", 1, path) != 0;
+    g_flags.strikeCue = GetPrivateProfileIntA("Features", "StrikeCue", 1, path) != 0;
     g_flags.weaponGallery = GetPrivateProfileIntA("Debug", "WeaponGallery", 0, path) != 0;
     g_flags.snapTurn = GetPrivateProfileIntA("Comfort", "SnapTurn", 0, path) != 0;
     g_flags.snapAngle = (float)GetPrivateProfileIntA("Comfort", "SnapAngle", 30, path);

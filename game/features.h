@@ -11,6 +11,7 @@ struct FeatureFlags {
     bool hands;          // draw the character's own hands (from their body model, so they match the outfit)
     bool modelCull;      // hide exactly the controlled character's model (0 = old radius heuristics)
     bool cues;           // combat feedback: haptics, weapon glow, KotOR sounds for blocks / timing / warnings
+    bool strikeCue;      // [Features] StrikeCue: cuts count through the trunk in an opening (0 = any touch counts)
     bool cueTest;        // [Debug] CueTest=1: fire every combat cue in turn every 1.5 s (harness checks)
     bool snapTurn;       // [Comfort] SnapTurn=1: right stick turns in SnapAngle steps instead of smoothly
     float snapAngle;     // [Comfort] SnapAngle (degrees, default 30)

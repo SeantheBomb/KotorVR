@@ -791,6 +791,19 @@ void Combat_Update() {
 
 bool Combat_InPerfectWindow() { return g_windowOpen; }
 
+bool Combat_Threatening(unsigned long attacker) {
+    double t = Now();
+    bool busy = false;
+    EnterCriticalSection(&g_lock);
+    for (const Incoming& in : g_incoming) {
+        if (in.attacker != attacker) continue;
+        double due = in.due > 0 ? in.due : in.rolled + 0.5;
+        if (t >= due - 0.6 && t <= due + 0.15) busy = true;
+    }
+    LeaveCriticalSection(&g_lock);
+    return busy;
+}
+
 bool Combat_ContactMode() { return g_contact; }
 
 bool Combat_PlayerAttacking() { return Now() - g_playerRolls[1] < 3.5; }

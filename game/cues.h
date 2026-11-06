@@ -44,6 +44,10 @@ void Cues_TooFar();
 void Cues_Contact(float speed);
 // ... but too slowly to count (below the swing gate): a faint spark, a light tick.
 void Cues_Glance();
+// A cut that did not count (too slow, outside the trunk, or into an attack): a dull grey spark, a low double buzz.
+void Cues_NoCount();
+// An enemy in reach just opened up: a soft pulse in the sword hand.
+void Cues_Opening();
 // The player's perfect attack window is open (drives the gentle weapon pulse).
 void Cues_SetWindow(bool open);
 // Lightsaber audio (KotOR's own power-up / power-down / hum / swing sounds): ignition edges, and every frame the
