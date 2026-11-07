@@ -293,9 +293,13 @@ static std::string LogLastLine(const std::string& needle, long from) {
 
 // a walkmesh route (tools/navmesh.py) from one point to another in <module>: "x y x y ..." ("" if none)
 static std::string NavRoute(const std::string& module, float x0, float y0, float x1, float y1) {
-    char cmd[512];
-    sprintf_s(cmd, "python \"C:\\Users\\SeanF\\Documents\\KotorVR\\tools\\navmesh.py\" %s %.2f %.2f %.2f %.2f 2>nul",
-              module.c_str(), x0, y0, x1, y1);
+    // tools\navmesh.py next to this exe's repo: <repo>\host\build\kvr_simhost.exe
+    char exe[MAX_PATH], cmd[1024];
+    GetModuleFileNameA(nullptr, exe, MAX_PATH);
+    std::string repo = exe;
+    for (int up = 0; up < 3 && repo.rfind('\\') != std::string::npos; up++) repo.resize(repo.rfind('\\'));
+    sprintf_s(cmd, "python \"%s\\tools\\navmesh.py\" %s %.2f %.2f %.2f %.2f 2>nul", repo.c_str(), module.c_str(), x0,
+              y0, x1, y1);
     FILE* p = _popen(cmd, "r");
     if (!p) return "";
     std::string out;
