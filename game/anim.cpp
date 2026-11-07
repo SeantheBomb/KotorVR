@@ -364,6 +364,28 @@ extern "C" void __cdecl Anim_AnimatePost(BYTE* gob) {
 void Anim_Update() {
     if (!Features().modelCull) return;
     BYTE* gob = PlayerBodyGob();
+    // the client's "player creature" can stay on the party member you switched away from (2026-11-06 playtest:
+    // back as yourself, Trask's head stayed hidden as if it were yours): the body is the model standing where the
+    // controlled creature is
+    float cp[3];
+    if (Weapon_PlayerPos(cp)) {
+        bool off = true;
+        __try {
+            if (gob) {
+                const float* g = (const float*)(gob + 0x78);
+                off = (g[0] - cp[0]) * (g[0] - cp[0]) + (g[1] - cp[1]) * (g[1] - cp[1]) > 0.5f * 0.5f;
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        if (off) {
+            BYTE* at = (BYTE*)Anim_ModelAt(cp);
+            if (at && at != gob) {
+                static BYTE* told;
+                if (told != at) Log("anim: the client's player body is not the controlled character - using the model at its feet");
+                told = at;
+                gob = at;
+            }
+        }
+    }
     g_playerGob = gob;
     if (!gob) return;
     DWORD* vt = nullptr;

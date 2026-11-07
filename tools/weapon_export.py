@@ -103,6 +103,29 @@ def barrel_axis(pts, fwd):
     return v
 
 
+def handle_dir(pts, fwd):
+    """A gun's handle direction (unit, perpendicular to fwd): toward the point farthest off the barrel line within 6 cm
+    of the grip point (the model origin) along the barrel. None if there is none."""
+    proj = [sum(p[i] * fwd[i] for i in range(3)) for p in pts]
+    mid = (min(proj) + max(proj)) / 2
+    front = [p for p, s in zip(pts, proj) if s >= mid] or pts
+    b0 = [sum(p[i] for p in front) / len(front) for i in range(3)]
+    offs = []
+    for p, s in zip(pts, proj):
+        if abs(s) > 0.06:
+            continue
+        d = [p[i] - b0[i] for i in range(3)]
+        t = sum(d[i] * fwd[i] for i in range(3))
+        o = [d[i] - fwd[i] * t for i in range(3)]
+        if math.sqrt(sum(x * x for x in o)) > 0.02:
+            offs.append(o)
+    if len(offs) < 3:
+        return None
+    # the handle's end is what sticks out farthest there (a mean was outweighed by a bulky body under the barrel:
+    # the disruptor / ion pistols came out upside down)
+    return norm(max(offs, key=lambda o: sum(x * x for x in o)))
+
+
 def grip_frame(meshes, gun=False):
     """Rotation rows mapping root space -> grip frame (tip along -Z, 'up' along +Y). Guns: -Z along the barrel."""
     pts = [p for _, _, pos, _, _ in meshes for p in pos]
@@ -114,6 +137,13 @@ def grip_frame(meshes, gun=False):
         for _ in range(6):  # re-slice along each new estimate until it settles
             fwd = barrel_axis(pts, fwd) or fwd
     c = [sum(p[i] for p in pts) / len(pts) for i in range(3)]
+    if gun:
+        # "up" is away from the handle: the part near the hand point (the model origin) that sticks out from the barrel
+        # line. The whole-mesh centroid sat beside the grip on some pistols, and on others the barrel runs right through
+        # the grip point - either way the handle stuck out sideways (2026-11-06 playtest)
+        h = handle_dir(pts, fwd)
+        if h is not None:
+            c = [-x for x in h]
     side = [c[i] - fwd[i] * sum(c[k] * fwd[k] for k in range(3)) for i in range(3)]
     up = norm(side)
     if up is None or math.sqrt(sum(x * x for x in side)) < 0.01:
@@ -216,7 +246,10 @@ def main(game, out):
             if not meshes:
                 print(f"{r}: no renderable meshes")
                 continue
-            rows = blade_edge_up(meshes, grip_frame(meshes, is_gun(r)))
+            gun = is_gun(r)
+            rows = grip_frame(meshes, gun)
+            if not gun:  # (the blade rule rolled pistols with a wide barrel a quarter turn: handle sideways)
+                rows = blade_edge_up(meshes, rows)
             write_model(os.path.join(out, "models", r + ".kvrw"), meshes, rows)
             textures.update(t for t, *_ in meshes)
             print(f"{r}: {len(meshes)} meshes, {sum(len(x[2]) for x in meshes)} verts")

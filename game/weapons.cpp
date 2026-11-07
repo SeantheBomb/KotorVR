@@ -1175,7 +1175,8 @@ struct PoseAdj {
 static PoseAdj g_poseAdj[WC_COUNT];
 // Guns tip down from the controller's aim ray by [Aim] Pitch degrees (2026-10-30 playtest: shots went 15-30 deg above
 // where the hand pointed; -20 still high on 2026-10-31); the drawn gun and its bolts turn together. Negative = down.
-static float g_aimPitch = -30.0f;
+// 2026-11-06: 0 - the barrel lies on the pointing ray the hover / pick uses ("pointing forward is the raycast")
+static float g_aimPitch = 0.0f;
 
 static void RefreshPoseAdj() {
     static DWORD lastCheck;
@@ -1189,8 +1190,8 @@ static void RefreshPoseAdj() {
     lastWrite = fa.ftLastWriteTime;
     {
         char val[32];
-        GetPrivateProfileStringA("Aim", "Pitch", "-30", val, sizeof val, ini);
-        float p = -30.0f;
+        GetPrivateProfileStringA("Aim", "Pitch", "0", val, sizeof val, ini);
+        float p = 0.0f;
         if (sscanf_s(val, "%f", &p) == 1 && p >= -60.0f && p <= 60.0f) g_aimPitch = p;
         Log("weapons: guns tip %.0f deg from the pointing ray ([Aim] Pitch)", g_aimPitch);
     }

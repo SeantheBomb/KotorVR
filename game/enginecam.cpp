@@ -327,9 +327,13 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                 if (Melee_LineOfSight(headPos, g_subject, pid, 0)) {
                     r = 1;
                     Log("cutscene: only someone / something movable is in the way (walls are clear) -> first person");
-                } else if (Dialogue_SpeakerPos(sp)) {
+                } else if (Dialogue_SpeakerPos(sp) &&
+                           (g_subject[0] - headPos[0]) * (g_subject[0] - headPos[0]) +
+                                   (g_subject[1] - headPos[1]) * (g_subject[1] - headPos[1]) < 40.0f * 40.0f) {
                     // a wide shot's centre can be a far wall (22 m, past Bandon): the scene is still in plain view
-                    // when the one you are talking with is (Trask's last stand, 2026-11-05)
+                    // when the one you are talking with is (Trask's last stand, 2026-11-05). Not a shot of somewhere
+                    // else entirely (Taris' duel ring broadcast, 80-100 m off behind walls: you watched the announcer
+                    // instead of the fight; 2026-11-06 playtest)
                     sp[2] += 1.4f;
                     float dx = sp[0] - headPos[0], dy = sp[1] - headPos[1];
                     if (dx * dx + dy * dy < 25.0f * 25.0f && Melee_LineOfSight(headPos, sp, pid, 0)) {

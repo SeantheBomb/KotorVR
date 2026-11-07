@@ -1,6 +1,6 @@
 # Issue 2b, from the video: after switching characters (Tab), your new body's head / body drawn in your eyes.
 #   run_sim.ps1 -Script t_switch -Fixture spire_trask -Cheats -AllowDiscord -Force -TimeoutSec 400
-# Pass: as Trask (looking around, walking, gripping the door) and back as yourself, nothing within 12 cm of the eye.
+# Pass: the body hidden as yours is the one you control (Trask's head stays on him after you switch back); as Trask (looking around, walking, gripping the door) and back as yourself, nothing within 12 cm of the eye.
 wait_menu 90
 wait_calm 8 120
 click u=0.559 v=0.521      # Load Game
@@ -35,7 +35,9 @@ head yaw=-60 pitch=-50
 wait 1.5
 head yaw=0 pitch=0
 wait 1
-check_count @mark head_never_in_eyes_after_switch neareye: 0 0 0.2
+check_count @mark head_never_in_eyes_after_switch neareye:~draw 0 0 0.2
+game body
+check_log hidden_body_is_trask simcmd:~body~ok 3
 mark
 use 21.12 20.71 1.3        # Trask opens it
 wait 3
@@ -44,5 +46,7 @@ wait 2
 head yaw=0 pitch=-60
 wait 1.5
 head yaw=0 pitch=0
-check_count @mark head_never_in_eyes_switched_back neareye: 0 0 0.2
+check_count @mark head_never_in_eyes_switched_back neareye:~draw 0 0 0.2
+game body
+check_log hidden_body_is_you_again simcmd:~body~ok 3   # Trask's head stays (2026-11-06 playtest)
 shot door1

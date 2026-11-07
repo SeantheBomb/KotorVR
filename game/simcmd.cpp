@@ -27,6 +27,7 @@
 // Movement goes through the same keys the left stick uses (W/S/Z/C along the game camera), so it walks, collides and
 // slides along walls exactly as the player does.
 #include "simcmd.h"
+#include "anim.h"
 
 #include <cmath>
 #include <cstdio>
@@ -101,6 +102,14 @@ void Run(char* line) {
         g_bestDist = 1e9f;
         g_progressAt = GetTickCount();
         Log("autopilot: goto %d waypoints from (%.2f %.2f)", (int)(g_way.size() / 2), p[0], p[1]);
+    } else if (!strcmp(cmd, "body")) {  // is the body hidden as "yours" the controlled creature's? (issue 2b)
+        float bp[3];
+        if (havePos && Anim_PlayerBodyPos(bp)) {
+            float d = sqrtf((bp[0] - p[0]) * (bp[0] - p[0]) + (bp[1] - p[1]) * (bp[1] - p[1]));
+            Log("simcmd: body %s (the hidden model %.2f m from the controlled creature)", d < 0.5f ? "ok" : "WRONG", d);
+        } else {
+            Log("simcmd: body unknown");
+        }
     } else if (!strcmp(cmd, "god")) {
         g_god = nums.empty() || nums[0] != 0;
         g_godHp = 0;
