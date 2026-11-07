@@ -83,7 +83,10 @@ $sim = Start-Process -FilePath $simhost -ArgumentList "`"$scriptPath`"", "`"$out
     -RedirectStandardOutput $log -RedirectStandardError (Join-Path $out 'simhost.err')
 $null = $sim.Handle  # keep a handle so ExitCode is available after exit
 Start-Sleep 1
-& 'C:\Program Files (x86)\Steam\steam.exe' -applaunch 32370
+# Launch the exe directly (steam_appid.txt lets it run under the open Steam without a relaunch through it): no Steam
+# Cloud sync around a run - fixture saves were being uploaded, and the cloud-conflict prompt then blocked every launch
+Set-Content "$game\steam_appid.txt" '32370' -Encoding ascii -NoNewline
+Start-Process -FilePath "$game\swkotor.exe" -WorkingDirectory $game
 Write-Host "running '$name' (timeout $TimeoutSec s) -> $out"
 if (-not $sim.WaitForExit($TimeoutSec * 1000)) {
     Write-Host "TIMEOUT - stopping the simulator"
@@ -120,6 +123,7 @@ if (-not $KeepGame) {
         Write-Host "WARNING: saves snapshot missing or empty; live saves left as they are"
     }
 }
+Remove-Item "$game\steam_appid.txt" -ErrorAction SilentlyContinue
 if (Test-Path "$game\kvr\probe.log") { Copy-Item "$game\kvr\probe.log" (Join-Path $out 'probe.log') }
 $probe = Join-Path $out 'probe.log'
 $stalls = if (Test-Path $probe) { @(Select-String -Path $probe -Pattern 'STALL') } else { @() }

@@ -439,9 +439,20 @@ struct Bolt {
     bool fromSet;
     bool alongBarrel;   // fired by the trigger: flies down the barrel to what it hits (else 30 m)
     bool impact;        // it ends on a surface / creature: a burst of sparks there
+    bool onEnemy;       // it ends on an enemy: a dull grey puff - the damage, when the game deals it, is its own burst
     bool charged;       // a Power Blast: a heavier bolt
 };
 static double g_lastBarrelShot = -10;
+static double NowS();
+static unsigned long g_damageOn;    // the creature your ranged attack just hurt (the game's damage, not a bolt)
+static double g_damageAt = -10;
+
+void Weapons_DamageLanded(unsigned long target) {
+    g_damageOn = target;
+    g_damageAt = NowS();
+    VR_Haptic(1, 1.0f, 0.14f, 85);  // a heavy thump, unlike the recoil kick
+    Log("weapons: ranged damage landed on %08lX - burst", target);
+}
 static std::vector<Bolt> g_bolts;
 static float g_muzzleEye[16];   // this frame's right-hand ranged weapon matrix in eye space (tip along -Z)
 static float g_muzzleLen;
@@ -811,6 +822,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             }
             for (int r = 0; r < 3; r++) b.to[r] = b.from[r] + dw[r] * range;
             b.impact = range < 29.9f;
+            b.onEnemy = why[0] == 'e';
             Log("weapons: bolt along the barrel stops after %.1f m at the %s", range, why);
         }
         b.fromSet = true;
@@ -878,7 +890,9 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     bool meleeHeld = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
     float openAt[3];
     bool showOpen = Melee_OpeningTarget(openAt) != 0 && meleeHeld && !(hshm && hshm->cinematic) && !Dialogue_Showing();
-    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen) return;
+    float dmgAge = (float)(tnow - g_damageAt), dmgAt[3];
+    bool showDamage = dmgAge < 0.4f && CreaturePos(g_damageOn, dmgAt);
+    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -917,13 +931,18 @@ void Weapons_DrawWarnings(const float worldView[16]) {
                 unsigned seed = (unsigned)(b.t0 * 1000);
                 if (p_glLineWidth) p_glLineWidth(3.0f);
                 p_glBegin(GL_LINES);
-                for (int i = 0; i < 18; i++) {
+                // on an enemy a bolt only marks where it struck (dull grey): whether it hurt is the game's round -
+                // the damage burst (2026-11-06 playtest: ten bright hits, one bit of damage, no way to tell which)
+                int rays = b.onEnemy ? 8 : 18;
+                for (int i = 0; i < rays; i++) {
                     seed = seed * 1103515245u + 12345u;
                     float a = ((seed >> 8) & 0xFFFF) / 65535.0f * 6.2831853f;
-                    float r0 = 0.02f + age * 1.2f, r1 = r0 + 0.06f;
-                    p_glColor4f(1.0f, 0.85f, 0.6f, k);
+                    float r0 = 0.02f + age * (b.onEnemy ? 0.5f : 1.2f), r1 = r0 + (b.onEnemy ? 0.035f : 0.06f);
+                    if (b.onEnemy) p_glColor4f(0.55f, 0.55f, 0.55f, k * 0.7f);
+                    else p_glColor4f(1.0f, 0.85f, 0.6f, k);
                     p_glVertex3f(ie[0] + cosf(a) * r0, ie[1] + sinf(a) * r0, ie[2]);
-                    p_glColor4f(1.0f, 0.35f, 0.15f, 0);
+                    if (b.onEnemy) p_glColor4f(0.4f, 0.4f, 0.4f, 0);
+                    else p_glColor4f(1.0f, 0.35f, 0.15f, 0);
                     p_glVertex3f(ie[0] + cosf(a) * r1, ie[1] + sinf(a) * r1, ie[2]);
                 }
                 p_glEnd();
@@ -958,18 +977,43 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
         }
     }
+    if (showDamage) {  // the game dealt your ranged damage: a big white-hot burst on its chest, unmistakable
+        float c[3] = {dmgAt[0], dmgAt[1], dmgAt[2] + 1.2f}, e[3];
+        ToEye(worldView, c, e);
+        if (e[2] < -0.2f) {
+            float k = 1.0f - dmgAge / 0.4f;
+            if (p_glLineWidth) p_glLineWidth(4.0f);
+            p_glBegin(GL_LINES);
+            unsigned seed = (unsigned)(g_damageAt * 1000);
+            for (int i = 0; i < 28; i++) {
+                seed = seed * 1103515245u + 12345u;
+                float a = ((seed >> 8) & 0xFFFF) / 65535.0f * 6.2831853f;
+                float r0 = 0.05f + dmgAge * 0.9f, r1 = r0 + 0.12f + 0.08f * ((seed >> 4) & 15) / 15.0f;
+                p_glColor4f(1.0f, 0.95f, 0.8f, k);
+                p_glVertex3f(e[0] + cosf(a) * r0, e[1] + sinf(a) * r0, e[2]);
+                p_glColor4f(1.0f, 0.4f, 0.1f, 0);
+                p_glVertex3f(e[0] + cosf(a) * r1, e[1] + sinf(a) * r1, e[2]);
+            }
+            p_glEnd();
+        }
+    }
     if (showOpen) {  // issue 9: an open enemy's chest - a soft gold ring, breathing; cut through it
         float c[3] = {openAt[0], openAt[1], openAt[2] + 1.2f}, e[3];
         ToEye(worldView, c, e);
-        if (e[2] < -0.2f) {
-            float k = 0.55f + 0.25f * (float)sin(tnow * 2 * 3.14159265 * 1.5);
+        // in your face it shrinks and fades (2026-11-06 playtest: huge and half off-screen at arm's length, over the
+        // warnings and the guard bar): full size from 1.6 m out, gone at 0.7 m
+        float dist = sqrtf(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        float closeK = max(0.0f, min(1.0f, (dist - 0.7f) / 0.9f));
+        if (e[2] < -0.2f && closeK > 0.02f) {
+            float k = (0.55f + 0.25f * (float)sin(tnow * 2 * 3.14159265 * 1.5)) * closeK;
+            float rs = 0.6f + 0.4f * closeK;
             if (p_glLineWidth) p_glLineWidth(3.0f);
             p_glBegin(GL_LINES);
             for (int i = 0; i < 32; i++) {
                 float a0 = i / 32.0f * 6.2831853f, a1 = (i + 1) / 32.0f * 6.2831853f;
                 p_glColor4f(1.0f, 0.8f, 0.35f, k);
-                p_glVertex3f(e[0] + cosf(a0) * 0.22f, e[1] + sinf(a0) * 0.32f, e[2]);
-                p_glVertex3f(e[0] + cosf(a1) * 0.22f, e[1] + sinf(a1) * 0.32f, e[2]);
+                p_glVertex3f(e[0] + cosf(a0) * 0.22f * rs, e[1] + sinf(a0) * 0.32f * rs, e[2]);
+                p_glVertex3f(e[0] + cosf(a1) * 0.22f * rs, e[1] + sinf(a1) * 0.32f * rs, e[2]);
             }
             p_glEnd();
         }
@@ -1426,7 +1470,12 @@ void Weapons_Draw(const float invEye[16]) {
         int row = h ? g_rightRow : g_leftRow, var = h ? g_rightVar : g_leftVar;
         float glowRgb[3];
         Cues_GlowColor(h, glowRgb);
-        if (!WeaponModels_Draw(row, var, Cues_Glow(h), IsSaber(c) ? g_bladeExt : 1.0f, glowRgb)) DrawClass(c);
+        float glow = Cues_Glow(h);
+        // a gun glows while your attack is about to resolve: the shot that hurts is the one in this window (the game
+        // deals ranged damage once a round, whatever the trigger does)
+        if (!kProfiles[c].melee && Combat_InPerfectWindow())
+            glow = max(glow, 0.45f + 0.15f * (float)sin(NowS() * 2 * 3.14159265 * 3));
+        if (!WeaponModels_Draw(row, var, glow, IsSaber(c) ? g_bladeExt : 1.0f, glowRgb)) DrawClass(c);
         if (!kProfiles[c].melee && h == 1) {
             memcpy(g_muzzleEye, mv, sizeof g_muzzleEye);
             g_muzzleLen = WeaponModels_Length(row, var);

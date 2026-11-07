@@ -65,3 +65,5 @@ void Weapons_FireBolt(const float targetWorld[3], float delay);
 // The trigger was pulled on a ranged weapon: a bolt leaves the barrel right now, along it (with the muzzle flash and
 // recoil). KotOR's own shot for the attack it then rolls is not drawn again within 0.8 s.
 void Weapons_FireAlongBarrel();
+// The game just applied your ranged attack's damage to this creature: the burst you see and the thump you feel.
+void Weapons_DamageLanded(unsigned long target);

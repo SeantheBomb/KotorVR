@@ -404,6 +404,7 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
         Anim_HitPause(object, head ? 0.09f : 0);
         Cues_Fire(CUE_HIT_LANDED);
         Log("combat: player blow on %08lX lands: %d damage x%.2f%s", object, dealt, k, head ? " (head)" : "");
+        if (!Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE) Weapons_DamageLanded(object);
         return;
     }
     if (caller == playerId && object != playerId) {  // the player's blow / bolt just connected

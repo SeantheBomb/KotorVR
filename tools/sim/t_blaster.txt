@@ -111,6 +111,7 @@ wait 0.6
 trigger
 wait 3.5
 check_count @mark hits_keep_damage without~contact 0 0 0.2
+check_count @mark damage_shows_a_burst ranged~damage~landed 1 99 0.2   # the hurt you deal is its own burst (2026-11-06)
 # 7: the stick moves you while the fight goes on (after a shot, with the game's attack possibly still queued)
 trigger
 wait 0.4

@@ -210,9 +210,11 @@ bool Melee_IsEnemy(DWORD id) {
 static DWORD g_openId;
 static float g_openPos[3];
 
+// the strike zone: everything above the hips - trunk, arms, shoulders, head; only the legs miss (2026-11-06
+// playtest: a trunk-only zone left a third of the cuts "not counting" - a 0.55 m radius takes the arms in)
 static bool InTrunk(const float p[3], const float* a, const float* b, const float* prevTip) {
-    float lo[3] = {p[0], p[1], p[2] + 0.65f}, hi[3] = {p[0], p[1], p[2] + 1.85f};
-    return SegSeg(a, b, lo, hi, nullptr) <= 0.32f || SegSeg(prevTip, b, lo, hi, nullptr) <= 0.32f;
+    float lo[3] = {p[0], p[1], p[2] + 0.95f}, hi[3] = {p[0], p[1], p[2] + 1.95f};  // (its round end: mid-thigh)
+    return SegSeg(a, b, lo, hi, nullptr) <= 0.55f || SegSeg(prevTip, b, lo, hi, nullptr) <= 0.55f;
 }
 
 DWORD Melee_OpeningTarget(float out[3]) {
@@ -391,10 +393,15 @@ void Melee_Update() {
             if (glance) {
                 static std::map<DWORD, double> lastGlance;
                 double& lg = lastGlance[kv.first];
+                // the same cut touching again right after it counted is its follow-through: silent (it played the
+                // "did not count" buzz right after the hit's - 60 times in the 2026-11-06 playtest)
+                bool followThrough = b.speed >= 2.0f;
                 if (t - lg > 0.5) {
                     lg = t;
-                    if (Features().strikeCue) Cues_NoCount();
-                    else Cues_Glance();
+                    if (!followThrough) {
+                        if (Features().strikeCue) Cues_NoCount();
+                        else Cues_Glance();
+                    }
                     Log("melee: glance on %08lX at %.1f m/s (%s)", kv.first, b.speed,
                         b.speed < 2.0f ? "below the 2.0 m/s gate" : "the blade's last hit was under 0.4 s ago");
                 }

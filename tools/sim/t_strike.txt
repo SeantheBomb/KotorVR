@@ -2,7 +2,7 @@
 # not winding up on you is open - a gold ring on its chest, a soft pulse in the sword hand; a cut through its trunk
 # counts, one at its legs (or into its attack) gets a dull grey spark and a low double buzz.
 #   run_sim.ps1 -Script t_strike -Fixture starboard_entry -Cheats -AllowDiscord -Force -TimeoutSec 400
-# Pass: an opening shows; a chest-height cut lands; a cut at the legs does not count.
+# Pass: an opening shows; a chest-height cut lands; a cut at the legs does not count (the zone: everything above the hips).
 wait_menu 90
 wait_calm 8 120
 click u=0.559 v=0.521      # Load Game
@@ -33,7 +33,7 @@ check_since_mark opening_shown melee:~opening~on 15
 shot open_ring
 # a cut at its legs: low, sweeping across
 mark
-hand R x=0.35 y=-1.05 z=-0.45 yaw=-45 pitch=-40
+hand R x=0.35 y=-1.25 z=-0.45 yaw=-45 pitch=-50
 wait 0.4
 swing dx=-0.8 dy=0 dz=-0.1 over=0.15
 check_since_mark legs_do_not_count does~not~count~(outside~the~trunk) 3
