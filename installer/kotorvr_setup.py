@@ -151,6 +151,11 @@ class Steps:
         kvr = os.path.join(game, "kvr")
         host = os.path.join(kvr, "host")
         os.makedirs(host, exist_ok=True)
+        # settings kept by an earlier uninstall come back (a reinstall used to start from the defaults)
+        keep = os.path.join(game, "kvr.ini.kvr-saved")
+        if os.path.exists(keep) and not os.path.exists(os.path.join(kvr, "kvr.ini")):
+            shutil.copy2(keep, os.path.join(kvr, "kvr.ini"))
+            self.log("Your settings from before (kvr.ini.kvr-saved) are back.")
         manifest = {"version": VERSION, "files": [], "backup": None, "shortcuts": []}
         busy = running("swkotor.exe") or running("kvr_host.exe")
         if busy:
