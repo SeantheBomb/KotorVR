@@ -9,3 +9,6 @@ traces/
 third_party/
 installer/build/
 dist/
+
+# test-rig save fixtures: KotOR saves embed the game's own data - local only
+fixtures/
