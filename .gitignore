@@ -12,3 +12,6 @@ dist/
 
 # test-rig save fixtures: KotOR saves embed the game's own data - local only
 fixtures/
+
+# launch drafts (Reddit post, trailer working files)
+launch/
