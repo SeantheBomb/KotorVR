@@ -15,8 +15,12 @@ seated or standing with tracked controllers.
 KotOR's own rules still run underneath: your character's skills, feats, Force points and the d20 decide how well
 what you do lands.
 
-> **Early access.** This is a fan project in active development. Read [Known issues](docs/KNOWN_ISSUES.md) before
-> you start a long playthrough, and keep a backup of your saves.
+**▶ [Watch the trailer](TRAILER_LINK)** · **[Download v1.0.0](../../releases/latest)** · **[How to play](docs/USER_GUIDE.md)** ·
+**[Report a bug](../../issues/new?template=bug_report.yml)** · **[Suggest a feature](../../issues/new?template=feature_request.yml)**
+
+> **v1.0 — a fan project made by one person.** It plays from the first room of the Endar Spire through Taris and
+> beyond; tell me what breaks and what feels great. Read [Known issues](docs/KNOWN_ISSUES.md), and keep a backup of
+> your saves.
 
 ## Requirements
 
@@ -48,6 +52,27 @@ kept as `kvr.ini.kvr-saved`).
 
 The [User guide](docs/USER_GUIDE.md) has every control, how combat and the Force work, all settings and
 troubleshooting.
+
+### The 30-second version
+
+| | |
+|---|---|
+| Look, walk | your head; left stick (right stick turns, click it to recenter) |
+| Use, talk, open, attack | point with your right hand, **right grip** |
+| Click in menus and conversations | point, **right trigger** |
+| Swords and sabers | swing for real — cut while the enemy's chest shows a **gold ring**; block its blows on the glowing bar |
+| Blasters | point and pull the trigger — the **white-hot burst** is damage |
+| The Force | hold the **left grip**, then shove, lift, hold or squeeze the left trigger, and let go |
+| HUD, map, party | turn your **left palm** toward your face |
+
+## Feedback
+
+This is v1 and I want to hear how it plays.
+
+- 🐞 **Bugs:** [open a bug report](../../issues/new?template=bug_report.yml) — attach `<KotOR>\kvr\probe.log` and a
+  clip if you can.
+- 💡 **Ideas:** [request a feature](../../issues/new?template=feature_request.yml).
+- 💬 **Impressions, questions, clips:** [Discussions](../../discussions).
 
 ## Documentation
 
