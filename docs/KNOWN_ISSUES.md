@@ -1,6 +1,12 @@
 # Known issues
 
-KotOR VR is early access. What we know about, roughly from most to least noticeable:
+What we know about, roughly from most to least noticeable. Found something else?
+[Report it](https://github.com/SeantheBomb/KotorVR/issues/new?template=bug_report.yml).
+
+## Focus
+- **KotOR pauses whenever its window isn't the active one.** A pop-up, a notification or another app taking the
+  foreground freezes the headset view until the game is active again. Close pop-ups before you play; turn on Windows'
+  Do Not Disturb.
 
 ## Platform
 - **Steam version only.** GOG, disc and modified executables aren't supported yet (the mod detects a mismatch and
@@ -25,7 +31,8 @@ KotOR VR is early access. What we know about, roughly from most to least noticea
 ## Combat
 - Physical combat sits on top of KotOR's turn-based rules: enemies still attack on their own 3-second rhythm, and
   your attack "rounds" run in the background. Most of the time this is invisible; sometimes a hit you expected waits
-  for the next round.
+  for the next round. With blasters this is visible on purpose: only the white-hot burst is damage.
+- Now and then the stick takes half a second to free you from an attack that has just started.
 - Blocks and parries are judged against the block bar when the blow lands. KotOR decides an attack only about half a
   second before it lands, so the bar's warning is short; several enemies at once can be hard to read.
   `BlockTolerance` makes it more forgiving.

@@ -1,0 +1,81 @@
+name: Bug report
+description: Something in KotOR VR doesn't work or looks wrong.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing KotOR VR! A good report gets fixed fastest. Check [Known issues](https://github.com/SeantheBomb/KotorVR/blob/main/docs/KNOWN_ISSUES.md) first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+      placeholder: "In the Taris cantina, the duel broadcast showed the announcer instead of the fight."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Where / how to get it
+      description: The planet or area, what you were doing (fighting, talking, in a menu…), and the steps if you can repeat it.
+      placeholder: |
+        1. Endar Spire, the room after Trask opens the bunk door
+        2. Switch to Trask (X), then back
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the mod?
+      multiple: true
+      options:
+        - Melee combat (swords, lightsabers)
+        - Blasters
+        - Force powers
+        - Conversations / cutscenes
+        - Menus / HUD / panels
+        - Movement / comfort / recentering
+        - Hands / weapons in hand
+        - Rendering (missing / flickering geometry, black screen)
+        - Install / launch
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: KotOR VR version
+      description: Shown in the setup window and in the release you downloaded.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: headset
+    attributes:
+      label: Headset and connection
+      placeholder: "Quest 3, Air Link"
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: GPU and Windows version
+      placeholder: "RTX 3080, Windows 11"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log file
+      description: |
+        Drag `<KotOR folder>\kvr\probe.log` from the session where it happened into this box. It's replaced every time you start the game, so copy it before you play again.
+    validations:
+      required: false
+  - type: textarea
+    id: media
+    attributes:
+      label: Clip or screenshot
+      description: A short recording helps a lot - drag it in here or paste a link.
+    validations:
+      required: false

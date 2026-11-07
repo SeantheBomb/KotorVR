@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0 — first release (2026-11)
+
+Played and tested end to end: the whole Endar Spire (and on into Taris) in VR, with an automated playthrough of the
+level that checks doors, cutscenes, combat and rendering on every build.
+
+- **Strike cue:** an enemy in reach that isn't attacking you is *open* — a gold ring on its chest and a pulse in your
+  sword hand. Cuts above its hips count while it's open; cuts at the legs, too slow or into its attack get a dull grey
+  spark and a low buzz.
+- **Blasters:** the barrel lies exactly on your pointing ray; every gun sits handle-down in your hand. Bolts on an enemy
+  leave a grey puff, and the game's real damage shows as a white-hot burst with a heavy thump; the gun glows while your
+  next attack is about to land. One trigger pull, one shot; bolts stop at what they hit.
+- **Doors** open as easily as everything else you grip, including the ones the tutorial wants your party member to open.
+- **Party switching:** after switching characters nobody's head goes missing and your new body stays out of your eyes.
+- **Fights never stall:** a cut on an enemy that hasn't noticed you starts the fight; swinging near a corpse no longer
+  opens its loot mid-fight; the stick frees you from a queued attack.
+- **Cutscenes** stay in your eyes when someone merely stands in the way (Trask's last stand); shots of somewhere else
+  (the Taris duel ring broadcast) cut to the game's camera. The opening is never black.
+- Readable hover labels at any distance; your own head never drawn in your eyes.
+
 ## 0.1.0 — first public early access (2026-10)
 
 - Head-driven first person in KotOR's own engine, stereo rendering through OpenXR, recentering, smooth / snap turning.

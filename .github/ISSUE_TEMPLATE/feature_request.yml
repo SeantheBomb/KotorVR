@@ -1,0 +1,40 @@
+name: Feature request
+description: An idea that would make KotOR VR better.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: Describe it as you'd experience it in the headset.
+      placeholder: "Let me holster my blaster on my hip and draw it with the grip."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What's awkward, missing or could be more fun today? Moments from your playthrough help.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the game?
+      multiple: true
+      options:
+        - Melee combat
+        - Blasters
+        - Force powers
+        - Conversations / cutscenes
+        - Menus / HUD
+        - Movement / comfort
+        - Hands / body / weapons
+        - Install / setup
+        - Something else
+  - type: textarea
+    id: refs
+    attributes:
+      label: Anything similar you've liked?
+      description: Other VR games or mods that do it well (optional).

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, impressions and general feedback
+    url: https://github.com/SeantheBomb/KotorVR/discussions
+    about: Tell me how it played, ask how something works, share clips.
+  - name: Install and controls guide
+    url: https://github.com/SeantheBomb/KotorVR/blob/main/docs/USER_GUIDE.md
+    about: Setup, every control, combat and Force powers, settings and troubleshooting.

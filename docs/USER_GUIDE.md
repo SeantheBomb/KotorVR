@@ -61,7 +61,13 @@ controller and pull the trigger.
 
 ### Melee (lightsabers, swords, vibroblades, staffs)
 - **Your blade hits what it touches.** Swing for real (about 2 m/s at the tip — a deliberate swing, not a flick); a lazy
-  touch does nothing and a full swing hits harder. The first cut on an enemy starts the fight with it.
+  touch does nothing and a full swing hits harder. The first cut on an enemy starts the fight with it, even one that
+  hasn't noticed you yet.
+- **When and where to strike:** an enemy within reach that isn't winding up an attack on you is **open** — a soft
+  **gold ring** breathes on its chest and your sword hand gets a gentle pulse. Cut anywhere above its hips (body, arms,
+  head) while it's open and the cut counts: a bright buzz and sparks.
+- **A cut that doesn't count** — at the legs, too slow, or straight into its attack — gives a **dull grey spark and a
+  low double buzz**. Block its attack first, then cut while the ring is up.
 - KotOR's rules still decide how well a hit lands: a cut the enemy's defence beats becomes **blocked into its guard**.
 - Special moves: an overhead chop = Power Attack, a forward thrust = Critical Strike, two quick swings = Flurry (the
   best rank you have).
@@ -92,7 +98,12 @@ seconds — it can't attack and your blows become critical threats. Ordinary tro
 At most two enemies attack you at once; the rest wait their turn.
 
 ### Blasters
-- Where the barrel points is what you hit; head shots count extra. Each trigger pull is one shot.
+- The barrel lies along your pointing ray: what the ring under your pointer marks is what you hit; head shots count
+  extra. Each trigger pull is one shot.
+- **When a shot hurts:** KotOR deals your damage once per combat round (about every 3 seconds), whatever the trigger
+  does. Bolts that strike an enemy between rounds leave a small **grey puff**; when the game actually deals your damage
+  you see a **white-hot burst** on the enemy and feel a heavy **thump**. Your gun **glows** while your next attack is
+  about to land.
 - Shots spread a little: less with your **left hand on the barrel** (foregrip) or after **holding still for a
   second** (which also makes it a **Sniper Shot**). Two quick pulls = **Rapid Shot**; hold the trigger about a second
   and let go = **Power Blast** (a heavier extra bolt).
@@ -139,7 +150,8 @@ where it lands gets it. You need grenades in your inventory.
 | `[Feel] HitPause` | `1` | the brief freeze on a struck enemy |
 | `[Feel] HitPauseMs` | `60` | its length |
 | `[Feel] LookAtYou` | `0` | `1` = NPCs turn their heads to you in conversations (experimental: bystanders turn too) |
-| `[Aim] Pitch` | `-30` | how far guns tip down from the controller's pointing ray (degrees); raise it if shots go low, lower it if they go high |
+| `[Aim] Pitch` | `0` | tilts guns away from the controller's pointing ray (degrees; negative = down) |
+| `[Features] StrikeCue` | `1` | `0` = no openings / strike zone: any blade touch counts |
 | `[Features] FlatHud` | `0` | `1` = the flat HUD in front of you as in the original (Y toggles it) |
 | `[Features] Hands` / `WeaponProxies` / `Cues` | `1` | your hands / weapons in hand / combat feedback (haptics, telegraphs) |
 | `[Compat] DiscordOverlay` | `0` | Discord's in-game overlay is kept out (it froze the game); Discord itself is unaffected |
@@ -160,4 +172,13 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 | My character won't move after a fight | Push the left stick once (it clears a queued attack). |
 | Combat feels wrong / you'd rather play it the classic way | `[Combat] Mode=rounds`. |
 | Weapons show as simple shapes, no hands | Run the setup again (Install) — the assets weren't built. |
+| The game freezes for a moment, or stops | Another window took the foreground (a pop-up, a notification, another app). KotOR pauses when it isn't the active window: click its window or close the pop-up. |
 | Something else | `<KotOR>\kvr\probe.log` is the mod's log; include it with a bug report. |
+
+## 6. Getting help, reporting bugs, suggesting features
+
+- **Found a bug?** Open a [bug report](https://github.com/SeantheBomb/KotorVR/issues/new?template=bug_report.yml).
+  Attach `<KotOR>\kvr\probe.log` from the session where it happened (it's replaced each time you start the game, so
+  copy it before you play again) and, if you can, a short clip.
+- **Have an idea?** Open a [feature request](https://github.com/SeantheBomb/KotorVR/issues/new?template=feature_request.yml).
+- **Questions, impressions, "how do I…":** [Discussions](https://github.com/SeantheBomb/KotorVR/discussions).

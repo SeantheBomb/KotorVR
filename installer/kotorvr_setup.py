@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 STEAM_APPID = "32370"
 # swkotor.exe of the Steam release the mod's hooks are built against (every hook also checks its bytes at runtime and
 # switches itself off on a mismatch, so another build fails safe rather than crashing)
