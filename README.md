@@ -15,7 +15,9 @@ seated or standing with tracked controllers.
 KotOR's own rules still run underneath: your character's skills, feats, Force points and the d20 decide how well
 what you do lands.
 
-**▶ [Watch the trailer](TRAILER_LINK)** · **[Download v1.0.0](../../releases/latest)** · **[How to play](docs/USER_GUIDE.md)** ·
+[![KotOR VR trailer](docs/trailer.png)](https://github.com/SeantheBomb/KotorVR/releases/download/v1.0.0/KotorVR_trailer_v1.mp4)
+
+**▶ [Watch the trailer](https://github.com/SeantheBomb/KotorVR/releases/download/v1.0.0/KotorVR_trailer_v1.mp4)** · **[Download v1.0.0](../../releases/latest)** · **[How to play](docs/USER_GUIDE.md)** ·
 **[Report a bug](../../issues/new?template=bug_report.yml)** · **[Suggest a feature](../../issues/new?template=feature_request.yml)**
 
 > **v1.0 — a fan project made by one person.** It plays from the first room of the Endar Spire through Taris and
