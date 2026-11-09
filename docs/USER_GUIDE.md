@@ -166,7 +166,7 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 | Problem | Try |
 |---|---|
 | Nothing in the headset, the game runs on the monitor | Start the headset's Link / Air Link **before** KotOR VR. Check the "KotOR VR – headset view" window is open. |
-| Sound but a black (or flashing) headset; the monitor switches to 640×480 | KotOR is running fullscreen: it minimizes when it loses focus and has nothing to send. Set `FullScreen=0` in `<KotOR>\swkotor.ini` `[Graphics Options]` (the setup does this since 1.0.1). |
+| Sound but a black (or flashing) headset; the monitor switches to 640×480 | KotOR is running fullscreen: it minimizes when it loses focus and has nothing to send. Set `FullScreen=0` and `AllowWindowedMode=1` in `<KotOR>\swkotor.ini` `[Graphics Options]` (the setup does this since 1.0.1). |
 | Virtual Desktop: black, the session keeps restarting | Use Meta Link / Air Link for now (Virtual Desktop's OpenXR runtime ends the session - being looked into). |
 | The view is off-centre or too high / low | Right thumbstick click to recenter. |
 | The game freezes in the main menu with Discord open | Make sure `[Compat] DiscordOverlay=0` (default). |

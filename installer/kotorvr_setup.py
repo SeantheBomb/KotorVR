@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 STEAM_APPID = "32370"
 # swkotor.exe of the Steam release the mod's hooks are built against (every hook also checks its bytes at runtime and
 # switches itself off on a mismatch, so another build fails safe rather than crashing)
@@ -130,7 +130,8 @@ def shortcut_paths():
 
 
 # ---------------------------------------------------------------- KotOR's own settings
-WINDOWED = {"FullScreen": "0"}
+# KotOR ignores FullScreen=0 unless AllowWindowedMode=1 is set too (1.0.1 only set the first)
+WINDOWED = {"FullScreen": "0", "AllowWindowedMode": "1"}
 MIN_SIZE = (1280, 960)  # KotOR's 640x480 default is a very blurry picture in the headset
 
 
@@ -170,7 +171,12 @@ def windowed_mode(game, previous):
     to send to the headset (issue #1, 2026-11-09). Returns the original values to restore on uninstall."""
     path = os.path.join(game, "swkotor.ini")
     _lines, keys = ini_graphics(path)
-    original = previous or {k: keys[k][1] if k in keys else None for k in ("FullScreen", "Width", "Height")}
+    # the values to put back: from the first install (a reinstall must not record our own), any key it didn't
+    # record yet (AllowWindowedMode, new in 1.0.2) as it is now
+    original = dict(previous or {})
+    for k in ("FullScreen", "AllowWindowedMode", "Width", "Height"):
+        if k not in original:
+            original[k] = keys[k][1] if k in keys else None
     want = dict(WINDOWED)
     try:
         w, h = int(keys["Width"][1]), int(keys["Height"][1])
@@ -187,6 +193,12 @@ def restore_mode(game, original):
     if not original or not os.path.exists(path):
         return
     ini_set(path, {k: v for k, v in original.items() if v is not None})
+    gone = [k for k, v in original.items() if v is None]  # keys we added: take them out again
+    if gone:
+        lines, keys = ini_graphics(path)
+        drop = {keys[k][0] for k in gone if k in keys}
+        open(path, "w", encoding="latin1", newline="\r\n").write(
+            "\n".join(l for i, l in enumerate(lines) if i not in drop) + "\n")
 
 
 # ---------------------------------------------------------------- install / uninstall
@@ -257,11 +269,13 @@ class Steps:
         self.log("Building the VR assets from your own game files (a minute or two) ...")
         import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override, door_export  # noqa: E401,E501
         import sig_export
+        import camerastyle_override
         self.run_exporter("weapons", lambda: weapon_export.main(game, kvr))
         self.run_exporter("hands", lambda: hand_export.main(game, kvr))
         self.run_exporter("action icons", lambda: icon_export.main(game, kvr))
         self.run_exporter("door shapes (pointing at doors)", lambda: door_export.main(game, kvr))
         self.run_exporter("your own weapons' shapes", lambda: sig_export.main(game, kvr))
+        self.run_exporter("first-person cameras", lambda: camerastyle_override.install(game))
         argv = sys.argv
         try:
             sys.argv = ["sound_export", game]
@@ -298,6 +312,8 @@ class Steps:
             os.replace(dll + ".kvr-backup", dll)
             self.log("  restored your previous dinput8.dll")
         import vis_override
+        import camerastyle_override
+        self.run_exporter("first-person cameras", lambda: camerastyle_override.remove(game))
         argv = sys.argv
         try:
             sys.argv = ["vis_override", game, "--remove"]

@@ -26,18 +26,18 @@ struct Card {
 const Card kCards[] = {
     {"Welcome",
      "#Welcome to KotOR VR\n"
-     "Left stick: walk where you look. Right stick: turn.\n"
-     "Point and squeeze the right grip to use, open or talk to what your hand points at.\n"
-     "Y shows the game's menu panel, B is back / Escape, A pauses."},
+     "Left stick: walk where you look. Right stick: turn (click it to recenter).\n"
+     "Point with your right hand and squeeze the grip to use, open or talk to what it marks.\n"
+     "Turn your left palm toward your face for the HUD. B is back, A pauses."},
     {"Combat",
      "#Fighting\n"
-     "Swing to attack. Swing when your weapon pulses for a bonus.\n"
-     "A chevron over an enemy turns gold just before it strikes: raise your blade across your body to parry.\n"
-     "Overhead chop: Power Attack. Thrust: Critical Strike. Two quick swings: Flurry."},
+     "Swing for real: your blade hits what it touches.\n"
+     "A gold ring on an enemy's chest means it's open - cut above its hips then.\n"
+     "When it attacks, a glowing bar shows the blow: lay your blade along it to block."},
     {"Blaster",
      "#Blasters\n"
-     "Point at a target and pull the trigger: you shoot what you aim at.\n"
-     "Hold your aim steady for a moment for a Power Blast; two quick shots for Rapid Shot."},
+     "Point and pull the trigger: the barrel follows your aim.\n"
+     "A white-hot burst on the enemy is real damage; your gun glows when the next one is coming."},
 };
 const int kCount = sizeof kCards / sizeof kCards[0];
 

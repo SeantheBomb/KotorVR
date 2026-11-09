@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2 (2026-11-09)
+
+- **First-person cameras for everyone.** The setup now builds `Override\camerastyle.2da` from your own game files:
+  KotOR's cameras at your head with a 170° view. Until now this file only existed on the developer's PC, so players
+  got KotOR's third-person camera, objects and characters flickering out of existence as you looked around (the game
+  culled with its normal narrow view) and a headset that could freeze on a cutscene frame. Uninstall removes it (and
+  puts back one from another mod, if there was one).
+- **Windowed mode really applies:** KotOR ignores `FullScreen=0` without `AllowWindowedMode=1`; the setup now sets
+  both (1.0.1 only set the first).
+- The VR tutorial cards describe the current controls (the strike ring, the block bar, the blaster damage burst).
+
 ## 1.0.1 (2026-11-09)
 
 - **Windows 10: the 3D world reaches the headset.** One of the hooks the mod relies on never attached on Windows 10
