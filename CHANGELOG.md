@@ -1,6 +1,9 @@
 # Changelog
 
-## 1.0.1 (staged)
+## 1.0.1 (2026-11-09)
+
+- **Windows 10: the 3D world reaches the headset.** One of the hooks the mod relies on never attached on Windows 10
+  (its GLU32 is built slightly differently), so only the menus reached the headset and the world stayed on the monitor.
 
 - **Windowed KotOR by default:** the setup switches KotOR to a window (and at least 1280×960) and restores your
   display settings when you uninstall. Fullscreen KotOR minimizes the moment it loses focus, which left the headset

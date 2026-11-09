@@ -486,11 +486,38 @@ static void PatchIat(HMODULE mod) {
 // System DLL exports built with /hotpatch start with `mov edi, edi` and have 5 bytes of
 // int3/nop padding before them. Write `jmp hook` into the padding and a short jump back
 // over the padding at the entry; the trampoline is entry+2.
+// The 2-byte no-op a hot-patchable export starts with: `mov edi, edi` (8B FF) - or `xchg ax, ax` (66 90), which
+// Windows 10's GLU32!gluPerspective uses (issue #1, 2026-11-09: the world never reached the headset there).
+static bool HotPatchNop(const BYTE* p) { return (p[0] == 0x8B && p[1] == 0xFF) || (p[0] == 0x66 && p[1] == 0x90); }
+
+// No padding to borrow: a plain 5-byte detour over `<2-byte nop> push ebp; mov ebp, esp` (exactly 5 bytes of whole
+// instructions) - they move into a trampoline that jumps back to entry+5.
+static bool Detour5(BYTE* p, void* hook, void** tramp) {
+    if (!HotPatchNop(p) || p[2] != 0x55 || p[3] != 0x8B || p[4] != 0xEC) return false;
+    BYTE* t = (BYTE*)VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!t) return false;
+    memcpy(t, p, 5);
+    t[5] = 0xE9;
+    *(INT32*)(t + 6) = (INT32)((p + 5) - (t + 10));
+    DWORD old;
+    if (!VirtualProtect(p, 5, PAGE_EXECUTE_READWRITE, &old)) return false;
+    p[0] = 0xE9;
+    *(INT32*)(p + 1) = (INT32)((BYTE*)hook - (p + 5));
+    VirtualProtect(p, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), p, 5);
+    FlushInstructionCache(GetCurrentProcess(), t, 16);
+    *tramp = t;
+    return true;
+}
+
+static bool g_forceDetour;  // [Debug] ForceDetour=1: hook with Detour5 even where the hot-patch padding is there (tests)
+
 static bool HotPatch(void* target, void* hook, void** tramp) {
     BYTE* p = (BYTE*)target;
-    if (p[0] != 0x8B || p[1] != 0xFF) return false;
+    if (!HotPatchNop(p)) return false;
+    if (g_forceDetour && Detour5(p, hook, tramp)) return true;
     for (int i = 1; i <= 5; i++)
-        if (p[-i] != 0xCC && p[-i] != 0x90) return false;
+        if (p[-i] != 0xCC && p[-i] != 0x90) return Detour5(p, hook, tramp);
     DWORD old;
     if (!VirtualProtect(p - 5, 7, PAGE_EXECUTE_READWRITE, &old)) return false;
     p[-5] = 0xE9;
@@ -523,6 +550,12 @@ static bool HookGdiSwapBuffers() {
 
 static void InstallHooks(HMODULE exe) {
     Log("GameOverlayRenderer loaded: %s", GetModuleHandleA("GameOverlayRenderer.dll") ? "yes" : "no");
+    {
+        char ini[MAX_PATH];
+        sprintf_s(ini, "%s\\kvr\\kvr.ini", g_dir);
+        g_forceDetour = GetPrivateProfileIntA("Debug", "ForceDetour", 0, ini) != 0;
+        if (g_forceDetour) Log("hooks: [Debug] ForceDetour=1 - 5-byte detours instead of hot-patches");
+    }
     HookGdiSwapBuffers();
     for (auto& h : g_iatHooks) {
         HMODULE m = GetModuleHandleA(h.dll);
