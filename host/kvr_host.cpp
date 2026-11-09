@@ -35,6 +35,43 @@
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "openxr_loader.lib")
 
+// host log: every message also goes to <kvr>\host.log (next to the host folder), seconds since start in front -
+// the console window is easy to lose, and a bug report needs the host's side (2026-11-09: issue #1)
+#include <cstdarg>
+#include <share.h>
+static FILE* g_hostLog;
+static DWORD g_logT0;
+static void HostLogOpen() {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (wchar_t* sl = wcsrchr(exe, L'\\')) *sl = 0;  // <kvr>\host
+    if (wchar_t* sl = wcsrchr(exe, L'\\')) *sl = 0;  // <kvr>
+    wchar_t path[MAX_PATH];
+    swprintf_s(path, L"%s\\host.log", exe);
+    g_hostLog = _wfsopen(path, L"w", _SH_DENYNO);  // readable (and copyable) while the host runs
+    g_logT0 = GetTickCount();
+}
+static int HostPrintf(const char* fmt, ...) {
+    va_list a;
+    va_start(a, fmt);
+    int n = vprintf(fmt, a);
+    va_end(a);
+    if (g_hostLog) {
+        fprintf(g_hostLog, "%8.2f  ", (GetTickCount() - g_logT0) / 1000.0);
+        va_start(a, fmt);
+        vfprintf(g_hostLog, fmt, a);
+        va_end(a);
+        fflush(g_hostLog);
+    }
+    return n;
+}
+#define printf HostPrintf
+static const char* StateName(int st) {
+    static const char* n[] = {"unknown", "idle", "ready", "synchronized", "visible", "focused", "stopping",
+                              "loss pending", "exiting"};
+    return st >= 0 && st <= 8 ? n[st] : "?";
+}
+
 #define CHECK_XR(x)                                                         \
     do {                                                                    \
         XrResult r_ = (x);                                                  \
@@ -373,6 +410,12 @@ static bool InitXR() {
     ici.enabledExtensionCount = (uint32_t)exts.size();
     ici.enabledExtensionNames = exts.data();
     CHECK_XR(xrCreateInstance(&ici, &g_inst));
+    {
+        XrInstanceProperties ip{XR_TYPE_INSTANCE_PROPERTIES};
+        if (XR_SUCCEEDED(xrGetInstanceProperties(g_inst, &ip)))
+            printf("OpenXR runtime: %s %u.%u.%u\n", ip.runtimeName, XR_VERSION_MAJOR(ip.runtimeVersion),
+                   XR_VERSION_MINOR(ip.runtimeVersion), XR_VERSION_PATCH(ip.runtimeVersion));
+    }
     XrSystemGetInfo sgi{XR_TYPE_SYSTEM_GET_INFO};
     sgi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     for (;;) {
@@ -1036,7 +1079,7 @@ static void PollEvents() {
     while (xrPollEvent(g_inst, &ev) == XR_SUCCESS) {
         if (ev.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
             auto* s = (XrEventDataSessionStateChanged*)&ev;
-            printf("session state %d\n", s->state);
+            printf("session state %d (%s)\n", s->state, StateName(s->state));
             if (s->state == XR_SESSION_STATE_READY) {
                 XrSessionBeginInfo bi{XR_TYPE_SESSION_BEGIN_INFO};
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -1048,7 +1091,10 @@ static void PollEvents() {
                 g_lost = true;  // e.g. Air Link dropped: tear down and reconnect
             }
         } else if (ev.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
+            printf("runtime: instance loss pending\n");
             g_lost = true;
+        } else {
+            printf("runtime event type %d\n", (int)ev.type);
         }
         ev = {XR_TYPE_EVENT_DATA_BUFFER};
     }
@@ -1883,9 +1929,15 @@ static XrCompositionLayerQuad* UpdateWrist(const XrPosef& head, const PointerRes
 static void Frame() {
     XrFrameWaitInfo fwi{XR_TYPE_FRAME_WAIT_INFO};
     XrFrameState fs{XR_TYPE_FRAME_STATE};
-    if (XR_FAILED(xrWaitFrame(g_session, &fwi, &fs))) return;
+    static int waitFails, beginFails;
+    XrResult wr = xrWaitFrame(g_session, &fwi, &fs);
+    if (XR_FAILED(wr)) {
+        if (waitFails++ < 20) printf("xrWaitFrame failed: %d\n", wr);
+        return;
+    }
     XrFrameBeginInfo fbi{XR_TYPE_FRAME_BEGIN_INFO};
-    xrBeginFrame(g_session, &fbi);
+    XrResult br = xrBeginFrame(g_session, &fbi);
+    if (XR_FAILED(br) && beginFails++ < 20) printf("xrBeginFrame failed: %d\n", br);
 
     XrViewLocateInfo vli{XR_TYPE_VIEW_LOCATE_INFO};
     vli.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2099,7 +2151,13 @@ static void Frame() {
     fei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     fei.layerCount = (uint32_t)layers.size();
     fei.layers = layers.data();
-    xrEndFrame(g_session, &fei);
+    XrResult er = xrEndFrame(g_session, &fei);
+    static int endFails;
+    if (XR_FAILED(er) && endFails++ < 20) {
+        printf("xrEndFrame failed: %d (%u layers:", er, fei.layerCount);
+        for (auto* l : layers) printf(" %d", (int)l->type);
+        printf(")\n");
+    }
 }
 
 
@@ -2220,6 +2278,7 @@ static int Preview(int argc, char** argv) {
 int main(int argc, char** argv) {
     if (argc > 1 && !strcmp(argv[1], "--preview")) return Preview(argc, argv);
     setvbuf(stdout, nullptr, _IONBF, 0);
+    HostLogOpen();
     SetConsoleCtrlHandler(OnConsoleClose, TRUE);
     if (!OpenShared()) { printf("shared memory failed\n"); return 1; }
     while (!g_quit) {

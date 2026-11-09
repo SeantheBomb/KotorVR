@@ -15,3 +15,6 @@ fixtures/
 
 # launch drafts (Reddit post, trailer working files)
 launch/
+
+# host log (written next to the host folder)
+host/host.log
