@@ -166,6 +166,8 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 | Problem | Try |
 |---|---|
 | Nothing in the headset, the game runs on the monitor | Start the headset's Link / Air Link **before** KotOR VR. Check the "KotOR VR – headset view" window is open. |
+| Sound but a black (or flashing) headset; the monitor switches to 640×480 | KotOR is running fullscreen: it minimizes when it loses focus and has nothing to send. Set `FullScreen=0` in `<KotOR>\swkotor.ini` `[Graphics Options]` (the setup does this since 1.0.1). |
+| Virtual Desktop: black, the session keeps restarting | Use Meta Link / Air Link for now (Virtual Desktop's OpenXR runtime ends the session - being looked into). |
 | The view is off-centre or too high / low | Right thumbstick click to recenter. |
 | The game freezes in the main menu with Discord open | Make sure `[Compat] DiscordOverlay=0` (default). |
 | Clicks in menus don't land | Point with the **right** controller; menus are on the panel in front of you. |
@@ -178,7 +180,7 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 ## 6. Getting help, reporting bugs, suggesting features
 
 - **Found a bug?** Open a [bug report](https://github.com/SeantheBomb/KotorVR/issues/new?template=bug_report.yml).
-  Attach `<KotOR>\kvr\probe.log` from the session where it happened (it's replaced each time you start the game, so
+  Attach `<KotOR>\kvr\probe.log` and `<KotOR>\kvr\host.log` from the session where it happened (it's replaced each time you start the game, so
   copy it before you play again) and, if you can, a short clip.
 - **Have an idea?** Open a [feature request](https://github.com/SeantheBomb/KotorVR/issues/new?template=feature_request.yml).
 - **Questions, impressions, "how do I…":** [Discussions](https://github.com/SeantheBomb/KotorVR/discussions).

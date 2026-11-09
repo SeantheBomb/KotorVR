@@ -666,8 +666,17 @@ void VR_OnSwap(HDC dc) {
         }
         if (g_exportReady) {
             RECT rc;
-            if (GetClientRect(WindowFromDC(dc), &rc)) {
+            HWND gw = WindowFromDC(dc);
+            if (GetClientRect(gw, &rc)) {
                 int w = rc.right - rc.left, h = rc.bottom - rc.top;
+                // a minimized window (fullscreen KotOR minimizes when it loses focus) has nothing to copy: the
+                // headset gets no frames at all - say so instead of failing silently (issue #1, 2026-11-09)
+                static DWORD lastTold;
+                if ((w <= 0 || h <= 0 || IsIconic(gw)) && GetTickCount() - lastTold > 5000) {
+                    lastTold = GetTickCount();
+                    g_log("export: the game window is minimized (%dx%d) - nothing to send to the headset. Run KotOR "
+                          "windowed: swkotor.ini [Graphics Options] FullScreen=0", w, h);
+                }
                 if (w > 0 && h > 0 && (w != g_texW || h != g_texH)) {
                     if (!CreateSlots(w, h)) { g_log("export: slot creation failed"); DestroySlots(); g_exportReady = false; g_exportFailed = true; }
                 }

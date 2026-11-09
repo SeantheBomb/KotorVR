@@ -69,7 +69,7 @@ body:
     attributes:
       label: Log file
       description: |
-        Drag `<KotOR folder>\kvr\probe.log` from the session where it happened into this box. It's replaced every time you start the game, so copy it before you play again.
+        Drag **both** `<KotOR folder>\kvr\probe.log` (the game side) and `<KotOR folder>\kvr\host.log` (the VR host) from the session where it happened into this box. They're replaced every time you start, so copy them before you play again.
     validations:
       required: false
   - type: textarea

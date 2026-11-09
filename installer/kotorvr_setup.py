@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 STEAM_APPID = "32370"
 # swkotor.exe of the Steam release the mod's hooks are built against (every hook also checks its bytes at runtime and
 # switches itself off on a mismatch, so another build fails safe rather than crashing)
@@ -129,6 +129,66 @@ def shortcut_paths():
     return out
 
 
+# ---------------------------------------------------------------- KotOR's own settings
+WINDOWED = {"FullScreen": "0"}
+MIN_SIZE = (1280, 960)  # KotOR's 640x480 default is a very blurry picture in the headset
+
+
+def ini_graphics(path):
+    """(lines, {key: (line index, value)}) of [Graphics Options] in swkotor.ini; the file kept as it is otherwise."""
+    lines = open(path, encoding="latin1").read().splitlines() if os.path.exists(path) else []
+    sec, keys = None, {}
+    for i, l in enumerate(lines):
+        t = l.strip()
+        if t.startswith("[") and t.endswith("]"):
+            sec = t[1:-1].strip().lower()
+        elif sec == "graphics options" and "=" in t:
+            k, v = t.split("=", 1)
+            keys[k.strip()] = (i, v.strip())
+    return lines, keys
+
+
+def ini_set(path, values):
+    """Set [Graphics Options] keys (added to the section, or a new section, when missing)."""
+    lines, keys = ini_graphics(path)
+    missing = {k: v for k, v in values.items() if k not in keys}
+    for k, v in values.items():
+        if k in keys:
+            lines[keys[k][0]] = "%s=%s" % (k, v)
+    if missing:
+        at = next((i + 1 for i, l in enumerate(lines) if l.strip().lower() == "[graphics options]"), None)
+        add = ["%s=%s" % kv for kv in missing.items()]
+        if at is None:
+            lines += ["[Graphics Options]"] + add
+        else:
+            lines[at:at] = add
+    open(path, "w", encoding="latin1", newline="\r\n").write("\n".join(lines) + "\n")
+
+
+def windowed_mode(game, previous):
+    """KotOR in a window: fullscreen KotOR minimizes the moment it loses focus, and a minimized window has nothing
+    to send to the headset (issue #1, 2026-11-09). Returns the original values to restore on uninstall."""
+    path = os.path.join(game, "swkotor.ini")
+    _lines, keys = ini_graphics(path)
+    original = previous or {k: keys[k][1] if k in keys else None for k in ("FullScreen", "Width", "Height")}
+    want = dict(WINDOWED)
+    try:
+        w, h = int(keys["Width"][1]), int(keys["Height"][1])
+    except (KeyError, ValueError):
+        w, h = 0, 0
+    if w < MIN_SIZE[0] or h < MIN_SIZE[1]:
+        want["Width"], want["Height"] = str(MIN_SIZE[0]), str(MIN_SIZE[1])
+    ini_set(path, want)
+    return original
+
+
+def restore_mode(game, original):
+    path = os.path.join(game, "swkotor.ini")
+    if not original or not os.path.exists(path):
+        return
+    ini_set(path, {k: v for k, v in original.items() if v is not None})
+
+
 # ---------------------------------------------------------------- install / uninstall
 class Steps:
     def __init__(self, log):
@@ -157,6 +217,11 @@ class Steps:
             shutil.copy2(keep, os.path.join(kvr, "kvr.ini"))
             self.log("Your settings from before (kvr.ini.kvr-saved) are back.")
         manifest = {"version": VERSION, "files": [], "backup": None, "shortcuts": []}
+        previous = {}
+        try:
+            previous = json.load(open(os.path.join(kvr, "install.json")))
+        except Exception:  # noqa: BLE001
+            pass
         busy = running("swkotor.exe") or running("kvr_host.exe")
         if busy:
             raise PermissionError("close KotOR and the KotOR VR host first")
@@ -185,12 +250,18 @@ class Steps:
                 shutil.rmtree(docs)
             shutil.copytree(os.path.join(PAYLOAD, "docs"), docs)
 
+        self.log("KotOR in a window (the picture goes to the headset) ...")
+        manifest["ini_original"] = windowed_mode(game, previous.get("ini_original"))
+        self.log("  swkotor.ini: windowed; your previous display settings come back when you uninstall")
+
         self.log("Building the VR assets from your own game files (a minute or two) ...")
         import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override, door_export  # noqa: E401,E501
+        import sig_export
         self.run_exporter("weapons", lambda: weapon_export.main(game, kvr))
         self.run_exporter("hands", lambda: hand_export.main(game, kvr))
         self.run_exporter("action icons", lambda: icon_export.main(game, kvr))
         self.run_exporter("door shapes (pointing at doors)", lambda: door_export.main(game, kvr))
+        self.run_exporter("your own weapons' shapes", lambda: sig_export.main(game, kvr))
         argv = sys.argv
         try:
             sys.argv = ["sound_export", game]
@@ -236,6 +307,9 @@ class Steps:
         for p in manifest.get("shortcuts", shortcut_paths()):
             if os.path.exists(p):
                 os.remove(p)
+        if manifest.get("ini_original"):
+            restore_mode(game, manifest["ini_original"])
+            self.log("  your previous display settings are back in swkotor.ini")
         keep = os.path.join(game, "kvr.ini.kvr-saved")
         if os.path.exists(os.path.join(kvr, "kvr.ini")):
             shutil.copy2(os.path.join(kvr, "kvr.ini"), keep)

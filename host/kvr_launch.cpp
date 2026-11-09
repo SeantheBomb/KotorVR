@@ -4,15 +4,24 @@
 #include <shellapi.h>
 #include <tlhelp32.h>
 
-static bool HostRunning() {
+// a live process of that name (a single-thread leftover from a lost VR runtime session doesn't count); with
+// `kill`, it is ended instead (and reported as not running)
+static bool Running(const wchar_t* exe, bool kill = false) {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
     PROCESSENTRY32W e{sizeof e};
     bool found = false;
-    for (BOOL ok = Process32FirstW(snap, &e); ok && !found; ok = Process32NextW(snap, &e)) {
-        if (_wcsicmp(e.szExeFile, L"kvr_host.exe") != 0) continue;
-        // a single-thread leftover from a lost VR runtime session doesn't count
-        found = e.cntThreads > 1;
+    for (BOOL ok = Process32FirstW(snap, &e); ok; ok = Process32NextW(snap, &e)) {
+        if (_wcsicmp(e.szExeFile, exe) != 0 || e.cntThreads <= 1) continue;
+        if (kill) {
+            if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, e.th32ProcessID)) {
+                TerminateProcess(h, 0);
+                WaitForSingleObject(h, 3000);
+                CloseHandle(h);
+            }
+            continue;
+        }
+        found = true;
     }
     CloseHandle(snap);
     return found;
@@ -22,7 +31,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     wchar_t dir[MAX_PATH];
     GetModuleFileNameW(nullptr, dir, MAX_PATH);
     if (wchar_t* s = wcsrchr(dir, L'\\')) *s = 0;
-    if (!HostRunning()) {
+    // a host left over without the game (an earlier session, a dropped connection) may be stuck: start a fresh one.
+    // With the game running, the host belongs to it - leave it alone.
+    if (!Running(L"swkotor.exe")) Running(L"kvr_host.exe", true);
+    if (!Running(L"kvr_host.exe")) {
         wchar_t host[MAX_PATH];
         wsprintfW(host, L"%s\\kvr_host.exe", dir);
         STARTUPINFOW si{sizeof si};

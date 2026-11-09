@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1 (staged)
+
+- **Windowed KotOR by default:** the setup switches KotOR to a window (and at least 1280×960) and restores your
+  display settings when you uninstall. Fullscreen KotOR minimizes the moment it loses focus, which left the headset
+  black or flashing with only sound (first reported on an AMD + Quest 3 setup).
+- **The VR host writes `kvr\host.log`:** the runtime it's using, every session state with a timestamp, and any
+  frame-submission errors - attach it to bug reports with `probe.log`.
+- The mod logs a clear warning when the game window is minimized instead of silently sending nothing.
+- The KotOR VR shortcut replaces a stuck VR host left over from an earlier session.
+- Your own held weapons are recognized exactly again (the installer now builds their shapes file).
+
 ## 1.0.0 — first release (2026-11)
 
 Played and tested end to end: the whole Endar Spire (and on into Taris) in VR, with an automated playthrough of the

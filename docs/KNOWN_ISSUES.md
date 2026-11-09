@@ -9,6 +9,9 @@ What we know about, roughly from most to least noticeable. Found something else?
   Do Not Disturb.
 
 ## Platform
+- **Virtual Desktop:** its OpenXR runtime (VDXR) ends the session a few seconds after it starts; use Meta Link /
+  Air Link for now.
+- **AMD GPUs** have only been tested by one player so far; NVIDIA is the tested platform.
 - **Steam version only.** GOG, disc and modified executables aren't supported yet (the mod detects a mismatch and
   stays off rather than crashing).
 - **Tested on Meta Quest 3 over Air Link with an NVIDIA GPU.** Other headsets, SteamVR runtimes and AMD / Intel GPUs
