@@ -8,6 +8,7 @@
 
 #define DIRECTINPUT_VERSION 0x0800
 #include "input.h"
+#include "minigame.h"
 
 #include <dinput.h>
 #include <cmath>
@@ -659,6 +660,25 @@ void Input_Update(HWND wnd) {
             wnd && GetForegroundWindow() == GetAncestor(wnd, GA_ROOT), in.active ? in.pointerMode : 0, g_targetValid ? "yes" : "no", g_targetScreen.x, g_targetScreen.y,
             g_haveCursor ? "seen" : "never", g_cursorScreen.x, g_cursorScreen.y, g_nCursorInfo, g_nSetCursor, g_nMouseState,
             g_nMouseData, g_gain, dx, dy);
+    }
+    // Minigames read their own keys (keymap.2da MGAction*: W/S/A/D, MGshoot Space, PauseMinigame Escape), not the
+    // camera-relative W/S/Z/C walk: the left stick as it is (left / right steer the swoop, up / down its throttle;
+    // the turret's aim), right trigger or A shoots, B / menu pause. A game menu over it (the pause screen) keeps the
+    // usual panel input.
+    if (in.active && Minigame_Type() && !(VR_Shared() && VR_Shared()->menuOpen)) {
+        memset(keys, 0, sizeof keys);
+        if (in.lx < -0.4f) keys[DIK_A] = 0x80;
+        if (in.lx > 0.4f) keys[DIK_D] = 0x80;
+        if (in.ly > 0.4f) keys[DIK_W] = 0x80;
+        if (in.ly < -0.4f) keys[DIK_S] = 0x80;
+        if (in.trigR > 0.6f || (in.buttons & KVR_BTN_A)) keys[DIK_SPACE] = 0x80;
+        if (in.buttons & (KVR_BTN_B | KVR_BTN_MENU)) keys[DIK_ESCAPE] = 0x80;
+        static DWORD lastMg;
+        if (GetTickCount() - lastMg > 2000) {
+            lastMg = GetTickCount();
+            Log("minigame: stick %.2f %.2f trigger %.2f -> %s%s%s%s%s", in.lx, in.ly, in.trigR, keys[DIK_A] ? "A" : "",
+                keys[DIK_D] ? "D" : "", keys[DIK_W] ? "W" : "", keys[DIK_S] ? "S" : "", keys[DIK_SPACE] ? " shoot" : "");
+        }
     }
     Lock();
     memcpy(g_wantKeys, keys, sizeof keys);

@@ -10,6 +10,7 @@
 // Everything is read under SEH guards and refreshed four times a second.
 
 #include "weapons.h"
+#include "minigame.h"
 #include "pick.h"
 #include "guard.h"
 
@@ -1267,6 +1268,7 @@ static void RefreshPoseAdj() {
 void Weapons_Draw(const float invEye[16]) {
     const KvrShared* shm = VR_Shared();
     if (!shm || !LoadGl() || VR_ShowingOwnBody()) return;  // dead: the body is shown, not floating hands
+    if (Minigame_Type()) return;  // a swoop race / turret: the game's camera, no hands or weapons at it
     KvrInput in;
     memcpy(&in, (const void*)&shm->input, sizeof in);  // a torn read only costs one frame of pose
     if (!in.active || !(in.gripValid & 3)) return;

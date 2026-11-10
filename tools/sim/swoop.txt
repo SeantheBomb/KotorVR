@@ -1,0 +1,45 @@
+# Taris swoop race (fixture swoop_platform: Sean's save on the Swoop Platform, 2026-11-10): talk to the organizer,
+# race. The VR view must ride the game's chase camera (not stay at the body on the start line), the track must keep
+# drawing, and the stick / trigger must reach the swoop (W/A/S/D, Space).
+wait_menu 90
+wait_calm 8 120          # the menu can stall 10+ s after it first shows; clicks then are lost
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.410 v=0.431      # the fixture's save (top row)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 4
+shot platform
+pointer world
+autotalk prefer race:3 ready:3 track:3
+autotalk on
+use 223.17 220.16 1.3      # the race announcer at the desk (tar03_raceannoun)
+check_log race_starts minigame:~swoop 240
+autotalk off
+wait 4
+shot race_start
+stick ly=1 for=0.4         # throttle / gear (MGActionUp)
+wait 2
+shot race_2s
+stick lx=-1 for=0.8        # steer left
+shot race_left
+stick lx=1 for=0.8         # steer right
+shot race_right
+trigger                    # shoot key (Space)
+wait 3
+stick ly=1 for=0.4
+wait 4
+shot race_10s
+key f10                    # trace one race frame (kvr/trace_f*.txt): how the race HUD is drawn
+wait 1
+wait 8
+shot race_20s
+check_log stick_reaches_swoop minigame:~stick 5
+check_log race_ends minigame:~over 240
+wait 6
+shot after_race
+expect_world

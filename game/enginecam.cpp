@@ -24,6 +24,7 @@
 #include "anim.h"
 #include "dialogue.h"
 #include "melee.h"
+#include "minigame.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -210,7 +211,25 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         Log("enginecam: %s (camera fov %.1f)", gameplay ? "gameplay camera" : "cutscene / dialogue camera", fov);
         lastMode = gameplay;
     }
-    if (gameplay) {
+    int mg = Minigame_Type();
+    if (mg && !gameplay) {
+        // A minigame (swoop race, turret): the game's own chase / gunner camera, with your head on top. Never the
+        // cutscene rules - its camera moves every frame, so each frame was a "new shot" and you stayed at your body on
+        // the start line while the bike raced off, the track (drawn only near the bike) leaving a black world
+        // (2026-11-10 playtest, Taris). Never rolled; the swoop also keeps the horizon level (the bike's heading
+        // only), the turret keeps its pitch (it is the aim).
+        float M0[9];
+        QuatWxyzToRows(g_origQ, M0);
+        float f[3] = {-M0[2], -M0[5], mg == MG_SWOOP ? 0.0f : -M0[8]};  // forward = -Z column
+        static float mgQ[4];
+        QuatLookAlong(f, mgQ);
+        baseQ = mgQ;
+        g_shotMode = 0;
+        g_fovSaved = fov;  // cull with the gameplay cone: you look around the narrow chase view
+        *(float*)(cam + 0x1D0) = kCullFov;
+        g_fovCam = cam;
+        g_fovPatched = true;
+    } else if (gameplay) {
         // heading: the game camera's for reference, ours for the view
         float M0[9];
         QuatWxyzToRows(g_origQ, M0);
