@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 STEAM_APPID = "32370"
 # swkotor.exe of the Steam release the mod's hooks are built against (every hook also checks its bytes at runtime and
 # switches itself off on a mismatch, so another build fails safe rather than crashing)
@@ -133,6 +133,51 @@ def shortcut_paths():
 # KotOR ignores FullScreen=0 unless AllowWindowedMode=1 is set too (1.0.1 only set the first)
 WINDOWED = {"FullScreen": "0", "AllowWindowedMode": "1"}
 MIN_SIZE = (1280, 960)  # KotOR's 640x480 default is a very blurry picture in the headset
+# Each eye gets exactly KotOR's window size, so the biggest 4:3 window KotOR will open. Two limits, measured
+# 2026-11-10: KotOR falls back to 800x600 unless the size is one of the monitor's display modes, and Windows cuts
+# a window taller than the (DPI-scaled) desktop - 1600x1200 on a 1152-high desktop came out 1600x1133.
+SIZES = [(2880, 2160), (2560, 1920), (2048, 1536), (1920, 1440), (1600, 1200), (1440, 1080), (1400, 1050), (1280, 960)]
+FRAME = 40  # title bar and borders: the client area has to fit under the desktop height with them
+# KotOR's defaults (no anti-aliasing, no anisotropic filtering) are jagged and smeared in the headset
+QUALITY = {"Anti Aliasing": 4, "Anisotropy": 16}
+RECORDED = ("FullScreen", "AllowWindowedMode", "Width", "Height") + tuple(QUALITY)
+
+
+def display_modes():
+    """Sizes the primary monitor offers, and the desktop height as KotOR sees it (KotOR isn't DPI-aware, so at
+    125% scaling a 1440-high desktop is 1152 to it)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class DEVMODE(ctypes.Structure):
+        _fields_ = [("name", ctypes.c_wchar * 32), ("spec", wintypes.WORD), ("drv", wintypes.WORD),
+                    ("size", wintypes.WORD), ("extra", wintypes.WORD), ("fields", wintypes.DWORD),
+                    ("pos", ctypes.c_long * 2), ("orient", wintypes.DWORD), ("fixed", wintypes.DWORD),
+                    ("color", ctypes.c_short * 5), ("form", ctypes.c_wchar * 32), ("logpix", wintypes.WORD),
+                    ("bpp", wintypes.DWORD), ("w", wintypes.DWORD), ("h", wintypes.DWORD),
+                    ("flags", wintypes.DWORD), ("freq", wintypes.DWORD), ("rest", wintypes.DWORD * 8)]
+    u = ctypes.windll.user32
+    modes, m, i = set(), DEVMODE(), 0
+    m.size = ctypes.sizeof(DEVMODE)
+    while u.EnumDisplaySettingsW(None, i, ctypes.byref(m)):
+        modes.add((m.w, m.h))
+        i += 1
+    try:
+        u.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))  # DPI_AWARENESS_CONTEXT_UNAWARE: KotOR's view
+    except (AttributeError, OSError):
+        pass
+    return modes, u.GetSystemMetrics(1)  # SM_CYSCREEN
+
+
+def best_size():
+    try:
+        modes, desk_h = display_modes()
+    except Exception:
+        return MIN_SIZE
+    for w, h in SIZES:
+        if (w, h) in modes and h + FRAME <= desk_h:
+            return w, h
+    return MIN_SIZE
 
 
 def ini_graphics(path):
@@ -174,7 +219,7 @@ def windowed_mode(game, previous):
     # the values to put back: from the first install (a reinstall must not record our own), any key it didn't
     # record yet (AllowWindowedMode, new in 1.0.2) as it is now
     original = dict(previous or {})
-    for k in ("FullScreen", "AllowWindowedMode", "Width", "Height"):
+    for k in RECORDED:
         if k not in original:
             original[k] = keys[k][1] if k in keys else None
     want = dict(WINDOWED)
@@ -182,8 +227,16 @@ def windowed_mode(game, previous):
         w, h = int(keys["Width"][1]), int(keys["Height"][1])
     except (KeyError, ValueError):
         w, h = 0, 0
-    if w < MIN_SIZE[0] or h < MIN_SIZE[1]:
-        want["Width"], want["Height"] = str(MIN_SIZE[0]), str(MIN_SIZE[1])
+    bw, bh = best_size()
+    if w < bw or h < bh:  # never smaller than a size the player chose
+        want["Width"], want["Height"] = str(bw), str(bh)
+    for k, v in QUALITY.items():
+        try:
+            if int(keys[k][1]) >= v:
+                continue
+        except (KeyError, ValueError):
+            pass
+        want[k] = str(v)
     ini_set(path, want)
     return original
 
@@ -264,7 +317,10 @@ class Steps:
 
         self.log("KotOR in a window (the picture goes to the headset) ...")
         manifest["ini_original"] = windowed_mode(game, previous.get("ini_original"))
-        self.log("  swkotor.ini: windowed; your previous display settings come back when you uninstall")
+        _l, k = ini_graphics(os.path.join(game, "swkotor.ini"))
+        v = lambda n: k[n][1] if n in k else "?"
+        self.log("  swkotor.ini: windowed %sx%s, anti-aliasing %s, anisotropy %s; your previous display settings "
+                 "come back when you uninstall" % (v("Width"), v("Height"), v("Anti Aliasing"), v("Anisotropy")))
 
         self.log("Building the VR assets from your own game files (a minute or two) ...")
         import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override, door_export  # noqa: E401,E501

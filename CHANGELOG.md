@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 (2026-11-10)
+
+- **A sharper picture.** Each eye gets exactly KotOR's window size, and the setup left KotOR's graphics at its
+  defaults: a small window, no anti-aliasing, no texture filtering - jagged and blurry in a headset. The setup now
+  picks the biggest 4:3 window your monitor and Windows' display scaling allow (KotOR only opens sizes your monitor
+  lists, and Windows won't make a window taller than the desktop) and turns on 4x anti-aliasing and 16x anisotropic
+  filtering. It never lowers settings you already raised, and uninstall puts your own back.
+
 ## 1.0.2 (2026-11-09)
 
 - **First-person cameras for everyone.** The setup now builds `Override\camerastyle.2da` from your own game files:
