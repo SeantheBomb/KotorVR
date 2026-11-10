@@ -159,9 +159,10 @@ struct SharedTex {
     ID3D11ShaderResourceView* srv = nullptr;
     KvrEyeSlot meta{};                 // slot metadata matching `local`
     bool have = false;
+    uint32_t w = 0, h = 0;             // the texture's own size: the eyes can be the headset's, the panel the window's
 };
 static SharedTex g_shared[3] = {{KVR_TEX_NAME_EYE0}, {KVR_TEX_NAME_EYE1}, {KVR_TEX_NAME_PANEL}};
-static uint32_t g_sharedW, g_sharedH, g_sharedGen;
+static uint32_t g_sharedW, g_sharedH, g_sharedGen;  // the panel's size (the game window)
 
 static const char* kShader = R"(
 cbuffer P : register(b0) { float2 uvScale; float decodeSrgb; float guiKey; float2 uvOffset; float2 pad; };
@@ -250,15 +251,18 @@ static bool EnsureShared() {
         s.tex->QueryInterface(IID_PPV_ARGS(&s.mutex));
         D3D11_TEXTURE2D_DESC d;
         s.tex->GetDesc(&d);
+        s.w = d.Width;
+        s.h = d.Height;
         d.MiscFlags = 0;
         d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         g_dev->CreateTexture2D(&d, nullptr, &s.local);
         g_dev->CreateShaderResourceView(s.local, nullptr, &s.srv);
     }
-    g_sharedW = g_shm->texWidth;
-    g_sharedH = g_shm->texHeight;
+    g_sharedW = g_shared[2].w;
+    g_sharedH = g_shared[2].h;
     g_sharedGen = g_shm->texGeneration;
-    printf("opened shared textures %ux%u (gen %u)\n", g_sharedW, g_sharedH, g_sharedGen);
+    printf("opened shared textures: eyes %ux%u, panel %ux%u (gen %u)\n", g_shared[0].w, g_shared[0].h, g_sharedW, g_sharedH,
+           g_sharedGen);
     return true;
 }
 
@@ -1165,7 +1169,7 @@ static void DrawTexRect(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, S
 // Draw the valid region of a pulled texture into a render target viewport.
 static void DrawTex(ID3D11RenderTargetView* rtv, const D3D11_VIEWPORT& vp, SharedTex& src, uint32_t validW, uint32_t validH,
                     bool guiKey, bool decodeSrgb) {
-    const float scale[2] = {(float)validW / g_sharedW, (float)validH / g_sharedH}, offset[2] = {0, 0};
+    const float scale[2] = {(float)validW / src.w, (float)validH / src.h}, offset[2] = {0, 0};
     DrawTexRect(rtv, vp, src, scale, offset, guiKey, decodeSrgb);
 }
 

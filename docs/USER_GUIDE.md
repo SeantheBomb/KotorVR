@@ -153,6 +153,8 @@ where it lands gets it. You need grenades in your inventory.
 | `[Aim] Pitch` | `0` | tilts guns away from the controller's pointing ray (degrees; negative = down) |
 | `[Features] StrikeCue` | `1` | `0` = no openings / strike zone: any blade touch counts |
 | `[Features] FlatHud` | `0` | `1` = the flat HUD in front of you as in the original (Y toggles it) |
+| `[Render] EyeBuffer` | `1` | the 3D world is drawn at your headset's own resolution; `0` = at KotOR's window size (blurrier, a little faster) |
+| `[Render] Samples` | `4` | anti-aliasing of the headset picture (`0`, `2`, `4`, `8`); lower it if your frame rate drops |
 | `[Features] Hands` / `WeaponProxies` / `Cues` | `1` | your hands / weapons in hand / combat feedback (haptics, telegraphs) |
 | `[Compat] DiscordOverlay` | `0` | Discord's in-game overlay is kept out (it froze the game); Discord itself is unaffected |
 | `[WeaponPose] <class>` | — | adjust how a weapon class sits in your hand: `roll pitch yaw forward` (degrees, metres), e.g. `short_blade=180 0 0 0`; applied live |
@@ -166,7 +168,7 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 | Problem | Try |
 |---|---|
 | Nothing in the headset, the game runs on the monitor | Start the headset's Link / Air Link **before** KotOR VR. Check the "KotOR VR – headset view" window is open. |
-| Blurry, jagged or pixelated picture | Each eye gets exactly KotOR's window size. In `<KotOR>\swkotor.ini` `[Graphics Options]` set `Anti Aliasing=4`, `Anisotropy=16` and the biggest 4:3 `Width` / `Height` your monitor lists that fits under your desktop's height (e.g. `1920` / `1440` on a 4K screen; at 125% display scaling a 1440p screen tops out at `1440` / `1080`). The setup does this since 1.0.3. On Link / Air Link a higher encode bitrate in the Meta app helps too. |
+| Blurry, jagged or pixelated picture | Since 1.0.4 the 3D world is drawn at your headset's own resolution (check `[Render] EyeBuffer=1` in `kvr\kvr.ini`); menus and the HUD still come from KotOR's window. On older versions each eye got exactly KotOR's window size. In `<KotOR>\swkotor.ini` `[Graphics Options]` set `Anti Aliasing=4`, `Anisotropy=16` and the biggest 4:3 `Width` / `Height` your monitor lists that fits under your desktop's height (e.g. `1920` / `1440` on a 4K screen; at 125% display scaling a 1440p screen tops out at `1440` / `1080`). The setup does this since 1.0.3. On Link / Air Link a higher encode bitrate in the Meta app helps too. |
 | Sound but a black (or flashing) headset; the monitor switches to 640×480 | KotOR is running fullscreen: it minimizes when it loses focus and has nothing to send. Set `FullScreen=0` and `AllowWindowedMode=1` in `<KotOR>\swkotor.ini` `[Graphics Options]` (the setup does this since 1.0.1). |
 | Virtual Desktop: black, the session keeps restarting | Use Meta Link / Air Link for now (Virtual Desktop's OpenXR runtime ends the session - being looked into). |
 | The view is off-centre or too high / low | Right thumbstick click to recenter. |
