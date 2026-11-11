@@ -1,0 +1,20 @@
+# GL traces of two world frames with KotOR's framebuffer reads (glCopyTex*, glReadPixels) and context switches: what the eye buffer must handle.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 6
+shot loaded
+game trace
+wait 3
+head yaw=90
+wait 2
+game trace
+wait 3

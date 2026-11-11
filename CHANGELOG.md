@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 (unreleased)
+
+- **The headset's own resolution.** The 3D world is now drawn offscreen at exactly the size your headset asks for
+  (e.g. about 2064×2208 per eye on a Quest 3), with its own 4× anti-aliasing, instead of at the size of KotOR's
+  window - which KotOR, your monitor and Windows' display scaling all limited (1440×1080 at best on a 1440p monitor
+  at 125%), and which squeezed the headset's tall view into a 4:3 picture. Menus and the HUD still come from the
+  window. `[Render] EyeBuffer=0` in `kvr.ini` goes back to the old way; `[Render] Samples` sets the anti-aliasing.
+
 ## 1.0.3 (2026-11-10)
 
 - **A sharper picture.** Each eye gets exactly KotOR's window size, and the setup left KotOR's graphics at its

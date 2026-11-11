@@ -14,6 +14,7 @@
 #include <share.h>
 #include <cmath>
 
+#include "eyebuf.h"
 #include "vr.h"
 #include "input.h"
 #include "enginecam.h"
@@ -166,14 +167,44 @@ static void APIENTRY h_glLoadIdentity() { FIRST("glLoadIdentity"); T("glLoadIden
 static void APIENTRY h_glOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdouble f) { FIRST("glOrtho");
     T("glOrtho %.1f %.1f %.1f %.1f %.2f %.2f", l, r, b, t, n, f); VR_OnOrtho(l, r, b, t); r_glOrtho(l, r, b, t, n, f);
 }
-static void APIENTRY h_glViewport(GLint x, GLint y, GLsizei w, GLsizei h) { FIRST("glViewport"); T("glViewport %d %d %d %d", x, y, w, h); r_glViewport(x, y, w, h); }
+static void APIENTRY h_glViewport(GLint x, GLint y, GLsizei w, GLsizei h) { FIRST("glViewport"); T("glViewport %d %d %d %d", x, y, w, h);
+    if (EyeBuf_Active()) { int ww, wh; VR_ClientSize(&ww, &wh); EyeBuf_MapViewport(&x, &y, &w, &h, ww, wh); }
+    r_glViewport(x, y, w, h); }
 static void APIENTRY h_glTranslatef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glTranslatef"); T("glTranslatef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); if (VR_OnTranslatef(g_mode, x, y, z)) { T("  -> VR eye view"); return; } r_glTranslatef(x, y, z); }
 static void APIENTRY h_glRotatef(GLfloat a, GLfloat x, GLfloat y, GLfloat z) { FIRST("glRotatef"); T("glRotatef [%s] %.3f (%.3f %.3f %.3f)", ModeName(g_mode), a, x, y, z); r_glRotatef(a, x, y, z); }
 static void APIENTRY h_glScalef(GLfloat x, GLfloat y, GLfloat z) { FIRST("glScalef"); T("glScalef [%s] %.4f %.4f %.4f", ModeName(g_mode), x, y, z); r_glScalef(x, y, z); }
 static void APIENTRY h_glPushMatrix() { FIRST("glPushMatrix"); T("glPushMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth++; if (g_hideDepth >= 0 && g_mvDepth > g_hideDepth && g_mvDepth < 40) memcpy(g_ownMat[g_mvDepth], g_ownMat[g_mvDepth - 1], sizeof g_ownMat[0]); } r_glPushMatrix(); }
 static void APIENTRY h_glPopMatrix() { FIRST("glPopMatrix"); T("glPopMatrix [%s]", ModeName(g_mode)); if (g_mode == GL_MODELVIEW) { g_mvDepth--; if (g_hideDepth >= 0 && g_mvDepth < g_hideDepth) g_hideDepth = -1; if (g_candDepth >= 0 && g_mvDepth < g_candDepth) g_candDepth = -1; } r_glPopMatrix(); }
 static void APIENTRY h_glClear(GLbitfield b) { FIRST("glClear"); T("glClear 0x%x", b); r_glClear(b); }
-static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(b); }
+static void APIENTRY h_glDrawBuffer(GLenum b) { FIRST("glDrawBuffer"); T("glDrawBuffer 0x%x", b); r_glDrawBuffer(EyeBuf_MapDrawBuffer(b)); }
+static void(APIENTRY* r_glGetIntegerv)(GLenum, GLint*);
+static void APIENTRY h_glGetIntegerv(GLenum p, GLint* v) {
+    r_glGetIntegerv(p, v);
+    if (p == GL_VIEWPORT && EyeBuf_Active()) { int ww, wh; VR_ClientSize(&ww, &wh); EyeBuf_UnmapViewport(v, ww, wh); }
+}
+// framebuffer reads: what the engine takes out of the frame it is drawing (glow, effects) - eye buffer study
+static void(APIENTRY* r_glCopyTexImage2D)(GLenum, GLint, GLenum, GLint, GLint, GLsizei, GLsizei, GLint);
+static void(APIENTRY* r_glCopyTexSubImage2D)(GLenum, GLint, GLint, GLint, GLint, GLint, GLsizei, GLsizei);
+static void(APIENTRY* r_glReadPixels)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
+static void APIENTRY h_glCopyTexImage2D(GLenum t, GLint l, GLenum f, GLint x, GLint y, GLsizei w, GLsizei h, GLint b) {
+    FIRST("glCopyTexImage2D"); T("glCopyTexImage2D lvl %d fmt 0x%x from %d %d %dx%d", l, f, x, y, w, h);
+    int ww = 0, wh = 0;
+    if (EyeBuf_Active()) VR_ClientSize(&ww, &wh);
+    bool scaled = EyeBuf_BeginWindowRead(x, y, w, h, ww, wh);
+    r_glCopyTexImage2D(t, l, f, x, y, w, h, b);
+    if (scaled) EyeBuf_EndWindowRead();
+}
+static void APIENTRY h_glCopyTexSubImage2D(GLenum t, GLint l, GLint ox, GLint oy, GLint x, GLint y, GLsizei w, GLsizei h) {
+    FIRST("glCopyTexSubImage2D"); T("glCopyTexSubImage2D lvl %d at %d %d from %d %d %dx%d", l, ox, oy, x, y, w, h);
+    int ww = 0, wh = 0;
+    if (EyeBuf_Active()) VR_ClientSize(&ww, &wh);
+    bool scaled = EyeBuf_BeginWindowRead(x, y, w, h, ww, wh);  // (glow's frame grab: a window-sized copy of the eye)
+    r_glCopyTexSubImage2D(t, l, ox, oy, x, y, w, h);
+    if (scaled) EyeBuf_EndWindowRead();
+}
+static void APIENTRY h_glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum f, GLenum ty, void* px) {
+    FIRST("glReadPixels"); T("glReadPixels %d %d %dx%d fmt 0x%x", x, y, w, h, f); r_glReadPixels(x, y, w, h, f, ty, px);
+}
 static void APIENTRY h_glDrawElements(GLenum m, GLsizei c, GLenum t, const void* i) { FIRST("glDrawElements"); if (g_hideDepth >= 0 || (g_candDepth >= 0 && OwnSig_Match(c)) || VR_ShouldSkipDraw() || VR_ShouldSkipElements(c, t, i) || VR_InsideHead(c, t, i)) return; if (g_tracing) g_traceCount++; if (g_tracing) { float oc[3]; VR_DrawOrigin(oc); T("  glDrawElements mode=%u count=%d  origin_cam (%.2f %.2f %.2f)", m, c, oc[0], oc[1], oc[2]); } if (VR_NoteDrawn(c, t, i) && g_tracing) T("  ^^ this draw comes within 12 cm of the eye"); r_glDrawElements(m, c, t, i); }
 static void APIENTRY h_glDrawArrays(GLenum m, GLint f, GLsizei c) { FIRST("glDrawArrays"); if (g_hideDepth >= 0 || VR_ShouldSkipDraw()) return; if (g_tracing) g_traceCount++; T("  glDrawArrays mode=%u first=%d count=%d", m, f, c); r_glDrawArrays(m, f, c); }
 // Immediate-mode draws can't be skipped (the glVertex calls that follow would error), so an own-body glBegin
@@ -265,6 +296,7 @@ static void APIENTRY h_glBindTexture(GLenum t, GLuint name) {
 static BOOL WINAPI h_wglMakeCurrent(HDC dc, HGLRC rc) {
     static int c;
     if (c++ < 12) Log("[f%ld] wglMakeCurrent dc=%p rc=%p", g_frame, dc, rc);
+    T("wglMakeCurrent dc=%p rc=%p", dc, rc);
     return r_wglMakeCurrent(dc, rc);
 }
 
@@ -438,6 +470,10 @@ static IatHook g_iatHooks[] = {
     {"OPENGL32.dll", "glPopMatrix", (void**)&r_glPopMatrix, (void*)h_glPopMatrix},
     {"OPENGL32.dll", "glClear", (void**)&r_glClear, (void*)h_glClear},
     {"OPENGL32.dll", "glDrawBuffer", (void**)&r_glDrawBuffer, (void*)h_glDrawBuffer},
+    {"OPENGL32.dll", "glCopyTexImage2D", (void**)&r_glCopyTexImage2D, (void*)h_glCopyTexImage2D},
+    {"OPENGL32.dll", "glCopyTexSubImage2D", (void**)&r_glCopyTexSubImage2D, (void*)h_glCopyTexSubImage2D},
+    {"OPENGL32.dll", "glReadPixels", (void**)&r_glReadPixels, (void*)h_glReadPixels},
+    {"OPENGL32.dll", "glGetIntegerv", (void**)&r_glGetIntegerv, (void*)h_glGetIntegerv},
     {"OPENGL32.dll", "glDrawElements", (void**)&r_glDrawElements, (void*)h_glDrawElements},
     {"OPENGL32.dll", "glDrawArrays", (void**)&r_glDrawArrays, (void*)h_glDrawArrays},
     {"OPENGL32.dll", "glBegin", (void**)&r_glBegin, (void*)h_glBegin},

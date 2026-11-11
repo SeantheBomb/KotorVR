@@ -22,6 +22,7 @@
 #include "features.h"
 #include "mirror.h"
 #include "ownsig.h"
+#include "eyebuf.h"
 
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -76,11 +77,27 @@ struct Slot {
     KvrPose pose[2];  // metadata captured with each PBO
     KvrFov fov[2];
     uint32_t flags[2] = {0, 0};
+    int w = 0, h = 0;  // eyes: the eye buffer's size (the headset's), panel: the window's
 };
 static ID3D11Device* g_dev;
 static ID3D11DeviceContext* g_ctx;
 static Slot g_slots[SLOT_COUNT];
-static int g_texW, g_texH;
+static int g_texW, g_texH;  // the game window's client size (the panel; and the eyes without the eye buffer)
+// The eye buffer (eyebuf.h): the world pass drawn at the headset's own per-eye size. [Render] EyeBuffer=0 in kvr.ini
+// keeps the eyes at the window's size as before; Samples = its anti-aliasing (KotOR's own setting only covers the
+// window now).
+static int g_eyeW, g_eyeH;
+static bool g_eyeBufFailed;
+static bool EyeBufWanted() {
+    static int on = -1;
+    if (on < 0) on = GetPrivateProfileIntA("Render", "EyeBuffer", 1, Features_IniPath()) != 0;
+    return on && !g_eyeBufFailed;
+}
+static int EyeBufSamples() {
+    static int n = -1;
+    if (n < 0) n = GetPrivateProfileIntA("Render", "Samples", 4, Features_IniPath());
+    return n;
+}
 static uint32_t g_texGen;
 static bool g_exportReady, g_exportFailed;
 static HGLRC g_exportCtx;
@@ -204,14 +221,19 @@ void VR_BeforeShareLists() {}  // PBOs are plain buffer objects; context sharing
 
 // (Re)create the export resources at the window's client size. Names carry a generation so the
 // host can reopen after a resize while it still holds the previous ones.
-static bool CreateSlots(int w, int h) {
+static bool CreateSlots(int winW, int winH, int eyeW, int eyeH) {
     DestroySlots();
-    g_texW = w;
-    g_texH = h;
+    g_texW = winW;
+    g_texH = winH;
+    g_eyeW = eyeW;
+    g_eyeH = eyeH;
     g_texGen = g_texGen ? g_texGen + 1 : ((GetCurrentProcessId() & 0xFFFFF) << 8) + 1;  // unique per launch: the host may still hold a dead game's textures
     const wchar_t* bases[SLOT_COUNT] = {KVR_TEX_NAME_EYE0, KVR_TEX_NAME_EYE1, KVR_TEX_NAME_PANEL};
     for (int i = 0; i < SLOT_COUNT; i++) {
         Slot& s = g_slots[i];
+        int w = i == SLOT_PANEL ? winW : eyeW, h = i == SLOT_PANEL ? winH : eyeH;
+        s.w = w;
+        s.h = h;
         D3D11_TEXTURE2D_DESC d{};
         d.Width = w;
         d.Height = h;
@@ -242,10 +264,10 @@ static bool CreateSlots(int w, int h) {
     }
     for (auto& e : g_shm->eyes) e.frameId = 0;
     g_shm->panel.frameId = 0;
-    g_shm->texWidth = w;
-    g_shm->texHeight = h;
+    g_shm->texWidth = winW;
+    g_shm->texHeight = winH;
     g_shm->texGeneration = g_texGen;
-    g_log("export resources %dx%d gen %u", w, h, g_texGen);
+    g_log("export resources %dx%d, eyes %dx%d gen %u", winW, winH, eyeW, eyeH, g_texGen);
     return true;
 }
 
@@ -264,10 +286,10 @@ static void Deliver(int slotIndex, int which) {
     TIMED("map", px = p_glMapBufferARB(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY_ARB));
     bool ok = px != nullptr;
     if (ok) {
-        TIMED("upload", g_ctx->UpdateSubresource(s.shared, 0, nullptr, px, g_texW * 4, 0));
+        TIMED("upload", g_ctx->UpdateSubresource(s.shared, 0, nullptr, px, s.w * 4, 0));
         if (g_diagLeft > 0 && slotIndex == SLOT_PANEL) {
             g_diagLeft--;
-            const unsigned char* c = (const unsigned char*)px + ((g_texH / 2) * g_texW + g_texW / 2) * 4;
+            const unsigned char* c = (const unsigned char*)px + ((s.h / 2) * s.w + s.w / 2) * 4;
             g_log("diag panel center = %u %u %u %u", c[0], c[1], c[2], c[3]);
         }
         p_glUnmapBufferARB(GL_PIXEL_PACK_BUFFER_ARB);
@@ -277,8 +299,8 @@ static void Deliver(int slotIndex, int which) {
         KvrEyeSlot* out = slotIndex == SLOT_PANEL ? &g_shm->panel : &g_shm->eyes[slotIndex];
         out->pose = s.pose[which];
         out->fov = s.fov[which];
-        out->width = g_texW;
-        out->height = g_texH;
+        out->width = s.w;
+        out->height = s.h;
         out->flags = s.flags[which];
         out->frameId++;
     }
@@ -304,7 +326,7 @@ static void Capture(int slotIndex, const KvrPose* pose, const KvrFov* fov) {
     GLint prev = 0;
     p_glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING_ARB, &prev);
     p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, s.pbo[w]);
-    TIMED("readpixels", p_glReadPixels(0, 0, g_texW, g_texH, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+    TIMED("readpixels", p_glReadPixels(0, 0, s.w, s.h, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
     p_glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, prev);
     s.pending[w] = true;
     if (pose) s.pose[w] = *pose;
@@ -442,7 +464,8 @@ static void DrawHandItems() {
     GLint mode = GL_MODELVIEW, vp[4];
     p_glGetIntegerv2(GL_MATRIX_MODE, &mode);
     p_glGetIntegerv2(GL_VIEWPORT, vp);
-    p_glViewport(0, 0, g_texW, g_texH);
+    if (EyeBuf_Active()) p_glViewport(0, 0, EyeBuf_Width(), EyeBuf_Height());
+    else p_glViewport(0, 0, g_texW, g_texH);
     p_glMatrixMode(GL_PROJECTION);
     p_glPushMatrix();
     p_glLoadIdentity();
@@ -492,23 +515,36 @@ void VR_Init(const VrGl& gl, void (*log)(const char*, ...)) {
     g_log = log;
 }
 
+static int g_perspThisFrame;  // diagnostics: gluPerspective calls this frame (frames without a world, in the stats)
+static unsigned g_rejInactive, g_rejShape, g_rejEye;  // diagnostics: world cameras not turned into an eye, and why
 bool VR_OnPerspective(GLdouble fovy, GLdouble aspect, GLdouble zn, GLdouble zf) {
+    g_perspThisFrame++;
     g_camState = 0;
-    if (!g_vrActive) return false;
+    if (!g_vrActive) { g_rejInactive++; return false; }
     // world/dialogue cameras only: GUI 3D (portraits, menu model) uses fovy 22.7 or non-4:3 aspect
     double expect = (double)g_texW / g_texH;
-    if (fovy < 25.0 || fabs(aspect - expect) > 0.05) return false;
+    if (fovy < 25.0 || fabs(aspect - expect) > 0.05) {
+        if (fovy >= 25.0 && g_rejShape++ < 3 && g_worldFrames < 400)
+            g_log("persp rejected: fovy %.2f aspect %.4f, window %dx%d", fovy, aspect, g_texW, g_texH);
+        return false;
+    }
     g_gameFovy = fovy;
     g_gameAspect = aspect;
 
     KvrPose unused;
-    if (!VR_ChooseEye(&unused)) return false;
+    if (!VR_ChooseEye(&unused)) { g_rejEye++; return false; }
     g_zn = zn;
     g_zf = zf;
     g_inWorldPass = true;
 
     g_gl.Frustum(zn * tan(g_curFov.angleLeft), zn * tan(g_curFov.angleRight),
                  zn * tan(g_curFov.angleDown), zn * tan(g_curFov.angleUp), zn, zf);
+    // the eye buffer: once per world pass, in the context the frames are exported from
+    if (!g_eyeCaptured && !EyeBuf_Active() && EyeBufWanted() && (g_eyeW != g_texW || g_eyeH != g_texH) &&
+        p_wglGetCurrentContext && p_wglGetCurrentContext() == g_exportCtx &&
+        !EyeBuf_Begin(g_eyeW, g_eyeH, EyeBufSamples(), g_gl.GetProcAddress)) {
+        g_eyeBufFailed = true;  // the eye slots go back to the window's size at the next swap
+    }
     g_worldThisFrame = true;
     g_camState = 1;
     return true;
@@ -605,11 +641,14 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
     g_inWorldPass = false;  // post-processing / GUI from here on: nothing here is the player's body
     // first unit-square ortho after the world = GUI start; scene, shadows and glow are composited by now
     if (!g_worldThisFrame || g_eyeCaptured || l != 0.0 || r != 1.0 || b != 0.0 || t != 1.0) return;
+    bool kept = false;
     if (g_probeState == 1) {  // line-of-sight probe: depth at the view center vs the distance to the target point
         static void(APIENTRY* p_rp)(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
         if (!p_rp) p_rp = (decltype(p_rp))GetProcAddress(GetModuleHandleA("opengl32.dll"), "glReadPixels");
         double tl = tan(g_curFov.angleLeft), tr = tan(g_curFov.angleRight), td = tan(g_curFov.angleDown), tu = tan(g_curFov.angleUp);
-        GLint x = (GLint)((0 - tl) / (tr - tl) * g_texW), y = (GLint)((0 - td) / (tu - td) * g_texH);
+        EyeBuf_Resolve();  // (multisampled depth can't be read)
+        int pw = EyeBuf_Active() ? EyeBuf_Width() : g_texW, ph = EyeBuf_Active() ? EyeBuf_Height() : g_texH;
+        GLint x = (GLint)((0 - tl) / (tr - tl) * pw), y = (GLint)((0 - td) / (tu - td) * ph);
         float d = 1.0f;
         p_rp(x, y, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
         double zn = g_zn, zf = g_zf, ndc = 2.0 * d - 1.0;
@@ -621,14 +660,22 @@ void VR_OnOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t) {
         g_probeState = 2;
     } else if (NowMs() >= g_pickUntilMs) {  // a pick frame looks along the hand: never shown in the headset
         DrawHandItems();
+        EyeBuf_Resolve();
         Capture(g_curEye, &g_curPose, &g_curFov);
-        if (g_curEye == 0) Mirror_KeepEye(g_texW, g_texH, g_gl.GetProcAddress);  // desktop mirror (left eye)
+        kept = g_curEye == 0;
     }
+    EyeBuf_End(g_texW, g_texH);  // the window gets the eye, scaled, as it always had it
+    if (kept) Mirror_KeepEye(g_texW, g_texH, g_gl.GetProcAddress);  // desktop mirror (left eye)
     g_eyeCaptured = true;
     ClearForGui();
 }
 
 void VR_OnSwap(HDC dc) {
+    if (EyeBuf_Active()) {  // a world pass that never reached the GUI (loading, a skipped frame): back to the window
+        static int n;
+        if (n++ < 5) g_log("eyebuf: world pass ended without its GUI pass - closed at swap");
+        EyeBuf_End(g_texW, g_texH);
+    }
     Weapons_Update();
     if (Features().tracePosition && g_worldThisFrame) {
         static DWORD last;
@@ -646,16 +693,21 @@ void VR_OnSwap(HDC dc) {
     RefreshPlayerPos();
     Combat_EndFrame();
     static double lastStat, lastSwap;
-    static unsigned frames, worldFrames;
+    static unsigned frames, worldFrames, noPersp;
     double now = NowMs();
     if (lastSwap > 0 && now - lastSwap > 250) g_log("STALL frame gap %.0f ms (vr %d)", now - lastSwap, g_vrActive);
     lastSwap = now;
     frames++;
     if (g_worldThisFrame) worldFrames++;
+    if (!g_perspThisFrame) noPersp++;
+    g_perspThisFrame = 0;
     if (now - lastStat > 1000) {
-        if (g_vrActive) g_log("stats: %u fps, %u world, eyes %u/%u, panel %u", frames, worldFrames,
-                              g_shm ? g_shm->eyes[0].frameId : 0, g_shm ? g_shm->eyes[1].frameId : 0, g_shm ? g_shm->panel.frameId : 0);
-        frames = worldFrames = 0;
+        if (g_vrActive) g_log("stats: %u fps, %u world (%u without a 3D camera; not an eye: %u inactive, %u shape, %u no pose), "
+                              "eyes %u/%u, panel %u", frames, worldFrames, noPersp, g_rejInactive, g_rejShape, g_rejEye,
+                              g_shm ? g_shm->eyes[0].frameId : 0, g_shm ? g_shm->eyes[1].frameId : 0,
+                              g_shm ? g_shm->panel.frameId : 0);
+        g_rejInactive = g_rejShape = g_rejEye = 0;
+        frames = worldFrames = noPersp = 0;
         lastStat = now;
     }
     if (EnsureShm()) {
@@ -677,8 +729,15 @@ void VR_OnSwap(HDC dc) {
                     g_log("export: the game window is minimized (%dx%d) - nothing to send to the headset. Run KotOR "
                           "windowed: swkotor.ini [Graphics Options] FullScreen=0", w, h);
                 }
-                if (w > 0 && h > 0 && (w != g_texW || h != g_texH)) {
-                    if (!CreateSlots(w, h)) { g_log("export: slot creation failed"); DestroySlots(); g_exportReady = false; g_exportFailed = true; }
+                // the eyes at the headset's own size with the eye buffer, else the window's
+                int ew = w, eh = h;
+                KvrHostState hs;
+                if (EyeBufWanted() && ReadHost(hs) && hs.recommendedW > 0 && hs.recommendedH > 0) {
+                    ew = (int)hs.recommendedW;
+                    eh = (int)hs.recommendedH;
+                }
+                if (w > 0 && h > 0 && (w != g_texW || h != g_texH || ew != g_eyeW || eh != g_eyeH)) {
+                    if (!CreateSlots(w, h, ew, eh)) { g_log("export: slot creation failed"); DestroySlots(); g_exportReady = false; g_exportFailed = true; }
                 }
             }
         }
