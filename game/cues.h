@@ -58,3 +58,7 @@ void Cues_Shot();
 // A KotOR sound by resref (kvr\sounds), once.
 void Cues_Tone(const char* resref, float gain, float ratio);
 void Cues_SaberHum(bool on, float tipSpeed);
+// The breath beat opened (your round rolls in 0.75 s): a soft rising hum pulse in the sword hand.
+void Cues_Breath();
+// A stance locked (1 power, 2 critical, 3 flurry): a click, the hilt tinted the feat's colour until the roll.
+void Cues_StanceLock(int feat, const float rgb[3]);

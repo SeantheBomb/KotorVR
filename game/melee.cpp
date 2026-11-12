@@ -122,7 +122,29 @@ DWORD PlayerId() {
 
 }  // namespace
 
+static bool g_botOwns;
+static void SetBladeImpl(int hand, const float base[3], const float tip[3]);
 void Melee_SetBlade(int hand, const float base[3], const float tip[3]) {
+    if (g_botOwns && hand == 1) return;  // the combat bot drives the sword hand
+    SetBladeImpl(hand, base, tip);
+}
+void Melee_BotBlade(int hand, const float base[3], const float tip[3]) {
+    g_botOwns = true;
+    SetBladeImpl(hand, base, tip);
+}
+void Melee_BotRelease(bool release) {
+    if (release) g_botOwns = false;
+}
+bool Melee_BladeNow(int hand, float base[3], float tip[3], float* speed) {
+    if (hand < 0 || hand > 1) return false;
+    const Blade& b = g_blade[hand];
+    if (!b.valid || Now() - b.t > 0.2) return false;
+    memcpy(base, b.base, 12);
+    memcpy(tip, b.tip, 12);
+    if (speed) *speed = (Now() - b.maxAt < 0.15) ? b.maxRecent : b.speed;
+    return true;
+}
+static void SetBladeImpl(int hand, const float base[3], const float tip[3]) {
     if (hand < 0 || hand > 1) return;
     Blade& b = g_blade[hand];
     double t = Now();
@@ -152,6 +174,7 @@ float Melee_BladeSpeed(int hand) {
 }
 
 void Melee_ClearBlade(int hand) {
+    if (g_botOwns && hand == 1) return;
     if (hand >= 0 && hand <= 1) g_blade[hand].valid = false;
 }
 
@@ -202,6 +225,8 @@ bool Melee_IsEnemy(DWORD id) {
 
 #include "combat.h"
 #include "features.h"
+#include "fight.h"
+#include "vr.h"
 
 // Issue 9 (2026-11-05 playtest: "confusion about when and where to strike"): an enemy within reach that is not
 // winding up an attack on you is OPEN - its chest glows (weapons.cpp) and the sword hand gets a soft pulse. A cut
@@ -277,9 +302,14 @@ static void Contact(DWORD id, const float point[3], float speed) {
     double t = Now();
     g_lastContact[id] = t;
     g_credit[id] = {t, speed, false, 1.6};
-    Anim_HitPause(id, speed > 5.0f ? 0.09f : 0.06f);
-    Anim_Flinch(id, point);
-    Cues_Contact(speed);
+    if (Fight_Active()) {
+        // choreo: the touch is only a faint tick; the blow's outcome (one cue, the enemy's own reaction) comes at its Hit
+        VR_Haptic(1, 0.25f, 0.02f, 220);
+    } else {
+        Anim_HitPause(id, speed > 5.0f ? 0.09f : 0.06f);
+        Anim_Flinch(id, point);
+        Cues_Contact(speed);
+    }
     if (!g_startAttackOn) g_startAttackOn = id;  // if you aren't fighting it yet, this starts the attack
     Log("melee: blade contact on %08lX at %.1f m/s", id, speed);
 }
@@ -372,7 +402,7 @@ void Melee_Update() {
             if (!touched) continue;
             // the strike cue: through the trunk, while it is open
             const char* noCount = nullptr;
-            if (!glance && Features().strikeCue) {
+            if (!glance && Features().strikeCue && !Fight_Active()) {  // (choreo: the gates say when and where)
                 if (!InTrunk(p, b.base, b.tip, b.prevTip)) noCount = "outside the trunk";
                 else if (Combat_Threatening(kv.first)) noCount = "into its attack - block, then cut";
             }
@@ -398,7 +428,7 @@ void Melee_Update() {
                 bool followThrough = b.speed >= 2.0f;
                 if (t - lg > 0.5) {
                     lg = t;
-                    if (!followThrough) {
+                    if (!followThrough && !Fight_Active()) {
                         if (Features().strikeCue) Cues_NoCount();
                         else Cues_Glance();
                     }

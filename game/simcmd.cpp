@@ -39,6 +39,7 @@
 
 #include "enginecam.h"
 #include "melee.h"
+#include "fight.h"
 #include "pick.h"
 #include "dialogue.h"
 #include "../common/kvr_shared.h"
@@ -110,6 +111,10 @@ void Run(char* line) {
         } else {
             Log("simcmd: body unknown");
         }
+    } else if (!strcmp(cmd, "bot")) {  // the combat bot: 0 off, 1 sloppy, 2 perfect, 3 idle (fight.cpp)
+        Fight_SetBot(nums.empty() ? 2 : (int)nums[0]);
+    } else if (!strcmp(cmd, "fightsummary")) {
+        Fight_Summary("asked");
     } else if (!strcmp(cmd, "god")) {
         g_god = nums.empty() || nums[0] != 0;
         g_godHp = 0;

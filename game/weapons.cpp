@@ -13,6 +13,7 @@
 #include "minigame.h"
 #include "pick.h"
 #include "guard.h"
+#include "fight.h"
 
 #include <GL/gl.h>
 #include <cmath>
@@ -890,10 +891,12 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     int nb = Features().cues ? Guard_Bars(bars, 8) : 0;
     bool meleeHeld = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
     float openAt[3];
-    bool showOpen = Melee_OpeningTarget(openAt) != 0 && meleeHeld && !(hshm && hshm->cinematic) && !Dialogue_Showing();
+    bool showOpen = (Fight_Active() ? Fight_OpenEnemy(openAt) != 0 : Melee_OpeningTarget(openAt) != 0) && meleeHeld &&
+                    !(hshm && hshm->cinematic) && !Dialogue_Showing();
     float dmgAge = (float)(tnow - g_damageAt), dmgAt[3];
     bool showDamage = dmgAge < 0.4f && CreaturePos(g_damageOn, dmgAt);
-    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage) return;
+    bool fightDraw = Fight_Active() && !(hshm && hshm->cinematic) && !Dialogue_Showing();
+    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage && !fightDraw) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -1076,6 +1079,10 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             continue;
         }
         float s = parry ? 0.16f : 0.11f;
+        if (Fight_Active() && !w[i].ranged && melee) {  // choreo: the gate on its real blade is the cue (fight.cpp)
+            float ga[3], gb[3], gl, gt;
+            if (Fight_EnemyGate(w[i].attacker, ga, gb, &gl, &gt)) continue;
+        }
         if (left > 0 && (w[i].ranged || !melee)) {  // timing ring: closes from 3.5x onto the chevron at the impact
             // (a blow you can block: the ring closes on its block bar instead)
             float rr = s * (1.0f + 2.5f * frac);
@@ -1103,6 +1110,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
         }
     }
     DrawGuardBars(worldView, bars, nb);
+    if (fightDraw) Fight_Draw(worldView);
     if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
         float pulse = 0.42f;
         if (p_glLineWidth) p_glLineWidth(1.5f);

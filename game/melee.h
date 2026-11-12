@@ -6,6 +6,11 @@
 // The drawn weapon's grip and tip in KotOR world coordinates this frame (weapon pass), per hand (1 right, 0 left).
 void Melee_SetBlade(int hand, const float base[3], const float tip[3]);
 void Melee_ClearBlade(int hand);
+// The combat bot (fight.cpp) owns the blade: the drawn weapon's pose is ignored while it drives.
+void Melee_BotBlade(int hand, const float base[3], const float tip[3]);
+void Melee_BotRelease(bool release);
+// The blade now (world): false when there is none this frame.
+bool Melee_BladeNow(int hand, float base[3], float tip[3], float* speed);
 // The blade tip's speed now (m/s), 0 without a blade.
 float Melee_BladeSpeed(int hand);
 // Every attack roll (combat.cpp): who fights whom.

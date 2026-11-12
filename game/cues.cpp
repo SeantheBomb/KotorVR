@@ -443,6 +443,26 @@ void Cues_Shot() {
     PlayResref(snd, 1.0f, 0.97f + (rand() % 7) * 0.01f);  // a touch of pitch variety
 }
 
+void Cues_Breath() {
+    if (!Features().cues) return;
+    Haptic(0, 1, 0.18f, 0.05f, 140);
+    Haptic(0.12, 1, 0.28f, 0.06f, 180);
+    for (int h = 0; h < 2; h++) {
+        g_flash[h] = 0.25f;
+        g_flashAt[h] = Now();
+    }
+}
+
+void Cues_StanceLock(int feat, const float rgb[3]) {
+    if (!Features().cues) return;
+    PlayResref("gui_actqueue", 0.6f, feat == 1 ? 0.8f : feat == 2 ? 1.25f : 1.05f);
+    Haptic(0, 1, 0.6f, 0.03f, 260);
+    memcpy(g_tint, rgb, sizeof g_tint);
+    g_tintUntil = Now() + 1.0;
+    Flash(0.7f);
+    if (feat == 1) g_powerAt = Now();
+}
+
 void Cues_Tone(const char* resref, float gain, float ratio) {
     if (Features().cues) PlayResref(resref, gain, ratio);
 }

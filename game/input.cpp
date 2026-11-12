@@ -26,6 +26,7 @@
 #include "hover.h"
 #include "pick.h"
 #include "guard.h"
+#include "fight.h"
 #include "melee.h"
 #include "force.h"
 #include "tutorial.h"
@@ -202,7 +203,12 @@ void Input_Update(HWND wnd) {
         Hover_Update(in);
         Melee_Update();
         Guard_Update();
+        Fight_Update();
         double now = Gestures_Now();
+        if (BYTE k = Fight_TakeKey()) {  // a stance's feat: its column key in KotOR's target action menu
+            g_gestureKey = k;
+            g_gestureKeyAt = now;
+        }
         bool ringWasOpen = ActionRing_Active();
         if (BYTE k = ActionRing_Update(in)) {  // trigger on an action in the ring: its column's key
             g_gestureKey = k;

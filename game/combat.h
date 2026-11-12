@@ -16,6 +16,10 @@ bool Combat_Threatening(unsigned long attacker);
 bool Combat_PlayerAttacking();
 // v2: your blade / barrel decides what lands ([Combat] Mode=contact, the default).
 bool Combat_ContactMode();
+// Posture (fight.cpp): damage it, read it (openLeft > 0: the opening is live, seconds left). Your guard 0..100.
+void Combat_HitPosture(unsigned long id, float amount, const char* why);
+bool Combat_PostureInfo(unsigned long id, float* value, float* max, float* openLeft);
+float Combat_Guard();
 // The player's queued attack was cleared: the next swing starts a new one.
 void Combat_ResetAttacking();
 // End the player's running combat round now (its timer run out): the stick gets the character back at once.

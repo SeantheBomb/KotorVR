@@ -36,6 +36,7 @@
 #include "anim.h"
 #include "cues.h"
 #include "features.h"
+#include "fight.h"
 #include "melee.h"
 #include "force.h"
 #include "gestures.h"
@@ -165,7 +166,8 @@ void HitPosture(DWORD id, float amount, const char* why) {
         p.openUntil = t + 2.2;
         SetRoundPaused(id, true);  // its combat round stops: no attacks while it is open
         Anim_HitPause(id, 0.3f);
-        Cues_Fire(CUE_PERFECT_LANDED);
+        if (Fight_Active()) Fight_Opening(id);
+        else Cues_Fire(CUE_PERFECT_LANDED);
         Log("combat: %08lX guard broken (%s) - open for 2.2 s", id, why);
     }
 }
@@ -290,9 +292,13 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
             }
             __try {
                 BYTE* round = *(BYTE**)((BYTE*)attacker + 0x9C8);
-                if (round) g_playerPending.push_back({round + 4 + *(round + 0x96C) * 0x14C, tid, Now()});
+                if (round) {
+                    BYTE* rec = round + 4 + *(round + 0x96C) * 0x14C;
+                    g_playerPending.push_back({rec, tid, Now()});
+                    if (target) Fight_NoteRoll(aid, tid, rec, true, false);
+                }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
-            ApplySpecialMove(attacker);
+            if (!Fight_Active()) ApplySpecialMove(attacker);  // (choreo: the stance queued the real feat)
             return;
         }
         if (target == player) {
@@ -302,12 +308,16 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
             }
             // attack tokens: only a few enemies' attacks on you are live at once; the rest whiff (no telegraph)
             int live = LiveAttackersBesides(aid);
-            if (live >= g_tokens) {
+            if (g_tokens > 0 && live >= g_tokens) {
                 *kForcedRoll = 1;
                 static int logged;
                 if (logged++ < 20) Log("combat: %08lX waits its turn (%d attackers already live) -> whiff", aid, live);
                 return;
             }
+            __try {
+                BYTE* round = *(BYTE**)((BYTE*)attacker + 0x9C8);
+                if (round) Fight_NoteRoll(aid, tid, round + 4 + *(round + 0x96C) * 0x14C, false, true);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     }
 
@@ -382,6 +392,8 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
     if (!IsWeaponDamage(data, &ints)) return;
     DWORD playerId = ObjectId(Weapon_PlayerCreature());
     if (!playerId) return;
+    bool meleeNow = Weapon_Right() == WC_NONE || Weapon_Profile(Weapon_Right()).melee;
+    if (caller == playerId && object != playerId && g_contact && meleeNow && Fight_PlayerBlowLands(object, ints)) return;
     if (caller == playerId && object != playerId && g_contact) {  // the player's blow / bolt lands now
         float speed = 1;
         bool head = false;
@@ -523,6 +535,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
             Cues_Fire(CUE_BLOCK_FAILED);
             if (dealt > 0) Cues_Fire(CUE_HURT);
             Guard_Result(attacker, 3);
+            Fight_DefenceResult(attacker, 3, dealt);
             Log("combat: block broken (no guard left), %d damage", dealt);
             return true;
         }
@@ -535,6 +548,8 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
             g_guard = g_guard + 15 > 100 ? 100 : g_guard + 15;
             Force_OnParry();
             Cues_Fire(CUE_PERFECT_BLOCK);
+            Guard_Result(attacker, 2);
+            Fight_DefenceResult(attacker, 2, 0);
             Log("combat: parried %08lX (blade %.1f m/s), %d damage stopped", attacker, speed, dealt);
         } else {
             g_guard -= 25;
@@ -542,6 +557,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
             HitPosture(attacker, 8, "blocked");
             Cues_Fire(CUE_BLOCK);
             Guard_Result(attacker, 1);
+            Fight_DefenceResult(attacker, 1, 0);
             Log("combat: blocked %08lX, %d damage stopped, guard %.0f", attacker, dealt, g_guard);
         }
         return true;
@@ -554,6 +570,7 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
     }
     if (dealt > 0) Cues_Fire(CUE_HURT);
     if (melee) Guard_Result(attacker, 3);
+    Fight_DefenceResult(attacker, 3, dealt);
     Log("combat: blow from %08lX lands, %d damage (no blade on the bar)", attacker, dealt);
     return true;
 }
@@ -564,6 +581,10 @@ extern "C" void __cdecl Combat_DamagePre(void** targetSlot, void* effect) {
     if (!IsWeaponDamage(effect, &ints)) return;
     void* player = Weapon_PlayerCreature();
     if (!player || AsCreature(targetObj) != player) return;
+    float scale = Fight_IncomingDamage();
+    if (scale != 1.0f)
+        for (int i = 0; i < 15; i++)
+            if (ints[i] > 0) ints[i] = max(1, (int)(ints[i] * scale + 0.5f));
     int dealt = 0;
     for (int i = 0; i < 15; i++) dealt += ints[i] > 0 ? ints[i] : 0;
     if (g_contact) {
@@ -672,12 +693,13 @@ bool Combat_Install() {
     if (char* s = strrchr(ini, '\\')) strcpy_s(s + 1, MAX_PATH - (s + 1 - ini), "kvr\\kvr.ini");
     g_impactBlock = GetPrivateProfileIntA("Combat", "ImpactBlock", 1, ini) != 0;
     char mode[32];
-    GetPrivateProfileStringA("Combat", "Mode", "contact", mode, sizeof mode, ini);
-    g_contact = _stricmp(mode, "rounds") != 0;
+    GetPrivateProfileStringA("Combat", "Mode", "choreo", mode, sizeof mode, ini);
+    g_contact = _stricmp(mode, "rounds") != 0;  // choreo (fight.cpp) builds on the contact rules
     char buf[32];
     GetPrivateProfileStringA("Combat", "ParryZone", "0.38", buf, sizeof buf, ini);
     g_parryZone = (float)atof(buf);
-    g_tokens = GetPrivateProfileIntA("Combat", "AttackTokens", 2, ini);
+    // choreo: no attacker cap by default (tanking stays possible; fight.cpp makes the load readable instead)
+    g_tokens = GetPrivateProfileIntA("Combat", "AttackTokens", _stricmp(mode, "choreo") == 0 ? 0 : 2, ini);
     Log("combat: mode %s (parry zone %.2f m, %d attack tokens)", g_contact ? "contact" : "rounds", g_parryZone, g_tokens);
     bool ok = Combat_Detour(kResolverVA, kResolverOrig, 6, ResolverStub, &g_resolverTramp, "attack resolver");
     if (ok) Combat_Detour(kQueueVA, kQueueOrig, 8, QueueStub, &g_queueTramp, "event queue");
@@ -734,7 +756,7 @@ void Combat_Update() {
             // (melee only: a blade can be blocked; for a shot this ate the hit's credit and the blow that then landed
             // did no damage - 2026-11-05)
             bool melee = Weapon_Profile(Weapon_Right()).melee || Weapon_Right() == WC_NONE;
-            if (melee && result == 4 && Melee_HasCredit(pr.target)) {
+            if (melee && result == 4 && Melee_HasCredit(pr.target) && !Fight_Active()) {
                 Melee_TakeCredit(pr.target, nullptr, nullptr);
                 HitPosture(pr.target, 20, "blocked your blow");
                 Cues_Fire(CUE_BLOCK);
@@ -806,6 +828,18 @@ bool Combat_Threatening(unsigned long attacker) {
 }
 
 bool Combat_ContactMode() { return g_contact; }
+
+void Combat_HitPosture(unsigned long id, float amount, const char* why) { HitPosture(id, amount, why); }
+bool Combat_PostureInfo(unsigned long id, float* value, float* max, float* openLeft) {
+    auto it = g_posture.find(id);
+    if (it == g_posture.end() || it->second.value < 0) return false;
+    *value = it->second.value;
+    *max = it->second.max;
+    double left = it->second.openUntil - Now();
+    *openLeft = left > 0 ? (float)left : 0;
+    return true;
+}
+float Combat_Guard() { return g_guard; }
 
 bool Combat_PlayerAttacking() { return Now() - g_playerRolls[1] < 3.5; }
 void Combat_ResetAttacking() { g_playerRolls[0] = g_playerRolls[1] = -100; }

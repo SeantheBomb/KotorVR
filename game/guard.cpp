@@ -20,6 +20,7 @@
 #include "cues.h"
 #include "enginecam.h"
 #include "features.h"
+#include "fight.h"
 #include "hover.h"
 #include "melee.h"
 #include "vr.h"
@@ -44,6 +45,7 @@ struct State {
     double linedSince;    // when the blade came onto it
     double lastLined;     // when it was last on it
     float speedAtLine;
+    bool choreo;          // the bar is the attacker's real blade at its Hit (fight.cpp): judged at any crossing angle
     double resultAt;
     int result;
 };
@@ -102,7 +104,14 @@ void Guard_Update() {
         b.total = w[i].total;
         b.result = st.result;
         b.resultAge = st.result ? (float)(t - st.resultAt) : 0;
-        if (!b.frozen && st.result == 0) {
+        float ga[3], gb[3], gl, gt;
+        st.choreo = st.result == 0 && Fight_EnemyGate(w[i].attacker, ga, gb, &gl, &gt);
+        if (st.choreo) {  // the choreography knows where its blade lands: that is the bar (fight.cpp draws it)
+            memcpy(b.a, ga, 12);
+            memcpy(b.b, gb, 12);
+            b.haveHand = false;
+            b.frozen = gl < kFreeze;
+        } else if (!b.frozen && st.result == 0) {
             float chest[3] = {eye[0], eye[1], eye[2] - 0.4f};
             float ux = ap[0] - chest[0], uy = ap[1] - chest[1], ul = sqrtf(ux * ux + uy * uy);
             if (ul < 0.05f) continue;
@@ -142,7 +151,8 @@ void Guard_Update() {
             if (w[i].secondsLeft < kFreeze) b.frozen = true;
         }
         float speed = 0;
-        bool on = st.result == 0 && Melee_BladeOnBar(b.a, b.b, g_tolerance, kMinCos, &speed);
+        bool on = st.result == 0 && (st.choreo ? Melee_BladeOnBar(b.a, b.b, g_tolerance * 1.5f, 0.0f, &speed)
+                                               : Melee_BladeOnBar(b.a, b.b, g_tolerance, kMinCos, &speed));
         if (on) st.lastLined = t;
         if (on && !st.lined) {
             Log("guard: blade on the bar for %08lX (%.2f s left, %.1f m/s)", w[i].attacker, w[i].secondsLeft, speed);
@@ -163,6 +173,7 @@ int Guard_Bars(GuardBar* out, int max) {
     double t = Now();
     for (auto& kv : g_state) {
         if (n >= max) break;
+        if (kv.second.choreo && !kv.second.result) continue;  // fight.cpp draws the real-blade gate
         if (t - kv.second.seen > 0.2 && !(kv.second.result && t - kv.second.resultAt < 0.6)) continue;
         out[n] = kv.second.bar;
         out[n].result = kv.second.result;
@@ -181,7 +192,7 @@ bool Guard_Judge(DWORD attacker, bool* parry, float* speed, bool* haveBar) {
     if (!*haveBar) return false;
     State& st = it->second;
     if (t - st.lastLined > 0.12) return false;  // a hair of forgiveness: on it in the last 0.12 s
-    Melee_BladeOnBar(st.bar.a, st.bar.b, g_tolerance * 1.5f, 0.5f, speed);
+    Melee_BladeOnBar(st.bar.a, st.bar.b, g_tolerance * 1.5f, st.choreo ? 0.0f : 0.5f, speed);
     // a parry: you swung onto it shortly before the impact, not just held it there
     *parry = t - st.linedSince <= g_parryWindow && (st.speedAtLine >= 1.2f || *speed >= 1.6f);
     return true;

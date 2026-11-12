@@ -18,6 +18,7 @@
 #include "vr.h"
 #include "input.h"
 #include "enginecam.h"
+#include "fight.h"
 #include "combat.h"
 #include "features.h"
 #include "weaponmodels.h"
@@ -651,7 +652,10 @@ static void Install() {
     Pick_Init(g_dir);
     SimCmd_Init(g_dir);
     if (Features().engineCamera) EngineCam_Install();
-    if (Features().combat && Combat_Install()) Anim_Install();
+    if (Features().combat && Combat_Install()) {
+        Anim_Install();
+        Fight_Init(g_dir);
+    }
 }
 
 extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE inst, DWORD ver, REFIID riid, LPVOID* out, LPUNKNOWN outer) {
