@@ -50,7 +50,8 @@ struct State {
     int result;
 };
 std::map<DWORD, State> g_state;
-float g_tolerance = 0.12f, g_parryWindow = 0.3f;
+float g_tolerance = 0.12f, g_parryWindow = 0.3f, g_parryBonus = 0;
+void SetBonusImpl(float s) { g_parryBonus = s < 0 ? 0 : s > 0.12f ? 0.12f : s; }
 bool g_settingsRead;
 
 double Now() { return GetTickCount() / 1000.0; }
@@ -168,6 +169,8 @@ void Guard_Update() {
         it = t - it->second.seen > 1.0 ? g_state.erase(it) : ++it;
 }
 
+void Guard_SetParryBonus(float seconds) { SetBonusImpl(seconds); }
+
 int Guard_Bars(GuardBar* out, int max) {
     int n = 0;
     double t = Now();
@@ -194,7 +197,7 @@ bool Guard_Judge(DWORD attacker, bool* parry, float* speed, bool* haveBar) {
     if (t - st.lastLined > 0.12) return false;  // a hair of forgiveness: on it in the last 0.12 s
     Melee_BladeOnBar(st.bar.a, st.bar.b, g_tolerance * 1.5f, st.choreo ? 0.0f : 0.5f, speed);
     // a parry: you swung onto it shortly before the impact, not just held it there
-    *parry = t - st.linedSince <= g_parryWindow && (st.speedAtLine >= 1.2f || *speed >= 1.6f);
+    *parry = t - st.linedSince <= g_parryWindow + g_parryBonus && (st.speedAtLine >= 1.2f || *speed >= 1.6f);
     return true;
 }
 

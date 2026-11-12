@@ -60,42 +60,57 @@ controller and pull the trigger.
 ## 3. Combat
 
 ### Melee (lightsabers, swords, vibroblades, staffs)
-- **Your blade hits what it touches.** Swing for real (about 2 m/s at the tip — a deliberate swing, not a flick); a lazy
-  touch does nothing and a full swing hits harder. The first cut on an enemy starts the fight with it, even one that
-  hasn't noticed you yet.
-- **When and where to strike:** an enemy within reach that isn't winding up an attack on you is **open** — a soft
-  **gold ring** breathes on its chest and your sword hand gets a gentle pulse. Cut anywhere above its hips (body, arms,
-  head) while it's open and the cut counts: a bright buzz and sparks.
-- **A cut that doesn't count** — at the legs, too slow, or straight into its attack — gives a **dull grey spark and a
-  low double buzz**. Block its attack first, then cut while the ring is up.
-- KotOR's rules still decide how well a hit lands: a cut the enemy's defence beats becomes **blocked into its guard**.
-- Special moves: an overhead chop = Power Attack, a forward thrust = Critical Strike, two quick swings = Flurry (the
-  best rank you have).
+KotOR already choreographs every exchange: when a round starts it decides each blow, picks the matching pair of
+animations for both fighters, and knows when the blades will meet. You play that choreography.
+
+- **Start a fight** by cutting an enemy within reach.
+- **Your gates (gold):** each time your round starts, a gold line appears where your character's own blade will land on
+  the enemy, with a ring closing on the moment of the blow. **Cut through it as the ring closes.** The enemy's own
+  reaction plays in time with your blade.
+  - on time and on the line: **clean** (a flash, the enemy freezes for a beat); right on the beat: **perfect**
+    (extra damage, a bigger flash);
+  - late, early or off the line: **glancing** (half damage, a dull scrape);
+  - not swung at all: **no hit**, and the enemy parries instead.
+- KotOR's dice still decide whether the blow *can* land. When they say it misses, cutting through the gate meets the
+  enemy's parrying blade (**blade on blade**: a clash), which wears down its guard.
+- **The breath beat: choosing a move.** Just before each of your rounds the hilt hums and faint **ghost blades**
+  appear by your hand, one for each special move your character knows. Move your blade into one and hold it (a click,
+  and the hilt glows its colour); the move is used in your next round, with all of KotOR's rules for it:
+
+  | Ghost | Hold your blade | Move |
+  |---|---|---|
+  | orange, a heavy wedge | raised over your shoulder, tip back | Power Attack |
+  | red, a point | drawn back at shoulder height, tip at the enemy | Critical Strike |
+  | blue, three strokes | low at your hip, tip forward | Flurry (its extra attack shows as an extra gate) |
+  | (none) | in front of you, tip up | a normal attack |
+
+  With two weapons, the right-hand blade counts. A double-bladed staff: overhead and level = Power Attack, one end
+  pointed at the enemy = Critical Strike, low and level = Flurry. After a few fights the ghosts fade to a glint
+  (`[Combat] StanceGhosts=0` hides them).
 
 ### Defence
-When an enemy commits to an attack on you:
-- a **chevron** appears over it (an arrow at the edge of your view if it's behind you);
-- a glowing **block bar** appears about half a metre in front of your chest, on its side. The bar follows the enemy's
-  weapon hand while it winds up (a faint line joins them): a level bar above centre = an overhead blow, an upright bar
-  to one side = a side blow. For the last moment it holds still;
-- a **ring** closes onto the bar at the moment the blow lands; the bar turns **gold** just before.
-
-Blue means block or parry it; red means dodge it (a bolt you can't deflect).
-- **Block:** lay your blade along the bar. When it's lined up the bar lights up solid, with a soft tone and a tick in
-  your hand. Keep it there when the blow lands: **BLOCK**. It costs **guard**; block too many in a row and your guard
-  breaks.
-- **Parry:** swing your blade *onto* the bar just before the blow lands: **PARRY** (a white flash). The attacker
-  staggers, it costs nothing, and it gives back a little Force.
-- Not on the bar when it lands: the bar breaks apart in red — **MISSED**, or **TOO EARLY** if you left it before the
-  blow arrived.
+- **A beat early:** an orange ring tightens on an enemy's weapon hand just before it commits to a blow, so you can see
+  who goes next, even in a crowd.
+- **Its line (blue, then gold):** when it commits, a line appears where its blade will be when the blow lands, with a
+  ring closing on that moment. It turns gold for the last moments. (Beasts and droids without a matching animation
+  show the block bar in front of your chest instead.)
+  - **Parry:** swing your blade into its line just before the blow lands: a white flash, the attacker staggers, it
+    costs nothing and gives back a little Force. A parry right on the beat opens a **riposte**: a white line on the
+    attacker for half a beat. Cut through it for a big hit to its guard.
+  - **Block:** hold your blade across the line when the blow lands. It costs **guard** (the four pips by your hilt);
+    with no guard left a block breaks.
+  - Two blows at once can both be parried by one blade across both lines.
+  - Red means you can't block it (no melee weapon in hand): dodge it.
 - **Bolts:** a lightsaber across a blaster bolt's path deflects it; swing into it and it goes back at the shooter.
   Without a saber, lean or duck out of its way as it arrives. Behind cover (the shooter can't see your head or chest),
   bolts hit the wall.
-
-Enemies have a guard too: parries, blocked blows and hits wear it down. When it breaks, the enemy staggers for two
-seconds — it can't attack and your blows become critical threats. Ordinary troopers and beasts break quickly.
-
-At most two enemies attack you at once; the rest wait their turn.
+- Over each enemy you're fighting, a **band** shows its health (red) and its guard (gold segments). Parries, blocks and
+  hits wear the guard down; when it breaks, the band flashes gold and the enemy is **open** for two seconds: it can't
+  attack and your blows are critical threats.
+- Your own health: the edge of your view pulses red when it runs low.
+- Every enemy can attack you, as in the original game (you can hold a crowd while your companions fight).
+- After a fight, a short card shows how it went: parries, gates met, hits taken (`[Combat] FightGrade=0` hides it).
+- **Force on the beat:** a power released in the breath beat or on a blow's moment gives back some Force.
 
 ### Blasters
 - The barrel lies along your pointing ray: what the ring under your pointer marks is what you hit; head shots count
@@ -139,10 +154,15 @@ where it lands gets it. You need grenades in your inventory.
 
 | Section / key | Default | What it does |
 |---|---|---|
-| `[Combat] Mode` | `contact` | `rounds` = the classic version: KotOR's rounds decide hits; your swings only time them |
-| `[Combat] BlockTolerance` | `0.12` | how close your blade must be to the block bar (m) — bigger is easier |
-| `[Combat] ParryWindow` | `0.3` | how long before the blow a swing onto the bar counts as a parry (s) |
-| `[Combat] AttackTokens` | `2` | how many enemies may attack you at once |
+| `[Combat] Mode` | `choreo` | `contact` = the 1.0 version (cuts land on contact, a block bar in front of you); `rounds` = the classic version (KotOR's rounds decide hits, your swings only time them) |
+| `[Combat] GateWindow` | `0.35` | how early a cut through your gate still counts as on time (s); bigger is easier |
+| `[Combat] GateRadius` | `0.22` | how close to the gate your blade must pass (m); bigger is easier, and your attack bonus widens it as you level |
+| `[Combat] BlockTolerance` | `0.12` | how close your blade must be to an enemy's line to block or parry (m) |
+| `[Combat] ParryWindow` | `0.3` | how long before the blow a swing onto its line counts as a parry (s); your Defense widens it |
+| `[Combat] IncomingDamage` | `1.0` | multiplies the weapon damage you take (`0.5` = half) |
+| `[Combat] AttackTokens` | `0` | how many enemies may attack you at once (`0` = no limit, as in the original) |
+| `[Combat] StanceGhosts` | `1` | `0` = no ghost blades in the breath beat |
+| `[Combat] FightGrade` | `1` | `0` = no card after a fight |
 | `[Comfort] SnapTurn` | `0` | `1` = turn in steps instead of smoothly |
 | `[Comfort] SnapAngle` | `30` | snap step (degrees) |
 | `[Comfort] TurnSpeed` | `120` | smooth turn speed (degrees / second) |
@@ -175,7 +195,7 @@ Enemy sighted** if the game keeps pausing when a fight starts (A unpauses).
 | The game freezes in the main menu with Discord open | Make sure `[Compat] DiscordOverlay=0` (default). |
 | Clicks in menus don't land | Point with the **right** controller; menus are on the panel in front of you. |
 | My character won't move after a fight | Push the left stick once (it clears a queued attack). |
-| Combat feels wrong / you'd rather play it the classic way | `[Combat] Mode=rounds`. |
+| Combat feels wrong / you'd rather play it the 1.0 way or the classic way | `[Combat] Mode=contact` or `Mode=rounds`. |
 | Weapons show as simple shapes, no hands | Run the setup again (Install) — the assets weren't built. |
 | The game freezes for a moment, or stops | Another window took the foreground (a pop-up, a notification, another app). KotOR pauses when it isn't the active window: click its window or close the pop-up. |
 | Something else | `<KotOR>\kvr\probe.log` is the mod's log; include it with a bug report. |

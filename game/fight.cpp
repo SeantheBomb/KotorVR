@@ -281,6 +281,7 @@ bool g_active = true;
 float g_window = 0.35f;     // seconds before the Hit a cut through the gate counts
 float g_radius = 0.22f;     // metres from the gate's blade
 float g_incoming = 1.0f;
+float g_abBonus = 0;        // progression: + gate radius from your attack bonus (m)
 bool g_ghosts = true;
 bool g_grade = true;
 int g_bot;
@@ -739,6 +740,9 @@ struct BotPlan {
     float c[3], s[3], u[3];  // sweep centre, sweep direction, blade axis
     double t0, t1;           // sweep from .. to
     bool hold = false;       // a held block (no sweep)
+    DWORD gateAttacker = 0;  // the gate it aims at (followed every frame: gates move with their model until frozen)
+    double gateDue = -1;
+    float jitter[3] = {0, 0, 0};
 };
 BotPlan g_botPlan;
 double g_botNextOpen = 0;
@@ -767,6 +771,7 @@ void BotSweep(const float c[3], const float along[3], double due, double lead) {
     g_botPlan.t1 = due + 0.08;
     g_botPlan.hold = false;
     g_botPlan.active = true;
+    g_botPlan.gateDue = -1;
 }
 
 // a blow with no choreography (monsters): the block bar - swung onto it 0.15 s before the impact (a parry)
@@ -826,7 +831,13 @@ void BotUpdate() {
                 due += (BotRand() - 0.5f) * 0.9f;
                 for (int k = 0; k < 3; k++) c[k] += (BotRand() - 0.5f) * 0.6f;
             }
-            if (!skip) BotSweep(c, along, due, next->mine ? 0.12 : 0.1);
+            if (!skip) {
+                BotSweep(c, along, due, next->mine ? 0.12 : 0.1);
+                g_botPlan.gateAttacker = next->attacker;
+                g_botPlan.gateDue = next->due;
+                float mid[3];
+                for (int k = 0; k < 3; k++) mid[k] = (next->a[k] + next->b[k]) * 0.5f, g_botPlan.jitter[k] = c[k] - mid[k];
+            }
         } else if (!idle && BotBar(t)) {
             // (a monster's blow: no choreography, the block bar - planned in BotBar)
         } else if (enemy && t > g_botNextOpen && !Combat_PlayerAttacking() &&
@@ -841,6 +852,10 @@ void BotUpdate() {
             g_botNextOpen = t + 2.5;
         }
     }
+    if (g_botPlan.active && g_botPlan.gateDue > 0)  // follow the gate: re-aim at where it is now
+        for (const Gate& g : g_gates)
+            if (g.attacker == g_botPlan.gateAttacker && fabs(g.due - g_botPlan.gateDue) < 0.01 && g.havePose)
+                for (int k = 0; k < 3; k++) g_botPlan.c[k] = (g.a[k] + g.b[k]) * 0.5f + g_botPlan.jitter[k];
     float base[3], tip[3];
     if (g_botPlan.active && t >= g_botPlan.t0 - 0.25 && t <= g_botPlan.t1 + 0.1) {
         // wind up 0.4 m before the centre, sweep 0.8 m through it between t0 and t1 (~3.5 m/s), mid-blade on it
@@ -1080,7 +1095,7 @@ bool Fight_PlayerBlowLands(DWORD target, int* ints) {
         if (logged++ < 30) Log("fight: hit timing: engine %+.0f ms vs the table (mean %+.0f over %d)", off * 1000, n ? sum / n * 1000 : 0, n);
     }
     bool credit = Melee_HasCredit(target);
-    bool met = gate->best <= g_radius && gate->bestSpeed >= 1.2f;
+    bool met = gate->best <= g_radius + g_abBonus && gate->bestSpeed >= 1.2f;
     double err = gate->bestAt - (gate->due > 0 ? gate->due : t);
     bool onTime = met && err >= -g_window && err <= 0.12;
     bool perfect = onTime && fabs(err) <= 0.12;
@@ -1229,12 +1244,29 @@ void Fight_Update() {
                 g.react = *(short*)(g.record + 0x12);
                 g.feat = *(WORD*)(g.record + 0x64);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
-            if (g.mine) Log("fight: your roll: attack type %u, dice %d", g.feat, g.dice);
-            if (g.mine && g_queuedFeat && t - g_queuedAt < 4.0) {
+            // progression felt as windows (S12): your attack bonus widens your gates, your Defense the parry window
+            {
+                int ab = 0, def = 0;
+                __try {
+                    ab = *(signed char*)(g.record + 0xC2);
+                    def = *(signed char*)(g.record + 0xF4);
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                if (g.mine && ab > -5 && ab < 60) g_abBonus = Clamp((ab - 5) * 0.006f, 0, 0.09f);
+                if (!g.mine && def > 0 && def < 80) Guard_SetParryBonus((def - 15) * 0.006f);
+                if (g.mine) Log("fight: your roll: attack type %u, dice %d, attack bonus %d", g.feat, g.dice, ab);
+                else {
+                    static int dl;
+                    if (dl++ < 10) Log("fight: their roll on you: dice %d, your defense %d", g.dice, def);
+                }
+            }
+            if (g.mine && g_queuedFeat && t - g_queuedAt < 7.0) {  // KotOR may take it this round or the next
                 bool took = g.feat == g_queuedFeat;
                 if (took) g_stats.featsFired++;
-                Log("fight: feat %u %s by this roll (attack type %u)", g_queuedFeat, took ? "taken" : "NOT taken", g.feat);
+                Log("fight: feat %u %s by this roll (attack type %u)", g_queuedFeat, took ? "taken" : "not yet taken", g.feat);
                 if (took) g_queuedFeat = 0;
+            } else if (g.mine && g_queuedFeat) {
+                Log("fight: feat %u never taken", g_queuedFeat);
+                g_queuedFeat = 0;
             }
         }
         if (g.read && g.due < 0 && t - g.rolled < 0.6) ResolveAnim(g);
@@ -1299,7 +1331,7 @@ void Fight_Update() {
         }
         // a dice miss on your blow never queues damage: judged after its Hit (blade on blade with its parry, or nothing)
         if (g.mine && g.read && g.verdict == 0 && !g.queued && g.due > 0 && t > g.due + 0.2) {
-            bool met = g.best <= g_radius && g.bestSpeed >= 1.2f;
+            bool met = g.best <= g_radius + g_abBonus && g.bestSpeed >= 1.2f;
             if (g.dice == 1) {  // a hit whose damage event we did not see (died, or other)
                 g.verdict = 6;
             } else if (met) {

@@ -23,3 +23,5 @@ int Guard_Bars(GuardBar* out, int max);
 bool Guard_Judge(DWORD attacker, bool* parry, float* speed, bool* haveBar);
 // The outcome, for the feedback (1 blocked, 2 parried, 3 missed).
 void Guard_Result(DWORD attacker, int result);
+// Progression (fight.cpp): your Defense widens the parry window by this much (seconds, capped there).
+void Guard_SetParryBonus(float seconds);

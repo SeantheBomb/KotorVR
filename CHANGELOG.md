@@ -2,6 +2,22 @@
 
 ## 1.0.4 (unreleased)
 
+- **Combat you play in time with KotOR's own choreography** (`[Combat] Mode=choreo`, the new default). KotOR picks a
+  pair of animations for both fighters as each round starts and knows where and when the blades will meet; that is
+  now what you see and play:
+  - your blows show as **gold gates** where your character's blade lands, with a ring closing on the moment: cut
+    through it on time for a clean hit, in sync with the enemy's own reaction; late is glancing, never swung is no hit;
+  - enemy blows show **a beat early** (a ring on their weapon hand) and then as a line where their blade will be when
+    it lands: parry into it, block across it, riposte after a perfect parry;
+  - **special moves by stance:** in the breath beat before your round, ghost blades show the moves you know; hold one
+    and KotOR's real Power Attack, Critical Strike or Flurry is used with all its rules (Flurry's extra attack
+    included), instead of guessing them from the shape of a swing;
+  - one result, one signal: every blow's outcome is a single cue led by the enemy's own animation;
+  - a health and guard band over each enemy, guard pips on your hilt, a red rim at low health, a card after each fight;
+  - no cap on attackers (tanking works again); Force powers released on the beat give back some Force; your attack
+    bonus and Defense widen your windows as you level.
+  The 1.0 rules are `Mode=contact`. The setup builds the animation table from your own game files.
+
 - **The headset's own resolution.** The 3D world is now drawn offscreen at exactly the size your headset asks for
   (e.g. about 2064×2208 per eye on a Quest 3), with its own 4× anti-aliasing, instead of at the size of KotOR's
   window - which KotOR, your monitor and Windows' display scaling all limited (1440×1080 at best on a 1440p monitor

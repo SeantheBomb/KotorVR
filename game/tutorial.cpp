@@ -29,11 +29,11 @@ const Card kCards[] = {
      "Left stick: walk where you look. Right stick: turn (click it to recenter).\n"
      "Point with your right hand and squeeze the grip to use, open or talk to what it marks.\n"
      "Turn your left palm toward your face for the HUD. B is back, A pauses."},
-    {"Combat",
+    {"Combat2",  // (the 1.0.4 combat; "Combat" was the 1.0 card)
      "#Fighting\n"
-     "Swing for real: your blade hits what it touches.\n"
-     "A gold ring on an enemy's chest means it's open - cut above its hips then.\n"
-     "When it attacks, a glowing bar shows the blow: lay your blade along it to block."},
+     "Cut an enemy to start. A gold line shows where your blow lands: cut through it as its ring closes.\n"
+     "A blue line shows where its blade will be: swing into it to parry, hold across it to block.\n"
+     "Before your turn, ghost blades show your moves: hold one for Power Attack, Critical Strike or Flurry."},
     {"Blaster",
      "#Blasters\n"
      "Point and pull the trigger: the barrel follows your aim.\n"

@@ -22,6 +22,7 @@
 // Grenades: squeeze the left grip at your hip (a click: one is in your hand), throw it - the release velocity flies an
 // arc to the floor; the enemy nearest the landing spot (4 m) gets the grenade from the target menu (an entry whose
 // icon names a grenade), so its blast, damage and saves are the game's.
+#include "fight.h"
 #include "force.h"
 
 #include <windows.h>
@@ -177,7 +178,11 @@ void LogMenu(BYTE* blk) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+}  // namespace
+void BeatBonus(const char* what);  // (below: Force on the beat)
+namespace {
 void CastSelf(const int* spells, int n, const char* what) {
+    BeatBonus(what);
     memset(&g_pending, 0, sizeof g_pending);
     for (int i = 0; i < n && i < 8; i++) g_pending.spells[i] = spells[i];
     g_pending.n = n;
@@ -190,6 +195,7 @@ void CastSelf(const int* spells, int n, const char* what) {
 
 void Cast(const int* spells, int n, DWORD target, const char* what) {
     if (!target) return;
+    BeatBonus(what);
     memset(&g_pending, 0, sizeof g_pending);
     for (int i = 0; i < n && i < 8; i++) g_pending.spells[i] = spells[i];
     g_pending.n = n;
@@ -331,7 +337,20 @@ bool Force_MenuHovered() { return g_menuHovered; }
 bool Force_SaberThrown() { return g_thrown; }
 bool Force_GrenadeArmed() { return g_armed; }
 
-void Force_OnParry() {
+// Force on the beat (combat design S11): a power released in the breath beat or on a blow's moment gives back 8% of
+// your Force (twice a parry's) - the rhythm rewards casting with it, not over it
+void RestoreForce(int divisor, const char* why);
+void BeatBonus(const char* what) {
+    if (Fight_OnBeat()) {
+        RestoreForce(12, "on the beat");
+        Cues_Fire(CUE_PERFECT_HIT);
+        Log("force: %s released on the beat", what);
+    }
+}
+
+void Force_OnParry() { RestoreForce(25, "parry"); }
+
+void RestoreForce(int divisor, const char* why) {
     typedef short(__fastcall * GetMaxFpFn)(void* creature, void*);
     __try {
         BYTE* c = (BYTE*)Weapon_PlayerCreature();
@@ -340,11 +359,11 @@ void Force_OnParry() {
         short cur = *(short*)(stats + 0x124);
         short mx = ((GetMaxFpFn)0x4FD490)(c, nullptr);
         if (mx <= 0) return;
-        short gain = (short)(mx / 25 > 1 ? mx / 25 : 1);  // 4% of your Force per parry
+        short gain = (short)(mx / divisor > 1 ? mx / divisor : 1);  // parry 4%, on the beat 8%
         short v = cur + gain > mx ? mx : (short)(cur + gain);
         if (v != cur) {
             *(short*)(stats + 0x124) = v;
-            Log("force: parry restores %d Force (%d / %d)", v - cur, v, mx);
+            Log("force: %s restores %d Force (%d / %d)", why, v - cur, v, mx);
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
