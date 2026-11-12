@@ -1,0 +1,34 @@
+# Choreographed combat on the Endar Spire, the combat bot sloppy: fixture spire_mid (the corridors before the bridge),
+# the two Sith fights on the way to the bridge (tutorial.txt section 5). Keeps you out of the loop: -Cheats turns
+# every auto-pause off and the rig's god mode keeps the player standing.
+#   .\tools\run_sim.ps1 -Script spire_sloppy -Fixture spire_mid -Cheats -AllowDiscord -Force -TimeoutSec 420
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture, as the quicksave)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+pointer world
+aimhand
+game god 1
+game bot 1
+game pos
+walk 60 21.92 81.75 29.18 86.74 29.18 104.20
+opendoor 29.18 106.03 1.3
+fight 120 m01aa
+wait_talk_done 4 120
+game fightsummary
+walk 60 29.18 133.80
+opendoor 29.18 135.62 1.3
+fight 150 m01aa
+wait_talk_done 4 60
+game fightsummary
+game bot 0
+wait 2
+end

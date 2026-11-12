@@ -40,8 +40,10 @@
 #include "cues.h"
 #include "enginecam.h"
 #include "features.h"
+#include "guard.h"
 #include "hover.h"
 #include "melee.h"
+#include "simcmd.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -236,7 +238,7 @@ static void PlayAnimSeen(void* gob, const char** nameSlot, const char* name, flo
             g.at = t;
             g.speed = speed > 0.05f && speed < 5 ? speed : 1;
         }
-        if (g_animLog) {
+        if (g_animLog && n.size() == 4 && n[1] >= '0' && n[1] <= '9' && n[2] != 'r') {  // combat rows only (not the ready loops)
             static int logged;
             if (logged++ < 4000) Log("anim: %p plays %s x%.2f", gob, n.c_str(), speed);
         }
@@ -299,6 +301,7 @@ struct Gate {
     std::string anim;
     const ChoreoAnim* ca = nullptr;
     double start = 0, due = -1;
+    float poseT = 0;     // the animation's time at the blow (its Hit, less a late start)
     float speed = 1;
     float a[3], b[3];    // the gate's blade (world)
     bool havePose = false, frozen = false;
@@ -311,6 +314,7 @@ struct Gate {
     bool queued = false;   // its damage was queued (dice hit landed)
     float predErr = -1;    // table vs live hand at the Hit (m)
     bool logged = false;
+    bool bodyGate = false;  // placed on the target's chest (the swing was cut short)
 };
 std::vector<Gate> g_gates;
 
@@ -410,17 +414,43 @@ void ResolveAnim(Gate& g) {
     }
     auto t = g.anim.empty() ? g_table.end() : g_table.find(g.anim);
     if (t != g_table.end() && t->second.hit > 0) {
+        // the engine lands the blow at roll + Hit (measured: damage is queued ~500 ms after the roll for a g2a1 whose
+        // animation started 45..210 ms after it), so that is the gate's moment; the pose is the animation's at it
         g.ca = &t->second;
-        g.due = g.start + t->second.hit / g.speed;
+        g.due = g.rolled + t->second.hit / g.speed;
+        g.poseT = (float)Clamp((float)((g.due - g.start) * g.speed), 0, t->second.hit);
     }
 }
 
 // the gate's blade in the world now (the attacker's model at its Hit pose); enemy gates stand off your chest
+// your swing cut short by the engine (the hidden body went back to its ready loop): the gate goes across the
+// target's chest, between you - where the cut that lands this blow has to pass
+bool BodyGate(Gate& g) {
+    float tp[3], me[3];
+    if (!CreaturePos(g.target, tp) || !Weapon_PlayerPos(me)) return false;
+    float u[3] = {tp[0] - me[0], tp[1] - me[1], 0};
+    Norm3(u);
+    float side[3] = {u[1], -u[0], 0};
+    float c[3] = {tp[0] - u[0] * 0.25f, tp[1] - u[1] * 0.25f, tp[2] + 1.2f};
+    for (int k = 0; k < 3; k++) {
+        g.a[k] = c[k] - side[k] * 0.28f + (k == 2 ? 0.22f : 0);
+        g.b[k] = c[k] + side[k] * 0.28f - (k == 2 ? 0.22f : 0);
+    }
+    if (!g.bodyGate) Log("fight: your %s was cut short on the model - gate across %08lX's chest", g.anim.c_str(), g.target);
+    g.bodyGate = true;
+    g.havePose = true;
+    return true;
+}
+
 bool PlaceGate(Gate& g) {
     if (!g.ca) return false;
     void* gob = GobOf(g.attacker);
+    if (g.mine && gob && Now() - g.rolled > 0.15) {
+        auto ga = g_gobAnim.find(gob);
+        if (ga != g_gobAnim.end() && ga->second.name != g.anim) return BodyGate(g);
+    }
     float p[3], q[4], pose[15];
-    if (!gob || !ModelWorld(gob, p, q, g_quatOrder) || !ChoreoPose(*g.ca, g.ca->hit, pose)) return false;
+    if (!gob || !ModelWorld(gob, p, q, g_quatOrder) || !ChoreoPose(*g.ca, g.poseT, pose)) return false;
     // the blade's middle stretch (a saber's 0.18..1.16 m): from 20% to 85% of it
     float rb[3], rt[3];
     ToWorld(p, q, pose + 0, rb);
@@ -739,6 +769,38 @@ void BotSweep(const float c[3], const float along[3], double due, double lead) {
     g_botPlan.active = true;
 }
 
+// a blow with no choreography (monsters): the block bar - swung onto it 0.15 s before the impact (a parry)
+bool BotBar(double t) {
+    GuardBar bars[8];
+    int n = Guard_Bars(bars, 8);
+    const GuardBar* best = nullptr;
+    for (int i = 0; i < n; i++)
+        if (!bars[i].result && bars[i].secondsLeft > 0.08f && bars[i].secondsLeft < 0.7f && (!best || bars[i].secondsLeft < best->secondsLeft))
+            best = &bars[i];
+    if (!best) return false;
+    float c[3], along[3];
+    for (int k = 0; k < 3; k++) c[k] = (best->a[k] + best->b[k]) * 0.5f, along[k] = best->b[k] - best->a[k];
+    Norm3(along);
+    double due = t + best->secondsLeft - 0.12;
+    if (g_bot == 1) {
+        if (BotRand() < 0.45f) return true;  // sloppy: lets it through
+        due += (BotRand() - 0.5f) * 0.6f;
+    }
+    // lay the blade along the bar (block) arriving with speed (parry): sweep along its normal into it, end on it
+    float up[3] = {0, 0, 1}, s[3];
+    s[0] = along[1] * up[2] - along[2] * up[1], s[1] = along[2] * up[0] - along[0] * up[2], s[2] = along[0] * up[1] - along[1] * up[0];
+    if (Len3(s) < 0.2f) s[0] = 0, s[1] = 0, s[2] = 1;
+    Norm3(s);
+    memcpy(g_botPlan.c, c, 12);
+    memcpy(g_botPlan.s, s, 12);
+    memcpy(g_botPlan.u, along, 12);
+    g_botPlan.t0 = due - 0.15;
+    g_botPlan.t1 = due + 0.25;
+    g_botPlan.hold = true;
+    g_botPlan.active = true;
+    return true;
+}
+
 void BotUpdate() {
     if (!g_bot) return;
     double t = Now();
@@ -765,21 +827,36 @@ void BotUpdate() {
                 for (int k = 0; k < 3; k++) c[k] += (BotRand() - 0.5f) * 0.6f;
             }
             if (!skip) BotSweep(c, along, due, next->mine ? 0.12 : 0.1);
-        } else if (enemy && t > g_botNextOpen && !Combat_PlayerAttacking()) {
+        } else if (!idle && BotBar(t)) {
+            // (a monster's blow: no choreography, the block bar - planned in BotBar)
+        } else if (enemy && t > g_botNextOpen && !Combat_PlayerAttacking() &&
+                   (e[0] - pp[0]) * (e[0] - pp[0]) + (e[1] - pp[1]) * (e[1] - pp[1]) < 1.9f * 1.9f) {
             // nothing due and no fight going: a cut through its chest starts the fight (the contact rule)
             float c[3] = {e[0], e[1], e[2] + 1.2f}, along[3] = {0, 0, 1};
             BotSweep(c, along, t + 0.25, 0.25);
             g_botNextOpen = t + 1.5;
+        } else if (enemy && t > g_botNextOpen && !Combat_PlayerAttacking() && !SimCmd_Driving()) {
+            // out of reach: close in (the harness autopilot, as the stick would)
+            SimCmd_Do("approach 1.1");
+            g_botNextOpen = t + 2.5;
         }
     }
     float base[3], tip[3];
     if (g_botPlan.active && t >= g_botPlan.t0 - 0.25 && t <= g_botPlan.t1 + 0.1) {
         // wind up 0.4 m before the centre, sweep 0.8 m through it between t0 and t1 (~3.5 m/s), mid-blade on it
         float k = (float)Clamp((float)((t - g_botPlan.t0) / (g_botPlan.t1 - g_botPlan.t0)), 0, 1);
-        float x = -0.4f + 0.8f * k;
-        for (int i = 0; i < 3; i++) {
-            base[i] = g_botPlan.c[i] + g_botPlan.s[i] * x - g_botPlan.u[i] * 0.55f;
-            tip[i] = base[i] + g_botPlan.u[i] * 1.0f;
+        if (g_botPlan.hold) {  // into the bar over its first 40%, then held on it
+            float x = -0.35f + 0.35f * Clamp(k / 0.4f, 0, 1);
+            for (int i = 0; i < 3; i++) {
+                base[i] = g_botPlan.c[i] + g_botPlan.s[i] * x - g_botPlan.u[i] * 0.4f;
+                tip[i] = base[i] + g_botPlan.u[i] * 1.0f;
+            }
+        } else {
+            float x = -0.4f + 0.8f * k;
+            for (int i = 0; i < 3; i++) {
+                base[i] = g_botPlan.c[i] + g_botPlan.s[i] * x - g_botPlan.u[i] * 0.55f;
+                tip[i] = base[i] + g_botPlan.u[i] * 1.0f;
+            }
         }
     } else {
         // between gates: the stance for the coming round (cycling high / thrust / low / neutral), else neutral guard
@@ -1152,6 +1229,7 @@ void Fight_Update() {
                 g.react = *(short*)(g.record + 0x12);
                 g.feat = *(WORD*)(g.record + 0x64);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            if (g.mine) Log("fight: your roll: attack type %u, dice %d", g.feat, g.dice);
             if (g.mine && g_queuedFeat && t - g_queuedAt < 4.0) {
                 bool took = g.feat == g_queuedFeat;
                 if (took) g_stats.featsFired++;
@@ -1176,7 +1254,7 @@ void Fight_Update() {
         if (g.ca && g.due > 0 && g.predErr < 0 && t >= g.due) {
             void* gob = GobOf(g.attacker);
             float live[3], pose[15];
-            if (gob && Anim_PartPos(gob, "rhand", live) && ChoreoPose(*g.ca, g.ca->hit, pose)) {
+            if (gob && !g.bodyGate && Anim_PartPos(gob, "rhand", live) && ChoreoPose(*g.ca, g.poseT, pose)) {
                 for (int o = 0; o < 2; o++) {
                     float p[3], q[4], w[3];
                     if (!ModelWorld(gob, p, q, o)) continue;
@@ -1201,8 +1279,11 @@ void Fight_Update() {
                     }
                 }
                 static int logged;
-                if (logged++ < 40) Log("fight: %s pose check at the Hit: hand %.2f m from the table (%s)", g.mine ? "your" : "their",
-                                       g.predErr, g.anim.c_str());
+                auto ga = g_gobAnim.find(gob);
+                if (logged++ < 60)
+                    Log("fight: %s pose check at the blow: hand %.2f m from the table (%s at %.2f s, dice %d; the model plays %s, %.2f s in)",
+                        g.mine ? "your" : "their", g.predErr, g.anim.c_str(), g.poseT, g.dice,
+                        ga != g_gobAnim.end() ? ga->second.name.c_str() : "?", ga != g_gobAnim.end() ? t - ga->second.at : -1.0);
             }
         }
         if (g.mine && g.havePose && g.verdict == 0 && g_bladeValid && g.due > 0 && t >= g.due - g_window - 0.1 && t <= g.due + 0.15) {

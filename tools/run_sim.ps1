@@ -71,6 +71,8 @@ Copy-Item "$game\swkotor.ini" $iniSnapshot
 if ($Cheats) {
     $ini = Get-Content "$game\swkotor.ini"
     $ini = $ini -replace '^Enemy Sighted=1$', 'Enemy Sighted=0'
+    # no auto-pause of any kind (a companion's death paused the run until someone pressed A - 2026-11-12)
+    $ini = $ini -replace '^(Mine Sighted|Party Killed|New Target Selected|End Of Combat Round|Action Menu)=1$', '$1=0'
     if (-not ($ini -match '^EnableCheats=')) {
         $i = [Array]::IndexOf($ini, '[Game Options]')
         if ($i -ge 0) { $ini = $ini[0..$i] + 'EnableCheats=1' + $ini[($i + 1)..($ini.Count - 1)] }

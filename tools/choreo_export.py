@@ -135,8 +135,36 @@ def main(game, out_path):
             lb, lt = blade(p, "lhand", BLADE0, BLADE1)
             v = rb + rt + rt2 + lb + lt
             lines.append("s %.4f " % t + " ".join("%.4f" % x for x in v))
+    # The defender's reaction (attack record +0x12, an animations.2da row) names the attack it answers when only one
+    # attack row uses it: "react <row> <attack> <kind>" (kind p parry, g dodge, d damage). The engine picks the pair at
+    # the roll, so this tells the mod which animation the attacker is about to play.
+    try:
+        _c, alab, arows = kres.read_2da(kres.extract(game, "animations", "2da"))
+        names = {int(l): r[0].lower() for l, r in zip(alab, arows) if r and r[0]}
+        ccols, clab, crows = kres.read_2da(kres.extract(game, "combatanimations", "2da"))
+        owners = {}
+        for l, r in zip(clab, crows):
+            atk = names.get(int(l))
+            row = dict(zip(ccols, r))
+            if not atk or not row.get("hits") or row["hits"] == "0":
+                continue
+            for k in range(9):
+                for kind, col in (("p", "parry%d" % k), ("g", "dodge%d" % k), ("d", "damage%d" % k)):
+                    v = row.get(col, "")
+                    if v.isdigit():
+                        owners.setdefault(int(v), set()).add((atk, kind))
+        for row in sorted(owners):  # every attack that can draw this reaction (the mod picks by the attacker's class)
+            atks = sorted({a for a, _k in owners[row]})
+            kind = sorted(owners[row])[0][1]
+            if len(atks) <= 12:
+                lines.append("react %d %s %s %s" % (row, ",".join(atks), kind, names.get(row, "?")))
+        for row, nm in sorted(names.items()):
+            if nm in anims:
+                lines.append("row %d %s" % (row, nm))
+    except Exception as e:  # noqa: BLE001
+        print("  (no reaction pairs: %s)" % e)
     open(out_path, "w").write("\n".join(lines) + "\n")
-    print("%d animations -> %s" % (len(anims), out_path))
+    print("%d animations, %d reaction pairs -> %s" % (len(anims), sum(1 for l in lines if l.startswith("react")), out_path))
     for nm in ("c2a1", "c2a4", "c2p1"):
         if nm in anims:
             a = anims[nm]

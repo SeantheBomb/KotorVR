@@ -377,6 +377,12 @@ static void GodTick() {
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+void SimCmd_Do(const char* line) {  // a command from inside the game (the combat bot closes in with "approach")
+    char buf[128];
+    strcpy_s(buf, line);
+    Run(buf);
+}
+
 void SimCmd_Update(BYTE keys[256]) {
     Poll();
     GodTick();

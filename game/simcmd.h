@@ -9,3 +9,5 @@ void SimCmd_Init(const char* gameDir);
 void SimCmd_Update(BYTE keys[256]);
 // The autopilot is steering (the stick's own movement rules stay out of its way).
 bool SimCmd_Driving();
+// Run a command as if the harness sent it (fight.cpp's bot: "approach 1.0").
+void SimCmd_Do(const char* line);
