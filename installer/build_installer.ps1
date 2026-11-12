@@ -16,7 +16,7 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force "$stage\tools", "$stage\docs" | Out-Null
 Copy-Item "$root\game\build\dinput8.dll" $stage
 Copy-Item "$root\host\build\kvr_host.exe", "$root\host\build\openxr_loader.dll", "$root\host\build\kvr_launch.exe" $stage
-foreach ($t in 'kres', 'mdl', 'weapon_export', 'hand_export', 'icon_export', 'sound_export', 'action_names', 'vis_override', 'door_export', 'sig_export', 'camerastyle_override') {
+foreach ($t in 'kres', 'mdl', 'weapon_export', 'hand_export', 'icon_export', 'sound_export', 'action_names', 'vis_override', 'door_export', 'sig_export', 'camerastyle_override', 'mdlanim', 'choreo_export') {
     Copy-Item "$root\tools\$t.py" "$stage\tools"
 }
 Copy-Item "$root\README.md", "$root\LICENSE" "$stage\docs"
@@ -25,7 +25,7 @@ Copy-Item "$root\docs\USER_GUIDE.md", "$root\docs\KNOWN_ISSUES.md", "$root\CHANG
 $work = Join-Path $root 'installer\build\pyi'
 python -m PyInstaller --noconfirm --clean --onefile --console --name KotorVR-Setup `
     --distpath "$root\installer\build\dist" --workpath $work --specpath $work `
-    --add-data "$stage;payload" --hidden-import PIL --hidden-import PIL.Image --hidden-import configparser `
+    --add-data "$stage;payload" --hidden-import PIL --hidden-import PIL.Image --hidden-import configparser --hidden-import numpy `
     "$PSScriptRoot\kotorvr_setup.py" 2>&1 | Select-String -Pattern 'ERROR|completed successfully' | ForEach-Object { $_.Line }
 
 $dist = Join-Path $root 'dist'

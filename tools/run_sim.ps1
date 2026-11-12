@@ -31,6 +31,18 @@ $simhost = Join-Path $root 'host\build\kvr_simhost.exe'
 if (-not (Test-Path $simhost)) { throw "build the simulator first: host\simhost_build.bat" }
 
 # --- preflight -------------------------------------------------------------------------------
+# the install is shared with Kotor Gate's parity harness (tools/parity/run_original.ps1 there): it holds parity.lock
+# while it has swapped the dll / ini / Override for vanilla ones; Override.parity-parked or a parity\ folder left
+# behind means one of its runs was interrupted (fix: run_original.ps1 -RestoreOnly) - never launch over that
+foreach ($p in 'parity.lock', 'Override.parity-parked', 'parity') {
+    if (Test-Path (Join-Path $game $p)) { throw "$game\$p exists: a Kotor Gate parity run is in progress or was interrupted (Kotor Gate: run_original.ps1 -RestoreOnly). Not launching." }
+}
+$lock = Join-Path $game 'kvr.lock'
+if (Test-Path $lock) {
+    $holder = Get-Content $lock -ErrorAction SilentlyContinue
+    if ((Get-Process kvr_simhost -ErrorAction SilentlyContinue) -and -not $Force) { throw "kvr.lock is held ($holder) and a simulator is running" }
+}
+Set-Content $lock "run_sim $name $(Get-Date -Format s) pid $PID" -Encoding ascii
 if (-not $AllowDiscord -and (Get-Process Discord -ErrorAction SilentlyContinue)) {
     throw "Discord is running - its overlay leaks a GL context per frame and kills the game. Quit it first."
 }
@@ -72,8 +84,13 @@ Remove-Item "$game\kvr\simcmd.txt" -ErrorAction SilentlyContinue
 if ($Fixture) {
     $fx = Join-Path $root "fixtures\saves\$Fixture"
     if (-not (Test-Path $fx)) { throw "fixture not found: $fx" }
-    Get-ChildItem "$game\saves" | Remove-Item -Recurse -Force
-    Copy-Item "$fx\*" "$game\saves" -Recurse
+    # beside the personal saves as the quicksave (top row of the Load list), never instead of them: emptying the folder
+    # made Steam Cloud record them as deleted (Kotor Gate, 2026-11-12). The snapshot above puts the folder back after.
+    $quick = Join-Path $game 'saves\000000 - QUICKSAVE'
+    if (Test-Path $quick) { Remove-Item $quick -Recurse -Force }
+    $inner = Get-ChildItem $fx -Directory | Select-Object -First 1
+    New-Item -ItemType Directory -Force $quick | Out-Null
+    Copy-Item "$($inner.FullName)\*" $quick -Recurse
     Write-Host "fixture: $Fixture"
 }
 
@@ -124,6 +141,7 @@ if (-not $KeepGame) {
     }
 }
 Remove-Item "$game\steam_appid.txt" -ErrorAction SilentlyContinue
+Remove-Item $lock -ErrorAction SilentlyContinue
 if (Test-Path "$game\kvr\probe.log") { Copy-Item "$game\kvr\probe.log" (Join-Path $out 'probe.log') }
 $probe = Join-Path $out 'probe.log'
 $stalls = if (Test-Path $probe) { @(Select-String -Path $probe -Pattern 'STALL') } else { @() }

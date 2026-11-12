@@ -326,12 +326,14 @@ class Steps:
         import weapon_export, hand_export, icon_export, sound_export, action_names, vis_override, door_export  # noqa: E401,E501
         import sig_export
         import camerastyle_override
+        import choreo_export
         self.run_exporter("weapons", lambda: weapon_export.main(game, kvr))
         self.run_exporter("hands", lambda: hand_export.main(game, kvr))
         self.run_exporter("action icons", lambda: icon_export.main(game, kvr))
         self.run_exporter("door shapes (pointing at doors)", lambda: door_export.main(game, kvr))
         self.run_exporter("your own weapons' shapes", lambda: sig_export.main(game, kvr))
         self.run_exporter("first-person cameras", lambda: camerastyle_override.install(game))
+        self.run_exporter("combat choreography", lambda: choreo_export.main(game, os.path.join(kvr, "choreo.txt")))
         argv = sys.argv
         try:
             sys.argv = ["sound_export", game]
