@@ -891,7 +891,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     int nb = Features().cues ? Guard_Bars(bars, 8) : 0;
     bool meleeHeld = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
     float openAt[3];
-    bool showOpen = (Fight_Active() ? Fight_OpenEnemy(openAt) != 0 : Melee_OpeningTarget(openAt) != 0) && meleeHeld &&
+    bool showOpen = !Fight_Active() && Melee_OpeningTarget(openAt) != 0 && meleeHeld &&  // (choreo: the band pulses gold)
                     !(hshm && hshm->cinematic) && !Dialogue_Showing();
     float dmgAge = (float)(tnow - g_damageAt), dmgAt[3];
     bool showDamage = dmgAge < 0.4f && CreaturePos(g_damageOn, dmgAt);
@@ -1109,7 +1109,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             p_glEnd();
         }
     }
-    DrawGuardBars(worldView, bars, nb);
+    if (!Fight_Active()) DrawGuardBars(worldView, bars, nb);  // (choreo: fight.cpp draws them as shields)
     if (fightDraw) Fight_Draw(worldView);
     if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
         float pulse = 0.42f;

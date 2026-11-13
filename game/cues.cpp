@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "features.h"
+#include "fight.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -283,6 +284,11 @@ void Cues_Init(const char* gameDir) {
     InitAudio();
 }
 
+// in choreo the blow's own burst and the enemy's reaction lead: the whole-view flash only tints the edge
+static void ViewFlash(float r, float g, float b, float strength, float seconds) {
+    VR_Flash(r, g, b, Fight_Active() && strength < 0.7f ? strength * 0.35f : strength, seconds);
+}
+
 void Cues_Fire(CueEvent e) {
     if (!Features().cues) return;
     static const char* names[CUE_COUNT] = {"block", "perfect block", "dodge", "block failed", "perfect hit",
@@ -293,14 +299,14 @@ void Cues_Fire(CueEvent e) {
     switch (e) {  // haptic: hand 1 = weapon hand (both for two-handed weapons), 2 = both hands
         case CUE_PERFECT_BLOCK:  // crack + ring + a bright blue rim: unmistakable; a clean parry barely moves the blade
             Haptic(0, 1, 1.0f, 0.14f, 320); Haptic(0.15, 1, 0.8f, 0.12f, 160); Flash(1.0f); Spark(1.0f, true);
-            VR_Flash(0.6f, 0.85f, 1.0f, 0.55f, 0.35f); KnockOff(18.0f); break;
+            ViewFlash(0.6f, 0.85f, 1.0f, 0.55f, 0.35f); KnockOff(18.0f); break;
         case CUE_BLOCK:  // a held guard soaks the blow: the blade is shoved hard
-            Haptic(0, 1, 1.0f, 0.15f, 250); Flash(0.85f); Spark(0.85f, true); VR_Flash(0.35f, 0.65f, 1.0f, 0.35f, 0.25f);
+            Haptic(0, 1, 1.0f, 0.15f, 250); Flash(0.85f); Spark(0.85f, true); ViewFlash(0.35f, 0.65f, 1.0f, 0.35f, 0.25f);
             KnockOff(40.0f); break;
-        case CUE_DODGE: Haptic(0, 2, 0.7f, 0.12f, 200); VR_Flash(0.8f, 0.8f, 0.8f, 0.2f, 0.2f); break;
+        case CUE_DODGE: Haptic(0, 2, 0.7f, 0.12f, 200); ViewFlash(0.8f, 0.8f, 0.8f, 0.2f, 0.2f); break;
         case CUE_BLOCK_FAILED: Haptic(0, 1, 0.6f, 0.08f, 80); Haptic(0.14, 1, 0.6f, 0.08f, 80); break;
         case CUE_HURT:  // a heavy thump in both hands and a red pulse at the edge of the view
-            Haptic(0, 2, 1.0f, 0.16f, 55); Haptic(0.18, 2, 0.6f, 0.12f, 45); VR_Flash(0.95f, 0.05f, 0.02f, 0.75f, 0.55f);
+            Haptic(0, 2, 1.0f, 0.16f, 55); Haptic(0.18, 2, 0.6f, 0.12f, 45); ViewFlash(0.95f, 0.05f, 0.02f, 0.75f, 0.55f);
             break;
         case CUE_PERFECT_HIT: Haptic(0, 1, 0.8f, 0.10f, 120); Flash(0.6f); break;
         case CUE_WINDOW_OPEN: Haptic(0, 1, 0.25f, 0.03f, 200); break;
@@ -316,10 +322,10 @@ void Cues_Fire(CueEvent e) {
                 default:  // blades, batons, fists: a hard knock then a short tail
                     Haptic(0, 1, 1.0f, 0.09f, 90); Haptic(0.1, 1, 0.5f, 0.08f, 60); break;
             }
-            Flash(0.8f); Spark(1.0f); VR_Flash(1.0f, 0.8f, 0.55f, 0.12f, 0.12f); break;
+            Flash(0.8f); Spark(1.0f); ViewFlash(1.0f, 0.8f, 0.55f, 0.12f, 0.12f); break;
         case CUE_PERFECT_LANDED:
             Haptic(0, 1, 1.0f, 0.22f, 70); Haptic(0.24, 1, 0.6f, 0.1f, 50); Flash(1.0f); Spark(1.0f);
-            VR_Flash(1.0f, 0.75f, 0.2f, 0.25f, 0.3f); break;
+            ViewFlash(1.0f, 0.75f, 0.2f, 0.25f, 0.3f); break;
         case CUE_FORCE:  // a low surge in the casting (left) hand
             Haptic(0, 0, 0.7f, 0.25f, 50); g_forceAt = Now(); break;
         default: break;
@@ -357,9 +363,13 @@ float Cues_Glow(int hand) {
 
 void Cues_SetWindow(bool open) { g_window = open; }
 
+static bool g_guardLow;
+void Cues_GuardLow(bool low) { g_guardLow = low; }
+
 void Cues_GlowColor(int hand, float rgb[3]) {
     bool tinted = Now() < g_tintUntil;
     for (int i = 0; i < 3; i++) rgb[i] = tinted ? g_tint[i] : 1.0f;
+    if (!tinted && g_guardLow && hand == 1) rgb[1] = 0.4f, rgb[2] = 0.35f;
 }
 
 void Cues_Move(int move) {

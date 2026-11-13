@@ -318,8 +318,10 @@ struct Gate {
     bool queued = false;   // its damage was queued (dice hit landed)
     float predErr = -1;    // table vs live hand at the Hit (m)
     bool logged = false;
-    bool bodyGate = false;
-    bool ranged = false;  // placed on the target's chest (the swing was cut short)
+    bool bodyGate = false;  // placed on the target's chest (the swing was cut short)
+    bool ranged = false;    // a bolt: no gate
+    float cut[3] = {0, 0, -1};  // the strike's direction through the gate (world)
+    bool haveCut = false;
 };
 std::vector<Gate> g_gates;
 
@@ -459,6 +461,9 @@ bool BodyGate(Gate& g) {
         g.a[k] = c[k] - side[k] * 0.28f + (k == 2 ? 0.22f : 0);
         g.b[k] = c[k] + side[k] * 0.28f - (k == 2 ? 0.22f : 0);
     }
+    g.cut[0] = -side[0] * 0.8f, g.cut[1] = -side[1] * 0.8f, g.cut[2] = -0.6f;
+    Norm3(g.cut);
+    g.haveCut = true;
     if (!g.bodyGate) Log("fight: your %s was cut short on the model - gate across %08lX's chest", g.anim.c_str(), g.target);
     g.bodyGate = true;
     ClampReach(g);
@@ -479,6 +484,24 @@ bool PlaceGate(Gate& g) {
     float rb[3], rt[3];
     ToWorld(p, q, pose + 0, rb);
     ToWorld(p, q, pose + 3, rt);
+    {  // which way the blade travels into the blow (the strike arrow): its middle 0.12 s earlier -> now, across the blade
+        float pose0[15], b0[3], t0[3];
+        if (ChoreoPose(*g.ca, g.poseT > 0.12f ? g.poseT - 0.12f : 0, pose0)) {
+            ToWorld(p, q, pose0 + 0, b0);
+            ToWorld(p, q, pose0 + 3, t0);
+            float ax[3] = {rt[0] - rb[0], rt[1] - rb[1], rt[2] - rb[2]};
+            Norm3(ax);
+            float m[3];
+            for (int k = 0; k < 3; k++) m[k] = (rb[k] + rt[k] - b0[k] - t0[k]) * 0.5f;
+            float along = Dot3(m, ax);
+            for (int k = 0; k < 3; k++) m[k] -= ax[k] * along;
+            if (Len3(m) > 0.02f) {
+                Norm3(m);
+                memcpy(g.cut, m, 12);
+                g.haveCut = true;
+            }
+        }
+    }
     for (int k = 0; k < 3; k++) {
         g.a[k] = rb[k] + (rt[k] - rb[k]) * 0.15f;
         g.b[k] = rb[k] + (rt[k] - rb[k]) * 0.85f;
@@ -1022,6 +1045,75 @@ void Glyph(Stance s, const float c[3], float sz, const float rgb[3], float a) {
             gV(x + sz * 0.35f, c[1] + sz, c[2]);
             gV(x + sz * 0.05f, c[1] - sz, c[2]);
         }
+    }
+    gEnd();
+}
+
+// KotOR's own HUD palette: its cyan hologram blue (defend) and its selection gold (strike)
+const float kDefend[3] = {0.35f, 0.78f, 1.0f};
+const float kStrike[3] = {1.0f, 0.82f, 0.32f};
+
+// a tapered arrow from tail to head (eye space), filled tail-first by `fill`, a soft halo; `blink` = act now
+void Arrow(const float tl[3], const float hd[3], float w, const float col[3], float fill, float alpha, bool blink) {
+    float dx = hd[0] - tl[0], dy = hd[1] - tl[1], l = sqrtf(dx * dx + dy * dy) + 1e-5f;
+    float ux = dx / l, uy = dy / l, nx = -uy, ny = ux;
+    float neck[3] = {hd[0] - ux * w * 1.6f, hd[1] - uy * w * 1.6f, hd[2]};
+    float a = alpha * (blink ? 0.8f + 0.2f * (float)sin(Now() * 30) : 1.0f);
+    for (int pass = 0; pass < 2; pass++) {  // the outline (dim), then the filled part (bright)
+        float f = pass ? Clamp(fill, 0, 1) : 1.0f, al = pass ? a : a * 0.3f;
+        float e[3] = {tl[0] + (neck[0] - tl[0]) * f, tl[1] + (neck[1] - tl[1]) * f, tl[2]};
+        gC(col[0], col[1], col[2], al);
+        gBegin(GL_TRIANGLES);
+        gV(tl[0] + nx * w * 0.15f, tl[1] + ny * w * 0.15f, tl[2]);  // the shaft widens toward the head
+        gV(e[0] + nx * w * 0.45f, e[1] + ny * w * 0.45f, e[2]);
+        gV(e[0] - nx * w * 0.45f, e[1] - ny * w * 0.45f, e[2]);
+        gV(tl[0] + nx * w * 0.15f, tl[1] + ny * w * 0.15f, tl[2]);
+        gV(e[0] - nx * w * 0.45f, e[1] - ny * w * 0.45f, e[2]);
+        gV(tl[0] - nx * w * 0.15f, tl[1] - ny * w * 0.15f, tl[2]);
+        if (pass == 0 || fill >= 0.99f) {  // the head
+            gV(neck[0] + nx * w, neck[1] + ny * w, neck[2]);
+            gV(hd[0], hd[1], hd[2]);
+            gV(neck[0] - nx * w, neck[1] - ny * w, neck[2]);
+        }
+        gEnd();
+    }
+}
+
+// the shield: a bar on their blade's line with two edges that close in onto it (frac 1 -> 0), bracketed ends
+void Shield(const float ea[3], const float eb[3], float frac, const float col[3], float alpha, bool solid) {
+    float sx = eb[0] - ea[0], sy = eb[1] - ea[1], sl = sqrtf(sx * sx + sy * sy) + 1e-5f;
+    float nx = -sy / sl, ny = sx / sl, ux = sx / sl, uy = sy / sl;
+    Ribbon(ea, eb, solid ? 0.024f : 0.014f, col[0], col[1], col[2], (solid ? 0.95f : 0.7f) * alpha);
+    Ribbon(ea, eb, 0.05f, col[0], col[1], col[2], 0.12f * alpha);
+    float off = 0.025f + 0.11f * frac;  // the edges converge as the blow comes
+    for (int side = -1; side <= 1; side += 2) {
+        float a0[3] = {ea[0] + nx * off * side + ux * 0.03f, ea[1] + ny * off * side + uy * 0.03f, ea[2]};
+        float a1[3] = {eb[0] + nx * off * side - ux * 0.03f, eb[1] + ny * off * side - uy * 0.03f, eb[2]};
+        Ribbon(a0, a1, 0.004f, col[0], col[1], col[2], 0.6f * alpha);
+    }
+    for (int end = 0; end < 2; end++) {  // [ ] brackets at the ends
+        const float* p = end ? eb : ea;
+        float d = end ? -1.0f : 1.0f;
+        float b0[3] = {p[0] + nx * off, p[1] + ny * off, p[2]}, b1[3] = {p[0] - nx * off, p[1] - ny * off, p[2]};
+        float b2[3] = {b0[0] + ux * 0.03f * d, b0[1] + uy * 0.03f * d, p[2]}, b3[3] = {b1[0] + ux * 0.03f * d, b1[1] + uy * 0.03f * d, p[2]};
+        Ribbon(b0, b1, 0.005f, col[0], col[1], col[2], 0.8f * alpha);
+        Ribbon(b0, b2, 0.005f, col[0], col[1], col[2], 0.8f * alpha);
+        Ribbon(b1, b3, 0.005f, col[0], col[1], col[2], 0.8f * alpha);
+    }
+}
+
+// an outcome burst: short rays flying out (no rings - 2026-11-12: too many circles)
+void Burst(const float e[3], float size, float age, const float col[3], float k) {
+    unsigned seed = (unsigned)(size * 1000) + 7;
+    gBegin(GL_LINES);
+    for (int i = 0; i < 18; i++) {
+        seed = seed * 1103515245u + 12345u;
+        float an = ((seed >> 8) & 0xFFFF) / 65535.0f * 6.2831853f;
+        float r0 = size * (0.2f + age * 1.4f), r1 = r0 + size * 0.35f;
+        gC(col[0], col[1], col[2], k);
+        gV(e[0] + cosf(an) * r0, e[1] + sinf(an) * r0, e[2]);
+        gC(col[0], col[1], col[2], 0);
+        gV(e[0] + cosf(an) * r1, e[1] + sinf(an) * r1, e[2]);
     }
     gEnd();
 }
@@ -1609,32 +1701,34 @@ void Fight_Draw(const float wv[16]) {
             }
         }
         if (ea[2] > -0.1f || eb[2] > -0.1f) continue;
-        float rgb[3];
-        float alpha = 1;
-        bool window = left <= g_window && left > -0.12f;
-        if (resolved) {
-            int v = g.verdict;
-            bool good = v == 1 || v == 2 || v == 5 || v == 7 || v == 8;
-            rgb[0] = good ? 1.0f : 0.6f, rgb[1] = good ? 0.95f : 0.25f, rgb[2] = good ? 0.75f : 0.2f;
-            alpha = 1 - age / 0.45f;
-        } else if (g.mine) {  // your gate: gold, solid in its window
-            rgb[0] = 1.0f, rgb[1] = 0.78f, rgb[2] = 0.3f;
-            alpha = window ? 1.0f : 0.55f;
-        } else {  // theirs: blue, gold in the parry window; red when it can't be blocked (your hands are empty)
-            bool blockable = Weapon_Right() != WC_NONE && Weapon_Profile(Weapon_Right()).melee;
-            rgb[0] = blockable ? (window ? 1.0f : 0.35f) : 1.0f;
-            rgb[1] = blockable ? (window ? 0.85f : 0.65f) : 0.2f;
-            rgb[2] = blockable ? (window ? 0.4f : 1.0f) : 0.15f;
-            alpha = window ? 1.0f : 0.6f;
-        }
-        Ribbon(ea, eb, window ? 0.02f : 0.012f, rgb[0], rgb[1], rgb[2], 0.9f * alpha);
-        Ribbon(ea, eb, 0.04f, rgb[0], rgb[1], rgb[2], 0.15f * alpha);
-        if (!resolved && left > 0) {  // the ring closes onto the gate at its Hit
-            float c[3] = {(ea[0] + eb[0]) * 0.5f, (ea[1] + eb[1]) * 0.5f, (ea[2] + eb[2]) * 0.5f};
-            float half = sqrtf((eb[0] - ea[0]) * (eb[0] - ea[0]) + (eb[1] - ea[1]) * (eb[1] - ea[1])) * 0.5f;
-            float total = (float)(g.due - g.rolled);
-            float frac = total > 0.05f ? Clamp(left / total, 0, 1) : 0;
-            Ring(c, half * (1.0f + 1.6f * frac), rgb[0], rgb[1], rgb[2], 0.65f * alpha);
+        float total = (float)(g.due - g.rolled);
+        float frac = total > 0.05f ? Clamp(left / total, 0, 1) : 0;  // 1 at the roll, 0 at the blow
+        bool now = left <= 0.3f && left > -0.15f;
+        if (g.mine) {
+            // STRIKE: a gold arrow along the cut, crossing the line where the blades meet; it fills tail to point as the
+            // blow comes; the moment your blade crosses it, it locks white (graded at the blow)
+            bool locked = g.lockedAt > 0;
+            float alpha = resolved ? 1 - age / 0.45f : 1;
+            float cw[3] = {(g.a[0] + g.b[0]) * 0.5f, (g.a[1] + g.b[1]) * 0.5f, (g.a[2] + g.b[2]) * 0.5f};
+            float tw[3], hw[3], et[3], eh[3];
+            for (int k = 0; k < 3; k++) tw[k] = cw[k] - g.cut[k] * 0.38f, hw[k] = cw[k] + g.cut[k] * 0.16f;
+            ToEye(wv, tw, et);
+            ToEye(wv, hw, eh);
+            if (et[2] > -0.1f || eh[2] > -0.1f) continue;
+            bool lit = locked || resolved;
+            float col[3] = {lit ? 1.0f : kStrike[0], lit ? 1.0f : kStrike[1], lit ? 0.9f : kStrike[2]};
+            Ribbon(ea, eb, 0.006f, col[0], col[1], col[2], 0.55f * alpha);  // the line it crosses
+            Arrow(et, eh, 0.045f, col, lit ? 1.0f : 1 - frac, alpha, now && !locked);
+        } else {
+            // DEFEND: a cyan shield bar on their blade's line; its two edges close in onto it as the blow comes and it
+            // turns white in the last moment; your blade on it lights it solid
+            float sc = 0, sp = 0;
+            bool held = false;
+            bool on = Guard_Score(g.attacker, &sc, &sp, &held) && (sc >= 0.22f || held);
+            float alpha = resolved ? 1 - age / 0.45f : 1;
+            bool lit = now || on || resolved;
+            float col[3] = {lit ? 0.9f : kDefend[0], lit ? 0.97f : kDefend[1], 1.0f};
+            Shield(ea, eb, frac, col, alpha, on);
         }
     }
     // ---- riposte gates
@@ -1649,22 +1743,68 @@ void Fight_Draw(const float wv[16]) {
         Ribbon(ea, eb, 0.022f, 1.0f, 1.0f, 0.85f, 0.95f);
         Ribbon(ea, eb, 0.05f, 1.0f, 0.9f, 0.5f, 0.2f);
     }
-    // ---- charge glows: a ring closing on the enemy's weapon hand over its last beat before the roll
-    for (auto& kv : g_charge) {
-        if (kv.second.shownAt < 0 || kv.second.predicted < 0) continue;
-        float left = (float)(kv.second.predicted - t);
-        if (left < -0.05f || left > 0.8f) continue;
-        void* gob = GobOf(kv.first);
-        float hand[3], e[3];
-        if (!gob || !Anim_PartPos(gob, "rhand", hand)) {
-            if (!CreaturePos(kv.first, hand)) continue;
-            hand[2] += 1.3f;
+    // ---- beasts and droids without choreography: their block bar, drawn as the same shield
+    {
+        GuardBar bars[8];
+        int nbar = Guard_Bars(bars, 8);
+        for (int i = 0; i < nbar; i++) {
+            const GuardBar& gb = bars[i];
+            float ea[3], eb[3];
+            ToEye(wv, gb.a, ea);
+            ToEye(wv, gb.b, eb);
+            if (ea[2] > -0.1f || eb[2] > -0.1f) continue;
+            float frac = gb.total > 0.05f ? Clamp(gb.secondsLeft / gb.total, 0, 1) : 0;
+            bool now = gb.secondsLeft <= 0.3f;
+            float alpha = gb.result ? Clamp(1 - gb.resultAge / 0.45f, 0, 1) : 1;
+            bool lit = now || gb.lined || gb.result;
+            float col[3] = {lit ? 0.9f : kDefend[0], lit ? 0.97f : kDefend[1], 1.0f};
+            if (gb.result == 3) col[0] = 1.0f, col[1] = 0.35f, col[2] = 0.3f;
+            Shield(ea, eb, gb.result ? 0 : frac, col, alpha, gb.lined || gb.result == 1 || gb.result == 2);
         }
-        ToEye(wv, hand, e);
-        if (e[2] > -0.2f) continue;
-        float k = Clamp(1 - left / 0.75f, 0, 1);
-        Ring(e, 0.05f + 0.25f * (1 - k), 1.0f, 0.55f, 0.2f, 0.25f + 0.6f * k);
-        Ring(e, 0.03f, 1.0f, 0.8f, 0.5f, 0.7f * k);
+    }
+    // ---- the beat queue: over each enemy a marker that fills over the 2 s before its next blow (cyan), and over your
+    // target one for your own next strike (gold); whoever acts next is bright and pulses, the rest are dim
+    {
+        struct Beat {
+            DWORD id;
+            float left, total;
+            bool mine;
+        };
+        Beat beats[12];
+        int nbeat = 0;
+        for (auto& kv : g_charge)
+            if (kv.second.predicted > 0 && nbeat < 12) {
+                float left = (float)(kv.second.predicted - t);
+                if (left > -0.05f && left < 2.0f && Melee_IsEnemy(kv.first)) beats[nbeat++] = {kv.first, left, 2.0f, false};
+            }
+        float myLeft;
+        DWORD me = PlayerId();
+        DWORD tgt = 0;
+        for (const Gate& g : g_gates)
+            if (g.mine) tgt = g.target;
+        if (tgt && Combat_PlayerAttacking() && me && RoundLeft(me, &myLeft) && nbeat < 12 && Melee_IsEnemy(tgt))
+            beats[nbeat++] = {tgt, myLeft, 3.0f, true};
+        int next = -1;
+        for (int i = 0; i < nbeat; i++)
+            if (next < 0 || beats[i].left < beats[next].left) next = i;
+        for (int i = 0; i < nbeat; i++) {
+            void* gob = GobOf(beats[i].id);
+            float top[3], e[3], hh[3];
+            if (!CreaturePos(beats[i].id, top)) continue;
+            top[2] += 2.05f;
+            if (gob && (Anim_PartPos(gob, "headhook", hh) || Anim_PartPos(gob, "head_g", hh))) top[2] = hh[2] + 0.32f;
+            ToEye(wv, top, e);
+            if (e[2] > -0.3f) continue;
+            float k = Clamp(1 - beats[i].left / beats[i].total, 0, 1);
+            bool isNext = i == next;
+            const float* col = beats[i].mine ? kStrike : kDefend;
+            float zs = Clamp(-e[2] / 3.0f, 0.2f, 1.0f);
+            float w = (isNext ? 0.09f : 0.06f) * zs, y = e[1] + (0.05f + (beats[i].mine ? 0.03f : 0)) * zs;
+            float a0[3] = {e[0] - w, y, e[2]}, a1[3] = {e[0] + w, y, e[2]}, m[3] = {e[0] - w + 2 * w * k, y, e[2]};
+            float pulse = isNext ? 0.75f + 0.25f * (float)sin(t * 14) : 0.35f;
+            Ribbon(a0, a1, 0.008f * zs, col[0], col[1], col[2], 0.25f * pulse);
+            Ribbon(a0, m, (isNext ? 0.012f : 0.008f) * zs, col[0], col[1], col[2], pulse);
+        }
     }
     // ---- status bands over engaged enemies: health arc, posture segments, the opening's gold
     {
@@ -1691,23 +1831,25 @@ void Fight_Draw(const float wv[16]) {
                 ToEye(wv, top, e);
                 if (e[2] > -0.3f) continue;
                 short hp, mhp;
-                float w = 0.32f;
+                // the same size in your view at any distance (2026-11-13: up close it filled the view)
+                float zs = Clamp(-e[2] / 3.0f, 0.2f, 1.0f);
+                float w = 0.32f * zs;
                 if (HpOf(id, &hp, &mhp)) {
                     float frac = Clamp(hp / (float)mhp, 0, 1);
                     float a[3] = {e[0] - w, e[1], e[2]}, b[3] = {e[0] + w, e[1], e[2]}, m[3] = {e[0] - w + 2 * w * frac, e[1], e[2]};
-                    Ribbon(a, b, 0.012f, 0.25f, 0.08f, 0.08f, 0.6f);
-                    Ribbon(a, m, 0.012f, 0.95f, 0.25f, 0.18f, 0.95f);
+                    Ribbon(a, b, 0.012f * zs, 0.25f, 0.08f, 0.08f, 0.6f);
+                    Ribbon(a, m, 0.012f * zs, 0.95f, 0.25f, 0.18f, 0.95f);
                 }
                 float v, mx, openLeft;
                 if (Combat_PostureInfo(id, &v, &mx, &openLeft)) {
                     int segs = 6;
-                    float y = e[1] - 0.035f;
+                    float y = e[1] - 0.035f * zs;
                     for (int s = 0; s < segs; s++) {
-                        float x0 = e[0] - w + (2 * w) * s / segs + 0.006f, x1 = e[0] - w + (2 * w) * (s + 1) / segs - 0.006f;
+                        float x0 = e[0] - w + (2 * w) * s / segs + 0.006f * zs, x1 = e[0] - w + (2 * w) * (s + 1) / segs - 0.006f * zs;
                         float fill = Clamp(v / mx * segs - s, 0, 1);
                         float a[3] = {x0, y, e[2]}, b[3] = {x1, y, e[2]};
-                        if (openLeft > 0) Ribbon(a, b, 0.012f, 1.0f, 0.8f, 0.3f, 0.6f + 0.35f * (float)sin(t * 12));
-                        else Ribbon(a, b, 0.009f, 0.95f, 0.85f, 0.55f, 0.15f + 0.75f * fill);
+                        if (openLeft > 0) Ribbon(a, b, 0.012f * zs, 1.0f, 0.8f, 0.3f, 0.6f + 0.35f * (float)sin(t * 12));
+                        else Ribbon(a, b, 0.009f * zs, 0.95f, 0.85f, 0.55f, 0.15f + 0.75f * fill);
                     }
                 }
             }
@@ -1719,8 +1861,7 @@ void Fight_Draw(const float wv[16]) {
         ToEye(wv, f.pos, e);
         if (e[2] > -0.1f) continue;
         float k = 1 - age / 0.6f;
-        Ring(e, f.size * (0.3f + age * 1.5f), f.rgb[0], f.rgb[1], f.rgb[2], 0.9f * k);
-        Ring(e, f.size * (0.15f + age * 0.8f), f.rgb[0], f.rgb[1], f.rgb[2], 0.6f * k);
+        Burst(e, f.size, age, f.rgb, k);
     }
     // ---- stance ghosts in the breath beat (fading to a glint after a few fights)
     if (g_breath && g_ghosts) {
@@ -1755,16 +1896,6 @@ void Fight_Draw(const float wv[16]) {
             if (gLW) gLW(3.0f);
         }
     }
-    // ---- your guard on the hilt: four pips, dimming as it drains
-    if (g_bladeValid) {
-        float g = Combat_Guard();
-        float eb[3];
-        ToEye(wv, g_bladeBase, eb);
-        if (eb[2] < -0.1f)
-            for (int i = 0; i < 4; i++) {
-                float fill = Clamp(g / 25.0f - i, 0, 1);
-                float c[3] = {eb[0] + 0.035f * (i - 1.5f), eb[1] - 0.05f, eb[2]};
-                Ring(c, 0.008f, g < 30 ? 1.0f : 0.5f, g < 30 ? 0.3f : 0.8f, g < 30 ? 0.2f : 1.0f, 0.2f + 0.7f * fill, 8);
-            }
-    }
+    // (your guard: the blade's glow reddens when it runs low - cues.cpp; the pips were one more circle to read)
+    Cues_GuardLow(Combat_Guard() < 30);
 }
