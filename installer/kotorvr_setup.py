@@ -327,6 +327,7 @@ class Steps:
         import sig_export
         import camerastyle_override
         import choreo_export
+        import font_export
         self.run_exporter("weapons", lambda: weapon_export.main(game, kvr))
         self.run_exporter("hands", lambda: hand_export.main(game, kvr))
         self.run_exporter("action icons", lambda: icon_export.main(game, kvr))
@@ -334,6 +335,7 @@ class Steps:
         self.run_exporter("your own weapons' shapes", lambda: sig_export.main(game, kvr))
         self.run_exporter("first-person cameras", lambda: camerastyle_override.install(game))
         self.run_exporter("combat choreography", lambda: choreo_export.main(game, os.path.join(kvr, "choreo.txt")))
+        self.run_exporter("KotOR's own font for the VR panels", lambda: font_export.main(game, kvr))
         argv = sys.argv
         try:
             sys.argv = ["sound_export", game]

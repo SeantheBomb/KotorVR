@@ -704,7 +704,91 @@ static void ReleaseText() {
 }
 
 // A GUI icon exported by tools/icon_export.py (<game>\kvr\icons\<name>.png), as a bitmap of this panel's target.
-static ID2D1Bitmap* PanelIcon(TextPanel& p, const std::string& name) {
+static ID2D1Bitmap* PanelBitmap(TextPanel& p, const std::string& rel);
+static ID2D1Bitmap* PanelIcon(TextPanel& p, const std::string& name) { return PanelBitmap(p, "icons\\" + name); }
+
+// KotOR's own GUI font (tools/font_export.py: <game>\kvr\fonts\kotor.png + kotor.txt, its small-caps menu face):
+// every panel's text is drawn with it (2026-11-12 playtest: the Windows fonts broke the game's look)
+struct KGlyph {
+    float x0, y0, x1, y1;
+    bool ok;
+};
+static KGlyph g_glyph[256];
+static int g_fontState;  // 0 not tried, 1 ready, -1 missing
+static bool FontMetrics() {
+    if (g_fontState) return g_fontState > 0;
+    char dir[260];
+    memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
+    dir[sizeof dir - 1] = 0;
+    char path[MAX_PATH];
+    sprintf_s(path, "%s\\kvr\\fonts\\kotor.txt", dir);
+    FILE* f = nullptr;
+    g_fontState = -1;
+    if (!dir[0] || fopen_s(&f, path, "r") || !f) {
+        printf("text panel: %s missing (tools\\font_export.py) - Windows fonts instead\n", path);
+        return false;
+    }
+    int code;
+    float a, b, c, d;
+    while (fscanf_s(f, "%d %f %f %f %f", &code, &a, &b, &c, &d) == 5)
+        if (code >= 0 && code < 256) g_glyph[code] = {a, b, c, d, true};
+    fclose(f);
+    g_fontState = g_glyph['A'].ok ? 1 : -1;
+    return g_fontState > 0;
+}
+
+// one line of text in KotOR's font, wrapped at maxW; returns its height. Lower case is the face's own small caps.
+static float KText(TextPanel& p, const char* s, float x, float y, float maxW, float px, ID2D1Brush* br, bool center) {
+    ID2D1Bitmap* font = PanelBitmap(p, "fonts\\kotor");
+    if (!font) return 0;
+    const float k = px / 32.0f, gap = 2.0f * k, spaceW = 11.0f * k;
+    auto adv = [&](unsigned char ch) {
+        if (ch == ' ') return spaceW;
+        const KGlyph& g = g_glyph[ch < 127 && g_glyph[ch].ok ? ch : '?'];
+        return (g.x1 - g.x0) * k + gap;
+    };
+    // break into rows of whole words
+    std::vector<std::string> rows(1);
+    float rowW = 0;
+    std::string word;
+    auto flush = [&]() {
+        float ww = 0;
+        for (unsigned char ch : word) ww += adv(ch);
+        if (rowW > 0 && rowW + ww > maxW) {
+            while (!rows.back().empty() && rows.back().back() == ' ') rows.back().pop_back();
+            rows.emplace_back();
+            rowW = 0;
+        }
+        rows.back() += word;
+        rowW += ww;
+        word.clear();
+    };
+    for (const char* c = s; *c; c++) {
+        word += *c;
+        if (*c == ' ') flush();
+    }
+    flush();
+    p.rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);  // (FillOpacityMask needs it)
+    float lineH = px * 1.15f;
+    for (size_t r = 0; r < rows.size(); r++) {
+        float w = 0;
+        for (unsigned char ch : rows[r]) w += adv(ch);
+        float cx = center ? x + (maxW - w) * 0.5f : x;
+        for (unsigned char ch : rows[r]) {
+            if (ch != ' ') {
+                const KGlyph& g = g_glyph[ch < 127 && g_glyph[ch].ok ? ch : '?'];
+                D2D1_RECT_F src = D2D1::RectF(g.x0 + 0.5f, g.y0 + 0.5f, g.x1 - 0.5f, g.y1 - 1.5f);  // (inset: the next cell bled in)
+                D2D1_RECT_F dst = D2D1::RectF(cx + 0.5f * k, y + r * lineH + 0.5f * k, cx + (g.x1 - g.x0 - 0.5f) * k, y + r * lineH + (g.y1 - g.y0 - 1.5f) * k);
+                p.rt->FillOpacityMask(font, br, D2D1_OPACITY_MASK_CONTENT_GRAPHICS, &dst, &src);
+            }
+            cx += adv(ch);
+        }
+    }
+    p.rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    return rows.size() * lineH;
+}
+
+static ID2D1Bitmap* PanelBitmap(TextPanel& p, const std::string& name) {
     auto it = p.icons.find(name);
     if (it != p.icons.end()) return it->second;
     ID2D1Bitmap* bmp = nullptr;
@@ -717,7 +801,7 @@ static ID2D1Bitmap* PanelIcon(TextPanel& p, const std::string& name) {
     memcpy(dir, (const void*)g_shm->gameDir, sizeof dir);
     dir[sizeof dir - 1] = 0;
     wchar_t path[MAX_PATH];
-    swprintf_s(path, L"%hs\\kvr\\icons\\%hs.png", dir, name.c_str());
+    swprintf_s(path, L"%hs\\kvr\\%hs.png", dir, name.c_str());
     IWICBitmapDecoder* dec = nullptr;
     IWICBitmapFrameDecode* fr = nullptr;
     IWICFormatConverter* conv = nullptr;
@@ -744,7 +828,9 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
     ID2D1SolidColorBrush *bg = nullptr, *fg = nullptr, *gold = nullptr, *hl = nullptr, *rule = nullptr;
     // Pickable panels (conversations, the action ring) take KotOR's own GUI look: its dialogue blue, the yellow of a
     // highlighted reply, bold sans text over a dark plate with thin blue rules. Others (instruction cards) stay neutral.
-    bool game = src.pickable != 0 || text[0] == '~';  // '~': the game's look for a label (the hover name)
+    bool kfont = FontMetrics() && PanelBitmap(p, "fonts\\kotor");
+    // (with KotOR's font every panel takes the game's look - the neutral card style was the regression)
+    bool game = kfont || src.pickable != 0 || text[0] == '~';  // '~': the game's look for a label (the hover name)
     if (text[0] == '~') memmove(text, text + 1, strlen(text));
     p.rt->BeginDraw();
     p.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
@@ -783,11 +869,34 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
             }
         }
         const float iconSize = 58, textX = icon ? 36 + iconSize + 16 : 36;
-        int n = MultiByteToWideChar(CP_UTF8, 0, title ? s + 1 : s, -1, wide, 1024);
         IDWriteTextLayout* lay = nullptr;
-        g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? fmtTitle : fmtBody, kTextW - textX - 36.0f, (float)kTextH, &lay);
         DWRITE_TEXT_METRICS m{};
-        if (lay) lay->GetMetrics(&m);
+        if (kfont) {  // measured by drawing nothing: KText's height for this width
+            m.height = 0;
+        } else {
+            int n = MultiByteToWideChar(CP_UTF8, 0, title ? s + 1 : s, -1, wide, 1024);
+            g_dw->CreateTextLayout(wide, n > 0 ? n - 1 : 0, title ? fmtTitle : fmtBody, kTextW - textX - 36.0f, (float)kTextH, &lay);
+            if (lay) lay->GetMetrics(&m);
+        }
+        ID2D1SolidColorBrush* kbr = nullptr;
+        bool klit = line == src.highlight || line == hover;
+        if (kfont) {
+            kbr = klit ? gold : fg;
+            if (icon) p.rt->DrawBitmap(icon, D2D1::RectF(36, y, 36 + iconSize, y + iconSize), klit ? 1.0f : 0.85f);
+            float kh = title ? 38.0f : 32.0f;
+            if (klit) {  // the highlight behind the line, sized after a dry measure
+                float hgt = 0;
+                {
+                    // (a cheap estimate: the row count from the text length; KText wraps the same way)
+                    hgt = kh * 1.15f;
+                }
+                p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(20, y - 4, kTextW - 20.0f, y + hgt + 4), 12, 12), hl);
+            }
+            float textYk = y;
+            if (icon) textYk = y + (iconSize - kh) / 2;
+            m.height = KText(p, title ? s + 1 : s, textX, textYk, kTextW - textX - 36.0f, kh, kbr, title);
+            if (icon && m.height < iconSize) m.height = iconSize;
+        }
         float textY = y;
         if (icon && m.height < iconSize) {  // an icon row: as tall as the icon, text centred beside it
             textY = y + (iconSize - m.height) / 2;
@@ -798,7 +907,7 @@ static void DrawTextPanel(TextPanel& p, const KvrTextPanel& src, int hover) {
             p.lineBottom[line] = y + m.height + 4;
             p.lines = line + 1;
         }
-        bool lit = line == src.highlight || line == hover;
+        bool lit = !kfont && (line == src.highlight || line == hover);
         if (lit)
             p.rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(20, y - 4, kTextW - 20.0f, y + m.height + 4), 12, 12), hl);
         if (lay) {
