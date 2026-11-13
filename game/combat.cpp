@@ -264,6 +264,7 @@ static int LiveAttackersBesides(DWORD aid) {
 // (the bolt and its damage play out first; the next round would otherwise fire on its own).
 static const double kShotClearDelay = 0.9;
 static double g_clearShotAt = -1;
+static double g_shotRolledAt = -10, g_shotLandedAt = -10;
 extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
     *kForcedRoll = 0;
     g_lastAttack = GetTickCount() | 1;
@@ -275,7 +276,10 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
         Log("combat: player attack roll on %08lX", ObjectId(targetObj));  // every one (tests count)
         // one trigger pull, one shot (2026-11-05): a ranged attack queued by a shot would otherwise repeat round after
         // round with the gun idle; Combat_Update clears the queue once this attack has played out
-        if (!Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE) g_clearShotAt = Now() + kShotClearDelay;
+        if (!Weapon_Profile(Weapon_Right()).melee && Weapon_Right() != WC_NONE) {
+            g_clearShotAt = Now() + kShotClearDelay;
+            g_shotRolledAt = Now();
+        }
     }
     if (g_contact) {
         DWORD aid = ObjectId(attacker), tid = ObjectId(targetObj);
@@ -295,7 +299,8 @@ extern "C" void __cdecl Combat_ResolverPre(void* attacker, void* targetObj) {
                 if (round) {
                     BYTE* rec = round + 4 + *(round + 0x96C) * 0x14C;
                     g_playerPending.push_back({rec, tid, Now()});
-                    if (target) Fight_NoteRoll(aid, tid, rec, true, false);
+                    bool melee = Weapon_Right() == WC_NONE || Weapon_Profile(Weapon_Right()).melee;
+                    if (target && melee) Fight_NoteRoll(aid, tid, rec, true, false);  // (shots have no gates)
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
             if (!Fight_Active()) ApplySpecialMove(attacker);  // (choreo: the stance queued the real feat)
@@ -393,6 +398,7 @@ extern "C" void __cdecl Combat_QueuePre(DWORD ms, DWORD caller, DWORD object, DW
     DWORD playerId = ObjectId(Weapon_PlayerCreature());
     if (!playerId) return;
     bool meleeNow = Weapon_Right() == WC_NONE || Weapon_Profile(Weapon_Right()).melee;
+    if (caller == playerId && object != playerId && !meleeNow) g_shotLandedAt = Now();
     if (caller == playerId && object != playerId && g_contact && meleeNow && Fight_PlayerBlowLands(object, ints)) return;
     if (caller == playerId && object != playerId && g_contact) {  // the player's blow / bolt lands now
         float speed = 1;
@@ -719,7 +725,7 @@ bool Combat_AttackWithin(unsigned long ms) {
 // Once per frame: warnings for attacks about to land, the player's rhythm window, stale entries.
 void Combat_Update() {
     double t = Now();
-    if (g_clearShotAt > 0 && t >= g_clearShotAt) {
+    if (g_clearShotAt > 0 && t >= g_clearShotAt && !Combat_ShotPending()) {
         g_clearShotAt = -1;
         if (ActionRing_ClearQueue()) {
             Combat_ResetAttacking();
@@ -756,6 +762,7 @@ void Combat_Update() {
             // (melee only: a blade can be blocked; for a shot this ate the hit's credit and the blow that then landed
             // did no damage - 2026-11-05)
             bool melee = Weapon_Profile(Weapon_Right()).melee || Weapon_Right() == WC_NONE;
+            if (!melee) Log("combat: your shot at %08lX rolled %s (result %d)", pr.target, result == 1 || result == 7 ? "a hit" : "a miss", result);
             if (melee && result == 4 && Melee_HasCredit(pr.target) && !Fight_Active()) {
                 Melee_TakeCredit(pr.target, nullptr, nullptr);
                 HitPosture(pr.target, 20, "blocked your blow");
@@ -847,7 +854,13 @@ void Combat_ResetAttacking() { g_playerRolls[0] = g_playerRolls[1] = -100; }
 // The player's combat round holds the character in place until its timer runs out (KotOR: an attack plays out its
 // round), even with the action queue cleared (2026-11-05: 0.5-1.3 s with the stick pushed away after a strike).
 // Run the timer out so the round ends now (round: [creature + 0x9C8], Timer +0x944, RoundLength +0x94C). A round waiting on the opponent's (Paused +0x958) keeps its timer at 0 regardless.
+bool Combat_ShotPending() {
+    double t = Now();
+    return t - g_shotRolledAt < 1.6 && g_shotLandedAt < g_shotRolledAt;
+}
+
 void Combat_EndPlayerRound() {
+    if (Combat_ShotPending()) return;  // the shot plays out first
     __try {
         BYTE* p = (BYTE*)Weapon_PlayerCreature();
         BYTE* round = p ? *(BYTE**)(p + 0x9C8) : nullptr;

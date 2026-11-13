@@ -109,7 +109,7 @@ animations for both fighters, and knows when the blades will meet. You play that
   attack and your blows are critical threats.
 - Your own health: the edge of your view pulses red when it runs low.
 - Every enemy can attack you, as in the original game (you can hold a crowd while your companions fight).
-- After a fight, a short card shows how it went: parries, gates met, hits taken (`[Combat] FightGrade=0` hides it).
+- `[Combat] FightGrade=1` shows a short card after each fight: parries, gates met, hits taken.
 - **Force on the beat:** a power released in the breath beat or on a blow's moment gives back some Force.
 
 ### Blasters
@@ -162,7 +162,7 @@ where it lands gets it. You need grenades in your inventory.
 | `[Combat] IncomingDamage` | `1.0` | multiplies the weapon damage you take (`0.5` = half) |
 | `[Combat] AttackTokens` | `0` | how many enemies may attack you at once (`0` = no limit, as in the original) |
 | `[Combat] StanceGhosts` | `1` | `0` = no ghost blades in the breath beat |
-| `[Combat] FightGrade` | `1` | `0` = no card after a fight |
+| `[Combat] FightGrade` | `0` | `1` = a short card after each fight |
 | `[Comfort] SnapTurn` | `0` | `1` = turn in steps instead of smoothly |
 | `[Comfort] SnapAngle` | `30` | snap step (degrees) |
 | `[Comfort] TurnSpeed` | `120` | smooth turn speed (degrees / second) |

@@ -315,7 +315,8 @@ struct Gate {
     bool queued = false;   // its damage was queued (dice hit landed)
     float predErr = -1;    // table vs live hand at the Hit (m)
     bool logged = false;
-    bool bodyGate = false;  // placed on the target's chest (the swing was cut short)
+    bool bodyGate = false;
+    bool ranged = false;  // placed on the target's chest (the swing was cut short)
 };
 std::vector<Gate> g_gates;
 
@@ -1011,7 +1012,7 @@ void Fight_Init(const char* gameDir) {
     GetPrivateProfileStringA("Combat", "IncomingDamage", "1.0", v, sizeof v, ini);
     g_incoming = Clamp((float)atof(v), 0.0f, 4.0f);
     g_ghosts = GetPrivateProfileIntA("Combat", "StanceGhosts", 1, ini) != 0;
-    g_grade = GetPrivateProfileIntA("Combat", "FightGrade", 1, ini) != 0;
+    g_grade = GetPrivateProfileIntA("Combat", "FightGrade", 0, ini) != 0;  // (off: it came up mid-fight, 2026-11-12)
     g_bot = GetPrivateProfileIntA("Debug", "Bot", 0, ini);
     g_animLog = GetPrivateProfileIntA("Debug", "AnimLog", 0, ini) != 0;
     sprintf_s(g_statsIni, "%s\\kvr\\fight_stats.ini", gameDir);
@@ -1278,7 +1279,9 @@ void Fight_Update() {
                 g.dice = *(int*)(g.record + 0x5C);
                 g.react = *(short*)(g.record + 0x12);
                 g.feat = *(WORD*)(g.record + 0x64);
+                g.ranged = *(int*)(g.record + 0x40) != 0;
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            if (g.ranged) g.verdict = 6, g.verdictAt = t;  // a bolt: deflect / dodge, no gate
             // progression felt as windows (S12): your attack bonus widens your gates, your Defense the parry window
             {
                 int ab = 0, def = 0;
@@ -1530,8 +1533,13 @@ void Fight_Draw(const float wv[16]) {
     double t = Now();
     if (gLW) gLW(3.0f);
     // ---- gates
-    for (const Gate& g : g_gates) {
-        if (!g.havePose || g.due < 0) continue;
+    for (size_t gi = 0; gi < g_gates.size(); gi++) {
+        const Gate& g = g_gates[gi];
+        if (!g.havePose || g.due < 0 || g.ranged) continue;
+        bool dup = false;  // a double-bladed staff rolls each blade: one gate on screen
+        for (size_t gj = 0; gj < gi; gj++)
+            if (g_gates[gj].attacker == g.attacker && g_gates[gj].target == g.target && fabs(g_gates[gj].due - g.due) < 0.06) dup = true;
+        if (dup) continue;
         float left = (float)(g.due - t);
         bool resolved = g.verdict != 0;
         float age = resolved ? (float)(t - g.verdictAt) : 0;

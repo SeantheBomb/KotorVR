@@ -120,3 +120,46 @@ stick ly=1 for=2
 game moved 1.0
 check_log free_to_move moved~ok 3
 shot moved
+# strafing while shooting (2026-11-12 playtest: every shot fired on the move was cancelled the moment it rolled)
+game faceenemy
+wait 1
+game aimhint
+wait 0.5
+hand_adjust
+wait 0.5
+mark
+stick lx=1 for=0.6
+game faceenemy
+wait 0.4
+game aimhint
+wait 0.3
+hand_adjust
+trigger
+wait 1.8
+stick lx=-1 for=0.6
+game faceenemy
+wait 0.4
+game aimhint
+wait 0.3
+hand_adjust
+trigger
+wait 1.8
+stick lx=1 for=0.6
+game faceenemy
+wait 0.4
+game aimhint
+wait 0.3
+hand_adjust
+trigger
+wait 1.8
+stick lx=-1 for=0.6
+game faceenemy
+wait 0.4
+game aimhint
+wait 0.3
+hand_adjust
+trigger
+wait 1.8
+stick lx=0
+wait 1
+check_since_mark strafe_shot_lands ranged~damage~landed 2

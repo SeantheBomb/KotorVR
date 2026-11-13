@@ -24,6 +24,9 @@ float Combat_Guard();
 void Combat_ResetAttacking();
 // End the player's running combat round now (its timer run out): the stick gets the character back at once.
 void Combat_EndPlayerRound();
+// A shot of yours has rolled but not resolved yet: the stick must not cancel it (2026-11-12: strafing while shooting
+// cancelled every shot the moment it rolled - no ranged damage at all).
+bool Combat_ShotPending();
 
 // An enemy attack on the player, from its roll until just after it lands (the telegraph).
 struct CombatWarning {

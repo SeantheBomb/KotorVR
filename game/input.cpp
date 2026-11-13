@@ -234,7 +234,7 @@ void Input_Update(HWND wnd) {
         {
             static bool stickWas;
             bool stickNow = mag > 0.5f;
-            if (stickNow && !stickWas && Combat_PlayerAttacking() && ActionRing_ClearQueue()) {
+            if (stickNow && !stickWas && Combat_PlayerAttacking() && !Combat_ShotPending() && ActionRing_ClearQueue()) {
                 Combat_ResetAttacking();
                 g_attackWatchAt = -10;
                 Log("input: stick -> queued attack cleared (movement is yours)");
@@ -275,7 +275,7 @@ void Input_Update(HWND wnd) {
             // a round that has only just started takes its timer back on the next tick: end it every frame you steer away
             if (stickNow && g_stickAway) Combat_EndPlayerRound();
             static double lastHeldClear = -10;
-            if (stickNow && g_stickAway && Combat_PlayerAttacking() && now - lastHeldClear > 0.05) {
+            if (stickNow && g_stickAway && Combat_PlayerAttacking() && !Combat_ShotPending() && now - lastHeldClear > 0.05) {
                 lastHeldClear = now;
                 if (ActionRing_ClearQueue()) {
                     Combat_ResetAttacking();
