@@ -8,6 +8,7 @@
 
 #include "../common/kvr_shared.h"
 #include "combat.h"
+#include "fight.h"
 #include "features.h"
 #include "vr.h"
 #include "weapons.h"
@@ -89,7 +90,7 @@ void Tutorial_Update() {
     } else {
         worldSince = -1;
     }
-    if (Weapon_PlayerInCombat()) Show(1);
+    if (Weapon_PlayerInCombat() && !Fight_Active()) Show(1);  // (choreo: shown on the gates themselves, fight.cpp)
     WeaponClass r = Weapon_Right();
     if (r == WC_PISTOL || r == WC_RIFLE || r == WC_REPEATER) Show(2);
 }

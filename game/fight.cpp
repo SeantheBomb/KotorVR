@@ -288,6 +288,20 @@ int g_bot;
 char g_statsIni[MAX_PATH];
 int g_fightsSeen;           // fights so far (stance ghosts fade after a few)
 double g_gradeUntil = -1;   // the exchange grade panel (text slot 3) comes down then
+// Show, don't tell (2026-11-12): the first few of each kind get a ghost blade that performs the move on the real gate,
+// and a two-word label - no cards. Counted in kvr\fight_stats.ini [Tutorial] (delete the section to see them again).
+enum { TUT_STRIKE, TUT_DEFEND, TUT_STANCE };
+const char* kTutKey[3] = {"Strike", "Defend", "Stance"};
+const int kTutShows = 3;
+int g_tut[3];
+double g_tutLabelUntil = -1;
+void TutDone(int kind) {
+    if (g_tut[kind] >= kTutShows) return;
+    g_tut[kind]++;
+    char n[8];
+    sprintf_s(n, "%d", g_tut[kind]);
+    WritePrivateProfileStringA("Tutorial", kTutKey[kind], n, g_statsIni);
+}
 
 // ---------------------------------------------------------------- gates
 struct Gate {
@@ -1049,6 +1063,21 @@ void Glyph(Stance s, const float c[3], float sz, const float rgb[3], float a) {
     gEnd();
 }
 
+// a short label in the world, in the game's own look (text slot 3, KotOR's font)
+void TutLabel(const float world[3], const char* text) {
+    float pos[3];
+    if (!EngineCam_WorldToTracking(world, pos)) return;
+    float head[3];
+    VR_HeadPos(head);
+    float yaw = atan2f(head[0] - pos[0], head[2] - pos[2]);
+    float q[4] = {0, sinf(yaw * 0.5f), 0, cosf(yaw * 0.5f)};
+    char buf[64];
+    sprintf_s(buf, "~%s", text);
+    Hover_Suppress(0.6);
+    VR_ShowText(3, KVR_ANCHOR_WORLD, pos, q, 0.22f, buf, -1);
+    g_tutLabelUntil = Now() + 0.5;
+}
+
 // KotOR's own HUD palette: its cyan hologram blue (defend) and its selection gold (strike)
 const float kDefend[3] = {0.35f, 0.78f, 1.0f};
 const float kStrike[3] = {1.0f, 0.82f, 0.32f};
@@ -1148,6 +1177,7 @@ void Fight_Init(const char* gameDir) {
     g_animLog = GetPrivateProfileIntA("Debug", "AnimLog", 0, ini) != 0;
     sprintf_s(g_statsIni, "%s\\kvr\\fight_stats.ini", gameDir);
     g_fightsSeen = GetPrivateProfileIntA("Fights", "Count", 0, g_statsIni);
+    for (int i = 0; i < 3; i++) g_tut[i] = GetPrivateProfileIntA("Tutorial", kTutKey[i], 0, g_statsIni);
     LoadTable(gameDir);
     if (Combat_Detour(kPlayVA, kPlayOrig, 6, PlayAnimStub, &g_playTramp, "model PlayAnimation"))
         Log("fight: model animations watched");
@@ -1296,6 +1326,7 @@ bool Fight_PlayerBlowLands(DWORD target, int* ints) {
         FireOutcome(target, kind, gate->havePose ? hitAt : nullptr);
     }
     gate->verdict = kind == OC_PERFECT ? 2 : (kind == OC_CLEAN || kind == OC_GOOD) ? 1 : kind == OC_GLANCING ? 3 : 4;
+    if (kind != OC_SKIPPED) TutDone(TUT_STRIKE);
     gate->verdictAt = t;
     g_stats.mine++;
     if (met) g_stats.met++;
@@ -1353,6 +1384,7 @@ void Fight_DefenceResult(DWORD attacker, int result, int damage) {
     } else if (damage > 0) {
         g_stats.hurt++;
     }
+    if (result == 1 || result == 2) TutDone(TUT_DEFEND);
     if (gate) {
         gate->verdict = result == 2 ? 7 : result == 1 ? 8 : 9;
         gate->verdictAt = t;
@@ -1626,6 +1658,7 @@ void Fight_Update() {
                 g_stance = s;
                 g_stanceFlashAt = t;
                 g_stats.stances++;
+                if (s >= ST_HIGH) TutDone(TUT_STANCE);
                 if (s >= ST_HIGH) {
                     WORD feat = g_stanceFeat[s];
                     BYTE key = QueueFeat(feat);
@@ -1647,6 +1680,10 @@ void Fight_Update() {
         if (!fighting) g_stance = ST_NONE;
     }
 
+    if (g_tutLabelUntil > 0 && t > g_tutLabelUntil) {
+        g_tutLabelUntil = -1;
+        VR_HideText(3);
+    }
     if (g_gradeUntil > 0 && t > g_gradeUntil) {
         g_gradeUntil = -1;
         VR_HideText(3);
@@ -1719,6 +1756,20 @@ void Fight_Draw(const float wv[16]) {
             float col[3] = {lit ? 1.0f : kStrike[0], lit ? 1.0f : kStrike[1], lit ? 0.9f : kStrike[2]};
             Ribbon(ea, eb, 0.006f, col[0], col[1], col[2], 0.55f * alpha);  // the line it crosses
             Arrow(et, eh, 0.045f, col, lit ? 1.0f : 1 - frac, alpha, now && !locked);
+            if (g_tut[TUT_STRIKE] < kTutShows && !resolved) {
+                // a ghost blade cuts through it, ending on the beat, again and again until the blow
+                float ph = 1.0f - (float)fmod((g.due - t) / 0.8, 1.0);
+                float ax[3] = {g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]};
+                Norm3(ax);
+                float m[3], gb[3], gt[3], eb2[3], et2[3];
+                for (int k = 0; k < 3; k++) m[k] = cw[k] - g.cut[k] * 0.45f + g.cut[k] * 0.65f * ph;
+                for (int k = 0; k < 3; k++) gb[k] = m[k] - ax[k] * 0.4f, gt[k] = m[k] + ax[k] * 0.4f;
+                ToEye(wv, gb, eb2);
+                ToEye(wv, gt, et2);
+                if (eb2[2] < -0.1f && et2[2] < -0.1f) Ribbon(eb2, et2, 0.012f, 1.0f, 0.95f, 0.8f, 0.45f * (1 - ph * 0.5f));
+                float lp[3] = {cw[0], cw[1], cw[2] + 0.3f};
+                TutLabel(lp, "Cut through");
+            }
         } else {
             // DEFEND: a cyan shield bar on their blade's line; its two edges close in onto it as the blow comes and it
             // turns white in the last moment; your blade on it lights it solid
@@ -1729,6 +1780,29 @@ void Fight_Draw(const float wv[16]) {
             bool lit = now || on || resolved;
             float col[3] = {lit ? 0.9f : kDefend[0], lit ? 0.97f : kDefend[1], 1.0f};
             Shield(ea, eb, frac, col, alpha, on);
+            if (g_tut[TUT_DEFEND] < kTutShows && !resolved) {
+                // a ghost blade swings onto their line and holds there through the blow
+                float ph = Clamp(1.0f - left / 0.6f, 0, 1);
+                float c0[3] = {(g.a[0] + g.b[0]) * 0.5f, (g.a[1] + g.b[1]) * 0.5f, (g.a[2] + g.b[2]) * 0.5f}, eye[3];
+                if (EngineCam_EyeWorld(eye)) {
+                    float toMe[3] = {eye[0] - c0[0], eye[1] - c0[1], 0};
+                    Norm3(toMe);
+                    float ax[3] = {g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]};
+                    Norm3(ax);
+                    // across their blade (perpendicular in the plane facing you)
+                    float up[3] = {0, 0, 1}, cr[3] = {ax[1] * toMe[2] - ax[2] * toMe[1], ax[2] * toMe[0] - ax[0] * toMe[2], ax[0] * toMe[1] - ax[1] * toMe[0]};
+                    if (Len3(cr) < 0.2f) memcpy(cr, up, 12);
+                    Norm3(cr);
+                    float m[3], gb[3], gt[3], e1[3], e2[3];
+                    for (int k = 0; k < 3; k++) m[k] = c0[k] + toMe[k] * 0.35f * (1 - ph);
+                    for (int k = 0; k < 3; k++) gb[k] = m[k] - cr[k] * 0.4f, gt[k] = m[k] + cr[k] * 0.4f;
+                    ToEye(wv, gb, e1);
+                    ToEye(wv, gt, e2);
+                    if (e1[2] < -0.1f && e2[2] < -0.1f) Ribbon(e1, e2, 0.012f, 0.85f, 0.95f, 1.0f, 0.45f);
+                    float lp[3] = {c0[0], c0[1], c0[2] + 0.3f};
+                    TutLabel(lp, "Block it");
+                }
+            }
         }
     }
     // ---- riposte gates
@@ -1866,6 +1940,26 @@ void Fight_Draw(const float wv[16]) {
     // ---- stance ghosts in the breath beat (fading to a glint after a few fights)
     if (g_breath && g_ghosts) {
         float eye[3], f[3], r[3];
+        if (Facing(eye, f, r) && g_tut[TUT_STANCE] < kTutShows) {
+            for (int s2 = ST_HIGH; s2 < ST_COUNT; s2++)
+                if (g_stanceAvail[s2]) {
+                    float h0[3], d0[3], h1[3], d1[3];
+                    StanceGhost(ST_NEUTRAL, eye, f, r, h0, d0);
+                    StanceGhost((Stance)s2, eye, f, r, h1, d1);
+                    float ph = (float)fmod(t / 1.2, 1.0), k2 = ph < 0.6f ? ph / 0.6f : 1.0f;
+                    float hb[3], ht[3], e1[3], e2[3];
+                    for (int k = 0; k < 3; k++) {
+                        hb[k] = h0[k] + (h1[k] - h0[k]) * k2;
+                        ht[k] = hb[k] + (d0[k] + (d1[k] - d0[k]) * k2) * 0.9f;
+                    }
+                    ToEye(wv, hb, e1);
+                    ToEye(wv, ht, e2);
+                    if (e1[2] < -0.05f && e2[2] < -0.05f) Ribbon(e1, e2, 0.012f, 1.0f, 1.0f, 1.0f, 0.4f);
+                    float lp[3] = {h1[0] + f[0] * 0.2f, h1[1] + f[1] * 0.2f, h1[2] + 0.35f};
+                    TutLabel(lp, "Hold a stance");
+                    break;
+                }
+        }
         if (Facing(eye, f, r)) {
             float fade = g_fightsSeen < 5 ? 1.0f : 0.3f;
             for (int s = ST_HIGH; s < ST_COUNT; s++) {

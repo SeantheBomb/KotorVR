@@ -17,6 +17,14 @@
   - no cap on attackers (tanking works again); Force powers released on the beat give back some Force; your attack
     bonus and Defense widen your windows as you level.
   The 1.0 rules are `Mode=contact`. The setup builds the animation table from your own game files.
+- **After the first headset playtest:** every visible attempt at a gate lands, graded perfect / great / good / okay;
+  parries and blocks are scored the same way (a swing through the line a little early counts); gates stay within reach
+  of big enemies; strikes are gold arrows and defence is a blue shield, with a marker over each enemy showing who acts
+  next; a gate turns white the moment your blade crosses it; the first few of each move are shown by a ghost blade
+  instead of a text card; all VR panels use KotOR's own font; the after-fight card is off by default.
+- **Blasters deal damage again when you move:** strafing while shooting cancelled every shot the moment it rolled.
+- **T3-M4 and other droids:** the Force gestures fire their utility devices (shove: Stun Ray, Carbonite Projector,
+  Gravity Generator; lift or hold: Flame Thrower, Oil Slick), and the ring names devices and grenades.
 
 - **The headset's own resolution.** The 3D world is now drawn offscreen at exactly the size your headset asks for
   (e.g. about 2064×2208 per eye on a Quest 3), with its own 4× anti-aliasing, instead of at the size of KotOR's

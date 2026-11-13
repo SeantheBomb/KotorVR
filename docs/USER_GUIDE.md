@@ -64,15 +64,18 @@ KotOR already choreographs every exchange: when a round starts it decides each b
 animations for both fighters, and knows when the blades will meet. You play that choreography.
 
 - **Start a fight** by cutting an enemy within reach.
-- **Your gates (gold):** each time your round starts, a gold line appears where your character's own blade will land on
-  the enemy, with a ring closing on the moment of the blow. **Cut through it as the ring closes.** The enemy's own
-  reaction plays in time with your blade.
-  - on time and on the line: **clean** (a flash, the enemy freezes for a beat); right on the beat: **perfect**
-    (extra damage, a bigger flash);
-  - late, early or off the line: **glancing** (half damage, a dull scrape);
-  - not swung at all: **no hit**, and the enemy parries instead.
+- **Who acts next:** over each enemy, a small marker fills in the two seconds before its next blow (blue); over your
+  target, a gold one fills before your own strike. Whoever is next is brighter and pulses.
+- **Strike (gold arrow):** when your blow comes, a gold arrow shows which way to cut and where, crossing a thin line
+  where the blades meet. It fills from tail to point as the moment comes. **Cut through it along the arrow.** The
+  moment your blade crosses it, it turns white with a tick: that attempt counts.
+  - every visible attempt lands; how close, how well timed and how fast it was sets the grade: **perfect** (extra
+    damage), **great**, **good** or **okay** (lighter, but still a hit). Only a blow you never swing at misses;
+  - gates always sit within your reach, however big the enemy.
 - KotOR's dice still decide whether the blow *can* land. When they say it misses, cutting through the gate meets the
   enemy's parrying blade (**blade on blade**: a clash), which wears down its guard.
+- **Learning it:** the first few times, a ghost blade shows each move on the real gate (cut through, block,
+  hold a stance) with a two-word label. Deleting `kvr\fight_stats.ini` brings the demonstrations back.
 - **The breath beat: choosing a move.** Just before each of your rounds the hilt hums and faint **ghost blades**
   appear by your hand, one for each special move your character knows. Move your blade into one and hold it (a click,
   and the hilt glows its colour); the move is used in your next round, with all of KotOR's rules for it:
@@ -91,14 +94,15 @@ animations for both fighters, and knows when the blades will meet. You play that
 ### Defence
 - **A beat early:** an orange ring tightens on an enemy's weapon hand just before it commits to a blow, so you can see
   who goes next, even in a crowd.
-- **Its line (blue, then gold):** when it commits, a line appears where its blade will be when the blow lands, with a
-  ring closing on that moment. It turns gold for the last moments. (Beasts and droids without a matching animation
-  show the block bar in front of your chest instead.)
-  - **Parry:** swing your blade into its line just before the blow lands: a white flash, the attacker staggers, it
-    costs nothing and gives back a little Force. A parry right on the beat opens a **riposte**: a white line on the
-    attacker for half a beat. Cut through it for a big hit to its guard.
-  - **Block:** hold your blade across the line when the blow lands. It costs **guard** (the four pips by your hilt);
-    with no guard left a block breaks.
+- **Defend (blue shield):** when an enemy commits, a blue bar with bracketed ends sits on the line its blade will
+  take; its two edges close in as the blow comes and it turns white for the last moment. It lights solid while your
+  blade is on it.
+  - **Parry:** swing your blade into it before the blow lands, even a little early: the attacker staggers, it costs
+    nothing and gives back a little Force. A perfect parry opens a **riposte**: a white line on the attacker for half a
+    beat. Cut through it for a big hit to its guard.
+  - **Block:** a slower move onto the line, or holding your blade across it. It costs **guard**; your blade's glow turns
+    red when your guard runs low, and a block with no guard left breaks.
+  - A near miss still softens the blow.
   - Two blows at once can both be parried by one blade across both lines.
   - Red means you can't block it (no melee weapon in hand): dodge it.
 - **Bolts:** a lightsaber across a blaster bolt's path deflects it; swing into it and it goes back at the shooter.

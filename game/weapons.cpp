@@ -886,7 +886,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     float hover[3];
     const KvrShared* hshm = VR_Shared();
     bool showHover = hshm && hshm->input.pointerMode == KVR_POINTER_WORLD && !hshm->cinematic && !hshm->menuOpen &&
-                     !Dialogue_Showing() && HoverPos(hover);
+                     !Dialogue_Showing() && !(Fight_Active() && Weapon_PlayerInCombat()) && HoverPos(hover);  // (no floor ring mid-fight)
     GuardBar bars[8];
     int nb = Features().cues ? Guard_Bars(bars, 8) : 0;
     bool meleeHeld = Weapon_Right() != WC_NONE && kProfiles[Weapon_Right()].melee;
@@ -1079,10 +1079,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             continue;
         }
         float s = parry ? 0.16f : 0.11f;
-        if (Fight_Active() && !w[i].ranged && melee) {  // choreo: the gate on its real blade is the cue (fight.cpp)
-            float ga[3], gb[3], gl, gt;
-            if (Fight_EnemyGate(w[i].attacker, ga, gb, &gl, &gt)) continue;
-        }
+        if (Fight_Active() && !w[i].ranged && melee) continue;  // choreo: its shield and beat marker are the cue (fight.cpp)
         if (left > 0 && (w[i].ranged || !melee)) {  // timing ring: closes from 3.5x onto the chevron at the impact
             // (a blow you can block: the ring closes on its block bar instead)
             float rr = s * (1.0f + 2.5f * frac);
