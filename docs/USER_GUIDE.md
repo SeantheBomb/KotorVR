@@ -59,6 +59,14 @@ controller and pull the trigger.
 
 ## 3. Combat
 
+### Learning the controls
+There are no instruction cards: the first time each thing matters, the game shows it. A trail of chevrons on the floor
+(walk with the left stick), an arc around you (turn with the right stick), brackets on what you point at (grip to
+use it), a label at your left wrist (turn your palm to your face for the HUD), and with a blaster a line from your
+barrel to the enemy (pull the trigger), a label at your first damage burst, and a line to the barrel (hold it with your
+left hand: steadier shots). Each goes away once you've done it; set its `Hint...` key under `[Tutorial]` in `kvr.ini`
+to 0 to see it again.
+
 ### Melee (lightsabers, swords, vibroblades, staffs)
 KotOR already choreographs every exchange: when a round starts it decides each blow, picks the matching pair of
 animations for both fighters, and knows when the blades will meet. You play that choreography.

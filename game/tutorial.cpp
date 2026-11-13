@@ -86,11 +86,11 @@ void Tutorial_Update() {
     static double worldSince = -1;
     if (Weapon_PlayerCreature()) {
         if (worldSince < 0) worldSince = Now();
-        if (Now() - worldSince > 3.0) Show(0);
+        (void)0;  // (the Welcome card became demonstrations: hints.cpp)
     } else {
         worldSince = -1;
     }
     if (Weapon_PlayerInCombat() && !Fight_Active()) Show(1);  // (choreo: shown on the gates themselves, fight.cpp)
     WeaponClass r = Weapon_Right();
-    if (r == WC_PISTOL || r == WC_RIFLE || r == WC_REPEATER) Show(2);
+    (void)r;  // (the Blaster card became demonstrations: hints.cpp)
 }

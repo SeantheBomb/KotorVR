@@ -18,6 +18,7 @@
 #include "vr.h"
 #include "input.h"
 #include "enginecam.h"
+#include "hints.h"
 #include "fight.h"
 #include "combat.h"
 #include "features.h"
@@ -644,6 +645,7 @@ static void Install() {
     }
     WeaponModels_Init(g_dir);
     Cues_Init(g_dir);
+    Hints_Init(g_dir);
     Tutorial_Init(g_dir);
     Dialogue_Install();
     ActionRing_Init(g_dir);

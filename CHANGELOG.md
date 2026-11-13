@@ -22,6 +22,8 @@
   of big enemies; strikes are gold arrows and defence is a blue shield, with a marker over each enemy showing who acts
   next; a gate turns white the moment your blade crosses it; the first few of each move are shown by a ghost blade
   instead of a text card; all VR panels use KotOR's own font; the after-fight card is off by default.
+- **No instruction cards:** the basics (walk, turn, use, the wrist HUD, back) and blasters (fire, damage, brace the
+  barrel) are shown where and when they matter, each with a short label in KotOR's font, until you've done them once.
 - **Blasters deal damage again when you move:** strafing while shooting cancelled every shot the moment it rolled.
 - **T3-M4 and other droids:** the Force gestures fire their utility devices (shove: Stun Ray, Carbonite Projector,
   Gravity Generator; lift or hold: Flame Thrower, Oil Slick), and the ring names devices and grenades.

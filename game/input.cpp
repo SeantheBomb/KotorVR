@@ -27,6 +27,7 @@
 #include "pick.h"
 #include "guard.h"
 #include "fight.h"
+#include "hints.h"
 #include "melee.h"
 #include "force.h"
 #include "tutorial.h"
@@ -204,6 +205,7 @@ void Input_Update(HWND wnd) {
         Melee_Update();
         Guard_Update();
         Fight_Update();
+        Hints_Update(in);
         double now = Gestures_Now();
         if (BYTE k = Fight_TakeKey()) {  // a stance's feat: its column key in KotOR's target action menu
             g_gestureKey = k;

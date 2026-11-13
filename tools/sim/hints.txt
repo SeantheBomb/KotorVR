@@ -1,0 +1,31 @@
+# Choreographed combat on the Endar Spire, the show-dont-tell hints (no fight): fixture spire_mid (the corridors before the bridge),
+# the two Sith fights on the way to the bridge (tutorial.txt section 5). Keeps you out of the loop: -Cheats turns
+# every auto-pause off and the rig's god mode keeps the player standing.
+#   .\tools\run_sim.ps1 -Script spire_perfect -Fixture spire_mid -Cheats -AllowDiscord -Force -TimeoutSec 420
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture, as the quicksave)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+pointer world
+aimhand
+wait 4
+shot h1
+wait 0.5
+shot h2
+stick ly=1 for=2.5
+wait 1
+shot h3
+wait 0.5
+shot h4
+stick rx=1 for=1.2
+wait 1
+shot h5
+end

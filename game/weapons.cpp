@@ -14,6 +14,7 @@
 #include "pick.h"
 #include "guard.h"
 #include "fight.h"
+#include "hints.h"
 
 #include <GL/gl.h>
 #include <cmath>
@@ -485,6 +486,20 @@ static double g_lastFlash = -10;
 static double NowS() { return GetTickCount() / 1000.0; }
 
 float Weapon_SpreadDeg() { return g_spreadDeg; }
+bool Weapon_Foregrip() { return g_foregrip; }
+bool Weapons_LastDamage(unsigned long* target, float* age) {
+    if (g_damageAt < 0) return false;
+    *target = g_damageOn;
+    *age = (float)(NowS() - g_damageAt);
+    return true;
+}
+static float g_leftWorld[3];
+static double g_leftWorldAt = -10;
+bool Weapons_LeftHand(float out[3]) {
+    if (NowS() - g_leftWorldAt > 0.3) return false;
+    memcpy(out, g_leftWorld, 12);
+    return true;
+}
 bool Weapon_Steady() { return g_steadySince >= 0 && NowS() - g_steadySince > 1.0; }
 void Weapons_ChargeNextShot() { g_nextCharged = true; }
 
@@ -877,6 +892,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
             dw[r] = worldView[r * 4 + 0] * de[0] + worldView[r * 4 + 1] * de[1] + worldView[r * 4 + 2] * de[2];
         }
         Melee_SetPalm(o, dw);
+        memcpy(g_leftWorld, o, 12);
+        g_leftWorldAt = NowS();
     }
     bool anyBolt = false;
     for (const Bolt& b : g_bolts)
@@ -896,7 +913,8 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     float dmgAge = (float)(tnow - g_damageAt), dmgAt[3];
     bool showDamage = dmgAge < 0.4f && CreaturePos(g_damageOn, dmgAt);
     bool fightDraw = Fight_Active() && !(hshm && hshm->cinematic) && !Dialogue_Showing();
-    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage && !fightDraw) return;
+    bool hintDraw = Hints_Drawing();
+    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage && !fightDraw && !hintDraw) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -1108,6 +1126,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     }
     if (!Fight_Active()) DrawGuardBars(worldView, bars, nb);  // (choreo: fight.cpp draws them as shields)
     if (fightDraw) Fight_Draw(worldView);
+    if (hintDraw) Hints_Draw(worldView);
     if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
         float pulse = 0.42f;
         if (p_glLineWidth) p_glLineWidth(1.5f);

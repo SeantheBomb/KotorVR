@@ -59,6 +59,12 @@ bool Weapon_Steady();
 void Weapons_ChargeNextShot();
 // The ranged weapon in the right hand: its muzzle and barrel direction in world coordinates (false if none).
 bool Weapons_Barrel(float o[3], float d[3]);
+// The off hand is on the barrel (foregrip) now.
+bool Weapon_Foregrip();
+// The last ranged damage you dealt (the white burst): whom, how long ago (s); false if none yet.
+bool Weapons_LastDamage(unsigned long* target, float* age);
+// The left controller in the world (from the last rendered eye); false when unknown.
+bool Weapons_LeftHand(float out[3]);
 // The player's ranged weapon fired at a world point (KotOR meters): a bolt streaks from the muzzle in your hand to it,
 // with a muzzle flash and recoil. `delay` seconds from now (the shot leaves a moment after the attack roll).
 void Weapons_FireBolt(const float targetWorld[3], float delay);
