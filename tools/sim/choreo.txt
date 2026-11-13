@@ -31,9 +31,29 @@ game faceenemy
 game bot 2
 mark
 check_since_mark first_roll player~attack~roll 30
-wait 10
+wait 4
+shot g1
+wait 0.3
+shot g2
+wait 0.3
+shot g3
+wait 0.3
+shot g4
+wait 0.3
+shot g5
+wait 0.3
+shot g6
+wait 5
 game approach 1.0
-wait 10
+wait 4
+shot g7
+wait 0.25
+shot g8
+wait 0.25
+shot g9
+wait 0.25
+shot g10
+wait 6
 game faceenemy
 game approach 1.0
 wait 10

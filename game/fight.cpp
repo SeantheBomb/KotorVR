@@ -460,17 +460,52 @@ bool PlaceGate(Gate& g) {
         g.a[k] = rb[k] + (rt[k] - rb[k]) * 0.15f;
         g.b[k] = rb[k] + (rt[k] - rb[k]) * 0.85f;
     }
-    if (!g.mine) {  // never inside your head: pushed out to 0.35 m from your chest, toward the attacker
+    if (g.mine) {
+        // your avatar's blade at the blow runs back through your own head and shoulder: the gate is its stretch where
+        // it meets the target - 0.6 m of the blade centred on its closest point to the target's chest, at least 0.45 m
+        // out from your eye
+        float tp[3], eye[3];
+        if (CreaturePos(g.target, tp) && EngineCam_EyeWorld(eye)) {
+            float lo[3] = {tp[0], tp[1], tp[2] + 0.9f}, hi[3] = {tp[0], tp[1], tp[2] + 1.6f};
+            float d[3] = {rt[0] - rb[0], rt[1] - rb[1], rt[2] - rb[2]};
+            float len = Len3(d);
+            Norm3(d);
+            // closest point of the blade to the chest line (sampled)
+            float best = 1e9f, bk = 0.5f;
+            for (int i = 0; i <= 20; i++) {
+                float k = i / 20.0f, p2[3] = {rb[0] + d[0] * len * k, rb[1] + d[1] * len * k, rb[2] + d[2] * len * k};
+                float dd = SegSeg(p2, p2, lo, hi);
+                if (dd < best) best = dd, bk = k;
+            }
+            float c[3] = {rb[0] + d[0] * len * bk, rb[1] + d[1] * len * bk, rb[2] + d[2] * len * bk};
+            float u[3] = {tp[0] - eye[0], tp[1] - eye[1], 0};
+            Norm3(u);
+            float out = (c[0] - eye[0]) * u[0] + (c[1] - eye[1]) * u[1];
+            if (out < 0.45f) c[0] += u[0] * (0.45f - out), c[1] += u[1] * (0.45f - out);
+            for (int k = 0; k < 3; k++) g.a[k] = c[k] - d[k] * 0.3f, g.b[k] = c[k] + d[k] * 0.3f;
+        }
+    }
+    if (!g.mine) {
+        // their blade at the blow often ends inside your head: the gate is its 0.6 m stretch around its closest point
+        // to your chest line, at least 0.45 m out from your eye toward the attacker - where your blade meets it
         float eye[3], ap[3];
         if (EngineCam_EyeWorld(eye) && CreaturePos(g.attacker, ap)) {
-            float chest[3] = {eye[0], eye[1], eye[2] - 0.4f}, mid[3];
-            for (int k = 0; k < 3; k++) mid[k] = (g.a[k] + g.b[k]) * 0.5f;
-            float d = SegSeg(g.a, g.b, chest, chest);
-            float u[3] = {ap[0] - chest[0], ap[1] - chest[1], 0};
+            float lo[3] = {eye[0], eye[1], eye[2] - 0.9f}, hi[3] = {eye[0], eye[1], eye[2] - 0.05f};
+            float d[3] = {rt[0] - rb[0], rt[1] - rb[1], rt[2] - rb[2]};
+            float len = Len3(d);
+            Norm3(d);
+            float best = 1e9f, bk = 0.5f;
+            for (int i = 0; i <= 20; i++) {
+                float k = i / 20.0f, p2[3] = {rb[0] + d[0] * len * k, rb[1] + d[1] * len * k, rb[2] + d[2] * len * k};
+                float dd = SegSeg(p2, p2, lo, hi);
+                if (dd < best) best = dd, bk = k;
+            }
+            float c[3] = {rb[0] + d[0] * len * bk, rb[1] + d[1] * len * bk, rb[2] + d[2] * len * bk};
+            float u[3] = {ap[0] - eye[0], ap[1] - eye[1], 0};
             Norm3(u);
-            if (d < 0.35f)
-                for (int k = 0; k < 2; k++) g.a[k] += u[k] * (0.35f - d), g.b[k] += u[k] * (0.35f - d);
-            (void)mid;
+            float out = (c[0] - eye[0]) * u[0] + (c[1] - eye[1]) * u[1];
+            if (out < 0.45f) c[0] += u[0] * (0.45f - out), c[1] += u[1] * (0.45f - out);
+            for (int k = 0; k < 3; k++) g.a[k] = c[k] - d[k] * 0.3f, g.b[k] = c[k] + d[k] * 0.3f;
         }
     }
     g.havePose = true;
@@ -1504,6 +1539,18 @@ void Fight_Draw(const float wv[16]) {
         float ea[3], eb[3];
         ToEye(wv, g.a, ea);
         ToEye(wv, g.b, eb);
+        {
+            static double lastLog;
+            static int drawn, behind;
+            if (ea[2] > -0.1f || eb[2] > -0.1f) behind++;
+            else drawn++;
+            if (g_animLog && t - lastLog > 2.0 && drawn + behind) {  // ([Debug] AnimLog=1)
+                Log("fight: gates drawn %d, behind the eye %d (last: %s, eye z %.2f / %.2f, %.2f s left)", drawn, behind,
+                    g.mine ? "yours" : "theirs", ea[2], eb[2], left);
+                lastLog = t;
+                drawn = behind = 0;
+            }
+        }
         if (ea[2] > -0.1f || eb[2] > -0.1f) continue;
         float rgb[3];
         float alpha = 1;
@@ -1578,7 +1625,12 @@ void Fight_Draw(const float wv[16]) {
                 if (!CreaturePos(id, p)) continue;
                 float dx = p[0] - pp[0], dy = p[1] - pp[1];
                 if (dx * dx + dy * dy > 12 * 12) continue;
-                float top[3] = {p[0], p[1], p[2] + 2.25f}, e[3];
+                float top[3] = {p[0], p[1], p[2] + 2.05f}, e[3];
+                {  // just over its head (kinrath, droids and children are not 2 m tall)
+                    void* gob = GobOf(id);
+                    float hh[3];
+                    if (gob && (Anim_PartPos(gob, "headhook", hh) || Anim_PartPos(gob, "head_g", hh))) top[2] = hh[2] + 0.32f;
+                }
                 ToEye(wv, top, e);
                 if (e[2] > -0.3f) continue;
                 short hp, mhp;
