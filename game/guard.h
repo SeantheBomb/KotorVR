@@ -25,3 +25,5 @@ bool Guard_Judge(DWORD attacker, bool* parry, float* speed, bool* haveBar);
 void Guard_Result(DWORD attacker, int result);
 // Progression (fight.cpp): your Defense widens the parry window by this much (seconds, capped there).
 void Guard_SetParryBonus(float seconds);
+// choreo (fight.cpp scoring): the best attempt on this blow so far, 0..1, and its blade speed; false without a bar.
+bool Guard_Score(DWORD attacker, float* score, float* speed, bool* heldNow);

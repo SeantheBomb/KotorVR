@@ -33,5 +33,8 @@ float Fight_IncomingDamage();
 bool Fight_OnBeat();
 // A key for input.cpp to tap once (a stance's feat: its action-menu column 1..3), 0 none.
 BYTE Fight_TakeKey();
+// An attempt's score 0..1 from distance (m), time from the blow (s, - early) and blade speed (m/s): shared by your
+// gates and the parry / block judge (guard.cpp).
+float Fight_Score(float d, float dt, float speed);
 // combat.cpp: a posture break opened this enemy (one outcome: the opening).
 void Fight_Opening(DWORD id);

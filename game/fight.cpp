@@ -309,6 +309,9 @@ struct Gate {
     // judging (your gates)
     float best = 99, bestSpeed = 0;
     double bestAt = -10;
+    float score = 0;     // the best attempt so far, 0..1 (Fight_Score)
+    float scoreD = 99, scoreDt = 0, scoreSpeed = 0;
+    double lockedAt = -10;  // the moment an attempt first counted (the gate locks: instant feedback)
     bool touched = false;  // a credited contact on the target inside the window
     int verdict = 0;       // 0 pending, 1 clean, 2 perfect, 3 glancing, 4 skipped, 5 blade on blade (dice miss, met), 6 nothing
     double verdictAt = -10;
@@ -425,6 +428,24 @@ void ResolveAnim(Gate& g) {
 }
 
 // the gate's blade in the world now (the attacker's model at its Hit pose); enemy gates stand off your chest
+// every gate within reach (2026-11-12: the Assault Droid's gates sat up at its own arms): its middle no more than
+// 0.9 m out from your eye (horizontally) and no less than 0.4 m, between hip and eye height - the blow's direction kept
+void ClampReach(Gate& g) {
+    float eye[3];
+    if (!EngineCam_EyeWorld(eye)) return;
+    float c[3] = {(g.a[0] + g.b[0]) * 0.5f, (g.a[1] + g.b[1]) * 0.5f, (g.a[2] + g.b[2]) * 0.5f}, n[3];
+    memcpy(n, c, 12);
+    float hx = c[0] - eye[0], hy = c[1] - eye[1], hd = sqrtf(hx * hx + hy * hy);
+    if (hd > 0.9f) n[0] = eye[0] + hx / hd * 0.9f, n[1] = eye[1] + hy / hd * 0.9f;
+    else if (hd < 0.4f && hd > 0.01f) n[0] = eye[0] + hx / hd * 0.4f, n[1] = eye[1] + hy / hd * 0.4f;
+    n[2] = Clamp(c[2], eye[2] - 1.1f, eye[2] + 0.05f);
+    // a long gate that would poke out of reach: 0.6 m at most
+    float d[3] = {g.b[0] - g.a[0], g.b[1] - g.a[1], g.b[2] - g.a[2]};
+    float len = Len3(d);
+    if (len > 0.6f) for (int k = 0; k < 3; k++) d[k] *= 0.6f / len;
+    for (int k = 0; k < 3; k++) g.a[k] = n[k] - d[k] * 0.5f, g.b[k] = n[k] + d[k] * 0.5f;
+}
+
 // your swing cut short by the engine (the hidden body went back to its ready loop): the gate goes across the
 // target's chest, between you - where the cut that lands this blow has to pass
 bool BodyGate(Gate& g) {
@@ -440,6 +461,7 @@ bool BodyGate(Gate& g) {
     }
     if (!g.bodyGate) Log("fight: your %s was cut short on the model - gate across %08lX's chest", g.anim.c_str(), g.target);
     g.bodyGate = true;
+    ClampReach(g);
     g.havePose = true;
     return true;
 }
@@ -509,6 +531,7 @@ bool PlaceGate(Gate& g) {
             for (int k = 0; k < 3; k++) g.a[k] = c[k] - d[k] * 0.3f, g.b[k] = c[k] + d[k] * 0.3f;
         }
     }
+    ClampReach(g);
     g.havePose = true;
     return true;
 }
@@ -677,9 +700,10 @@ bool HpOf(DWORD id, short* hp, short* maxHp) {
 
 // ---------------------------------------------------------------- outcomes
 enum OutcomeKind { OC_CLEAN = 1, OC_PERFECT, OC_GLANCING, OC_SKIPPED, OC_BLADE_ON_BLADE, OC_NOTHING, OC_PARRIED,
-                   OC_BLOCKED, OC_HURT, OC_OPENING, OC_RIPOSTE };
-const char* kOutcome[] = {"", "clean", "perfect", "glancing", "skipped", "blade on blade", "nothing", "parried",
-                          "blocked", "hurt", "opening", "riposte"};
+                   OC_BLOCKED, OC_HURT, OC_OPENING, OC_RIPOSTE, OC_GOOD };
+// your blows by grade: perfect, great (OC_CLEAN), good, okay (OC_GLANCING) - every visible attempt lands
+const char* kOutcome[] = {"", "great", "perfect", "okay", "skipped", "blade on blade", "nothing", "parried",
+                          "blocked", "hurt", "opening", "riposte", "good"};
 struct Flash {
     float pos[3];
     float rgb[3];
@@ -721,10 +745,15 @@ void FireOutcome(DWORD target, int kind, const float* at) {
             Cues_Fire(CUE_HIT_LANDED);
             FlashAt(p, 1.0f, 0.55f, 0.15f, 0.32f);
             break;
-        case OC_GLANCING:  // no freeze: a scrape, a dull spark
-            Cues_Glance();
-            Cues_Tone("cb_ls_swingshrt1", 0.35f, 0.7f);
-            FlashAt(p, 0.6f, 0.6f, 0.6f, 0.18f);
+        case OC_GOOD:  // it lands: a short freeze, the hit's own sound
+            Anim_HitPause(target, 0.05f);
+            Cues_Fire(CUE_HIT_LANDED);
+            FlashAt(p, 1.0f, 0.6f, 0.25f, 0.24f);
+            break;
+        case OC_GLANCING:  // okay: still a hit you feel (2026-11-12: a visible effort always lands), just lighter
+            Anim_HitPause(target, 0.03f);
+            Cues_Contact(2.5f);
+            FlashAt(p, 0.9f, 0.7f, 0.45f, 0.16f);
             break;
         case OC_BLADE_ON_BLADE:  // its parry met your blade: clash, blue sparks, your blade knocked back
             Cues_Fire(CUE_BLOCK);
@@ -999,6 +1028,16 @@ void Glyph(Stance s, const float c[3], float sz, const float rgb[3], float a) {
 
 }  // namespace
 
+// One attempt's worth, 0..1: how close the blade passed (m), when (s from the blow: - early, + late) and how fast.
+// Forgiving on purpose (2026-11-12): within 8 cm and 0.12 s early to 0.08 s late is full marks; it falls off to
+// nothing at 70 cm and 0.72 s early / 0.2 s late; even a slow, deliberate move earns a quarter of the swing factor.
+float Fight_Score(float d, float dt, float speed) {
+    float p = Clamp(1 - (d - 0.08f) / 0.62f, 0, 1);
+    float tm = dt < -0.12f ? Clamp(1 - (-dt - 0.12f) / 0.6f, 0, 1) : dt > 0.08f ? Clamp(1 - (dt - 0.08f) / 0.12f, 0, 1) : 1;
+    float sw = Clamp((speed - 0.5f) / 1.5f, 0.25f, 1);
+    return p * tm * sw;
+}
+
 // ================================================================ API
 void Fight_Init(const char* gameDir) {
     const char* ini = Features_IniPath();
@@ -1131,19 +1170,20 @@ bool Fight_PlayerBlowLands(DWORD target, int* ints) {
         if (logged++ < 30) Log("fight: hit timing: engine %+.0f ms vs the table (mean %+.0f over %d)", off * 1000, n ? sum / n * 1000 : 0, n);
     }
     bool credit = Melee_HasCredit(target);
-    bool met = gate->best <= g_radius + g_abBonus && gate->bestSpeed >= 1.2f;
-    double err = gate->bestAt - (gate->due > 0 ? gate->due : t);
-    bool onTime = met && err >= -g_window && err <= 0.12;
-    bool perfect = onTime && fabs(err) <= 0.12;
+    // graded on a sliding scale (2026-11-12: "if they made a visible effort to hit the right point, it should always
+    // count"): the best attempt's closeness, timing and swing; a touch on the body counts as an okay at least
+    float sc = gate->score;
+    if ((credit || gate->touched) && sc < 0.2f) sc = 0.2f;
+    if (!gate->havePose && credit) sc = 0.6f;
+    bool met = sc >= 0.25f;
+    double err = gate->scoreDt;
     int kind;
     float k;
-    if (onTime || (credit && !gate->havePose)) {  // (no table pose: a contact in time counts as the gate)
-        kind = perfect ? OC_PERFECT : OC_CLEAN;
-        k = perfect ? 1.15f : 1.0f;
-    } else if (met || credit || gate->touched) {
-        kind = OC_GLANCING;
-        k = 0.5f;
-    } else {
+    if (sc >= 0.8f) kind = OC_PERFECT, k = 1.25f;
+    else if (sc >= 0.55f) kind = OC_CLEAN, k = 1.0f;
+    else if (sc >= 0.3f) kind = OC_GOOD, k = 0.8f;
+    else if (sc > 0.04f) kind = OC_GLANCING, k = 0.6f;
+    else {
         kind = OC_SKIPPED;
         k = 0;
         if (void* gob = GobOf(target)) {  // never swung: no hit, and its flinch becomes a parry
@@ -1157,24 +1197,24 @@ bool Fight_PlayerBlowLands(DWORD target, int* ints) {
     for (int i = 0; i < 15; i++)
         if (ints[i] > 0) ints[i] = (int)(ints[i] * k + 0.5f);
     if (kind != OC_SKIPPED) {
-        Combat_HitPosture(target, kind == OC_PERFECT ? 22.0f : kind == OC_CLEAN ? 12.0f : 4.0f, "your blow");
+        Combat_HitPosture(target, kind == OC_PERFECT ? 22.0f : kind == OC_CLEAN ? 14.0f : kind == OC_GOOD ? 9.0f : 5.0f, "your blow");
         Melee_TakeCredit(target, nullptr, nullptr);
         float hitAt[3];
         for (int i = 0; i < 3; i++) hitAt[i] = gate->havePose ? (gate->a[i] + gate->b[i]) * 0.5f : 0;
         FireOutcome(target, kind, gate->havePose ? hitAt : nullptr);
     }
-    gate->verdict = kind == OC_PERFECT ? 2 : kind == OC_CLEAN ? 1 : kind == OC_GLANCING ? 3 : 4;
+    gate->verdict = kind == OC_PERFECT ? 2 : (kind == OC_CLEAN || kind == OC_GOOD) ? 1 : kind == OC_GLANCING ? 3 : 4;
     gate->verdictAt = t;
     g_stats.mine++;
     if (met) g_stats.met++;
     if (kind == OC_PERFECT) g_stats.perfect++, g_stats.clean++;
-    else if (kind == OC_CLEAN) g_stats.clean++;
+    else if (kind == OC_CLEAN || kind == OC_GOOD) g_stats.clean++;
     else if (kind == OC_GLANCING) g_stats.glancing++;
     else g_stats.skipped++;
     if (met) g_stats.timingErrSum += fabs(err), g_stats.timingN++;
-    Log("gate: yours on %08lX (%s, dice hit) -> %s: %d of %d damage, blade %.2f m from it at %+.0f ms (%.1f m/s)%s",
-        target, gate->anim.empty() ? "?" : gate->anim.c_str(), kOutcome[kind], (int)(dealt * k + 0.5f), dealt,
-        gate->best, err * 1000, gate->bestSpeed, gate->havePose ? "" : " [no pose]");
+    Log("gate: yours on %08lX (%s, dice hit) -> %s (score %.2f): %d of %d damage, best attempt %.2f m from it at %+.0f ms (%.1f m/s)%s",
+        target, gate->anim.empty() ? "?" : gate->anim.c_str(), kOutcome[kind], sc, (int)(dealt * k + 0.5f), dealt,
+        gate->scoreD, err * 1000, gate->scoreSpeed, gate->havePose ? "" : " [no pose]");
     return true;
 }
 
@@ -1195,7 +1235,9 @@ void Fight_DefenceResult(DWORD attacker, int result, int damage) {
         lastParry = t;
         FireOutcome(attacker, OC_PARRIED, gate && gate->havePose ? gate->a : nullptr);
         // a perfect parry (within 0.15 s of the Hit) opens a riposte gate on the next half-beat
-        if (gate && gate->due > 0 && fabs(t - gate->due) < 0.2) {
+        float psc = 0, psp = 0;
+        bool ph = false;
+        if (gate && gate->due > 0 && Guard_Score(attacker, &psc, &psp, &ph) && psc >= 0.8f) {
             float ap[3];
             if (CreaturePos(attacker, ap)) {
                 Riposte r;
@@ -1356,8 +1398,15 @@ void Fight_Update() {
                         ga != g_gobAnim.end() ? ga->second.name.c_str() : "?", ga != g_gobAnim.end() ? t - ga->second.at : -1.0);
             }
         }
-        if (g.mine && g.havePose && g.verdict == 0 && g_bladeValid && g.due > 0 && t >= g.due - g_window - 0.1 && t <= g.due + 0.15) {
+        if (g.mine && g.havePose && g.verdict == 0 && g_bladeValid && g.due > 0 && t >= g.due - 0.8 && t <= g.due + 0.2) {
             float d = SegSeg(g_bladeBase, g_bladeTip, g.a, g.b);
+            float sc = Fight_Score(d - g_abBonus, (float)(t - g.due), g_bladeSpeed);
+            if (sc > g.score) g.score = sc, g.scoreD = d, g.scoreDt = (float)(t - g.due), g.scoreSpeed = g_bladeSpeed;
+            if (g.score >= 0.25f && g.lockedAt < 0) {  // it counts: the gate locks now (a tick, a tone) - graded at the blow
+                g.lockedAt = t;
+                VR_Haptic(1, 0.45f, 0.03f, 240);
+                Cues_Tone("gui_prompt", 0.45f, 1.3f);
+            }
             if (d < g.best) {
                 g.best = d;
                 g.bestAt = t;
@@ -1369,13 +1418,13 @@ void Fight_Update() {
         }
         // a dice miss on your blow never queues damage: judged after its Hit (blade on blade with its parry, or nothing)
         if (g.mine && g.read && g.verdict == 0 && !g.queued && g.due > 0 && t > g.due + 0.2) {
-            bool met = g.best <= g_radius + g_abBonus && g.bestSpeed >= 1.2f;
+            bool met = g.score >= 0.25f || g.touched;
             if (g.dice == 1) {  // a hit whose damage event we did not see (died, or other)
                 g.verdict = 6;
             } else if (met) {
                 g.verdict = 5;
                 g_stats.bladeOnBlade++, g_stats.mine++, g_stats.met++;
-                Combat_HitPosture(g.target, 20, "blade on blade");
+                Combat_HitPosture(g.target, 8 + 16 * g.score, "blade on blade");
                 float c[3];
                 for (int k = 0; k < 3; k++) c[k] = (g.a[k] + g.b[k]) * 0.5f;
                 FireOutcome(g.target, OC_BLADE_ON_BLADE, c);

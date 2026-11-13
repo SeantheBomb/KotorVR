@@ -494,6 +494,22 @@ bool Melee_BladeNear(const float point[3], float radius, float* speed) {
     return false;
 }
 
+float Melee_BladeDist(const float a[3], const float b[3], float* speed) {
+    float best = 99;
+    for (int h = 0; h < 2; h++) {
+        const Blade& bl = g_blade[h];
+        if (!bl.valid || Now() - bl.t > 0.2) continue;
+        float d = SegSeg(bl.base, bl.tip, a, b, nullptr);
+        float sw = SegSeg(bl.prevTip, bl.tip, a, b, nullptr);  // a fast blade passes between frames
+        if (sw < d) d = sw;
+        if (d < best) {
+            best = d;
+            if (speed) *speed = (Now() - bl.maxAt < 0.3) ? bl.maxRecent : bl.speed;
+        }
+    }
+    return best;
+}
+
 bool Melee_BladeCrossesLine(const float a[3], const float b2[3], float radius, float* speed) {
     for (int h = 0; h < 2; h++) {
         const Blade& b = g_blade[h];

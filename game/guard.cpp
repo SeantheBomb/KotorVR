@@ -46,6 +46,8 @@ struct State {
     double lastLined;     // when it was last on it
     float speedAtLine;
     bool choreo;          // the bar is the attacker's real blade at its Hit (fight.cpp): judged at any crossing angle
+    float score;          // the best attempt on it so far (Fight_Score), its blade speed
+    float scoreSpeed;
     double resultAt;
     int result;
 };
@@ -164,12 +166,26 @@ void Guard_Update() {
         }
         st.lined = on;
         b.lined = on;
+        if (st.result == 0) {  // every attempt is scored: closeness to the bar, timing to the blow, the swing
+            float sp = 0, d = Melee_BladeDist(b.a, b.b, &sp);
+            float sc = Fight_Score(d, -w[i].secondsLeft, sp);
+            if (d < 90 && sc > st.score) st.score = sc, st.scoreSpeed = sp;
+        }
     }
     for (auto it = g_state.begin(); it != g_state.end();)
         it = t - it->second.seen > 1.0 ? g_state.erase(it) : ++it;
 }
 
 void Guard_SetParryBonus(float seconds) { SetBonusImpl(seconds); }
+
+bool Guard_Score(DWORD attacker, float* score, float* speed, bool* heldNow) {
+    auto it = g_state.find(attacker);
+    if (it == g_state.end() || Now() - it->second.seen > 0.3) return false;
+    *score = it->second.score + g_parryBonus;  // (Defense widens it)
+    *speed = it->second.scoreSpeed;
+    *heldNow = Now() - it->second.lastLined < 0.12;
+    return true;
+}
 
 int Guard_Bars(GuardBar* out, int max) {
     int n = 0;

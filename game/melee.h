@@ -11,6 +11,8 @@ void Melee_BotBlade(int hand, const float base[3], const float tip[3]);
 void Melee_BotRelease(bool release);
 // The blade now (world): false when there is none this frame.
 bool Melee_BladeNow(int hand, float base[3], float tip[3], float* speed);
+// The nearest blade's distance to a segment (m, either hand, including its sweep since last frame), 99 for none.
+float Melee_BladeDist(const float a[3], const float b[3], float* speed);
 // The blade tip's speed now (m/s), 0 without a blade.
 float Melee_BladeSpeed(int hand);
 // Every attack roll (combat.cpp): who fights whom.

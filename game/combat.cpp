@@ -532,6 +532,26 @@ static bool ContactDefence(void** targetSlot, void* effect, int* ints, int dealt
     float zone[3] = {me[0] + dx * 0.55f, me[1] + dy * 0.55f, me[2] + 1.2f};
     float speed = 0;
     bool parry = false, haveBar = false, onBar = melee && Guard_Judge(attacker, &parry, &speed, &haveBar);
+    float sc = 0, scSpeed = 0;
+    bool held = false;
+    if (Fight_Active() && melee && Guard_Score(attacker, &sc, &scSpeed, &held)) {
+        // forgiving (2026-11-12: "I swear I did it right"): a swing through its line in the last ~0.7 s counts even if
+        // the blade moved on - good and fast = parry, a fair try or a held guard = block, a near miss softens the blow
+        haveBar = true;
+        if (sc >= 0.5f && scSpeed >= 1.2f) onBar = true, parry = true, speed = scSpeed;
+        else if (sc >= 0.22f || held) onBar = true, parry = false;
+        else if (sc > 0.04f) {
+            float keep = 1.0f - sc * 2.5f;  // 0.04 -> 90% of it, 0.22 -> 45%
+            for (int i = 0; i < 15; i++)
+                if (ints[i] > 0) ints[i] = max(1, (int)(ints[i] * keep + 0.5f));
+            Log("combat: near miss on %08lX's blow (score %.2f): %.0f%% of it lands", attacker, sc, keep * 100);
+            dealt = (int)(dealt * keep + 0.5f);
+            onBar = false;
+        } else {
+            onBar = false;
+        }
+        Log("combat: defence score %.2f (%.1f m/s%s) -> %s", sc, scSpeed, held ? ", held" : "", parry ? "parry" : onBar ? "block" : "hit");
+    }
     if (melee && !haveBar && Melee_BladeNear(zone, g_parryZone, &speed)) {
         onBar = true;
         parry = speed >= 1.6f;  // moved into the blow, not just held there
