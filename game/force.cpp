@@ -159,6 +159,38 @@ BYTE SelectGrenade(BYTE* blk, char* name, int cap) {
     return 0;
 }
 
+// A droid has no Force: the same gestures fire its utility devices (2026-11-12: T3-M4's Stun Ray was out of reach).
+// A shove (Push) prefers the Stun Ray, Carbonite Projector, Gravity Generator, Shield Disruptor; a lift or a hold
+// (Choke, Stun) the Flame Thrower, Oil Slick, then the rest; the best variant first (icons ii_drdutldev_NNN).
+BYTE SelectDevice(BYTE* blk, const char* what, char* name, int cap) {
+    static const int kShove[] = {2, 1, 9, 8, 11, 10, 4, 3, 7, 6, 5};
+    static const int kLift[] = {7, 6, 5, 2, 1, 9, 8, 11, 10, 4, 3};
+    const int* order = what && (strstr(what, "Push") || strstr(what, "Wave") || strstr(what, "Whirlwind")) ? kShove : kLift;
+    __try {
+        for (int o = 0; o < 11; o++) {
+            for (int c = 0; c < 3; c++) {
+                BYTE* ents = *(BYTE**)(blk + c * 0xC);
+                int count = *(int*)(blk + c * 0xC + 4);
+                for (int i = 0; ents && i < count && i < 24; i++) {
+                    char icon[17];
+                    memcpy(icon, ents + i * 0x38 + 0x20, 16);
+                    icon[16] = 0;
+                    for (char* p = icon; *p; p++) *p = (char)tolower((unsigned char)*p);
+                    const char* d = strstr(icon, "drdutldev_");
+                    if (!d || atoi(d + 10) != order[o]) continue;
+                    int id = *(int*)(ents + i * 0x38 + 8);
+                    int who = *(signed char*)(blk + 0x1AEA);
+                    *(int*)(blk + (c + (who + 3) * 3) * 4) = id;
+                    strncpy_s(name, cap, icon, _TRUNCATE);
+                    static const BYTE kKeys[3] = {0x02, 0x03, 0x04};
+                    return kKeys[c];
+                }
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    return 0;
+}
+
 void LogMenu(BYTE* blk) {
     __try {
         char line[512];
@@ -385,6 +417,11 @@ BYTE Force_Update(const KvrInput& in, bool fighting) {
                 char name[24];
                 key = SelectGrenade(blk, name, sizeof name);
                 if (key) Log("force: grenade thrown (%s)", name);
+            }
+            if (!key && !g_pending.grenade && !g_pending.self && age > 0.15) {  // no such power: a droid's device
+                char name[24];
+                key = SelectDevice(blk, g_pending.what, name, sizeof name);
+                if (key) Log("force: %s gesture fires the droid's %s", g_pending.what, name);
             }
             static int menusLogged;
             if (key && menusLogged++ < 3) LogMenu(blk);

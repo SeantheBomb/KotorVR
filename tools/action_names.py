@@ -1,7 +1,8 @@
 """Export display names for KotOR's target actions, keyed by the action's icon resref (what the game keeps in each
 target-action entry), into <game>/kvr/actions.txt: "<icon>\t<name>" per line.
 
-Sources: feat.2da (icon, name), spells.2da (iconresref, name) and skills.2da (icon, name) from chitin.key (or Override), names from dialog.tlk,
+Sources: feat.2da (icon, name), spells.2da (iconresref, name), skills.2da (icon, name) and the item templates of
+grenades and droid utility devices (their icons in the target menu) from chitin.key (or Override), names from dialog.tlk,
 plus a few built-in actions that have no 2da row.
 
 usage: python action_names.py <game_dir>
@@ -36,6 +37,49 @@ def tlk_reader(path):
     return get
 
 
+def uti_fields(data):
+    """The top struct's BaseItem, ModelVariation and LocalizedName strref of a GFF item template (UTI V3.2)."""
+    if data[:4] != b"UTI ":
+        return None
+    (so, sc, fo, fc, lo, lc, fdo, fdc, fio, fic, lio, lic) = struct.unpack_from("<12I", data, 8)
+    _t, idx, n = struct.unpack_from("<3I", data, so)  # struct 0
+    fields = [idx] if n == 1 else list(struct.unpack_from("<%dI" % n, data, fio + idx))
+    out = {}
+    for f in fields:
+        ftype, label, val = struct.unpack_from("<3I", data, fo + f * 12)
+        name = data[lo + label * 16:lo + label * 16 + 16].rstrip(b"\x00").decode("latin1")
+        if name in ("BaseItem", "ModelVariation"):
+            out[name] = val & 0xFFFF if ftype in (0, 2) else val
+        elif name == "LocalizedName" and ftype == 12:
+            out[name] = struct.unpack_from("<i", data, fdo + val + 4)[0]  # (total size, strref, ...)
+    return out
+
+
+def item_names(game, tlk, names):
+    """Items in the target menu (grenades, a droid's utility devices): icon i?_<itemclass>_<variation:03d>."""
+    try:
+        bcols, _bl, brows = load_2da(game, "baseitems")
+        ic = bcols.index("itemclass")
+    except Exception:  # noqa: BLE001
+        return
+    bifs, keys = kres.read_key(game)
+    kres.TYPES["uti"] = 2025
+    for (resref, rtype) in sorted(keys):
+        if rtype != 2025 or not (resref.startswith("g_i_drd") or resref.startswith("g_w_") and "gren" in resref):
+            continue
+        try:
+            f = uti_fields(kres.extract(game, resref, "uti"))
+        except Exception:  # noqa: BLE001
+            continue
+        if not f or "BaseItem" not in f or f.get("LocalizedName", -1) < 0:
+            continue
+        cls = brows[f["BaseItem"]][ic].strip().lower() if f["BaseItem"] < len(brows) else ""
+        text = tlk(f["LocalizedName"]).strip()
+        if not cls or not text:
+            continue
+        names.setdefault("i%s_%03d" % (cls, f.get("ModelVariation", 1)), text)  # itemclass "i_drdutldev" -> ii_drdutldev_001
+
+
 def load_2da(game, name):
     over = os.path.join(game, "Override", name + ".2da")
     data = open(over, "rb").read() if os.path.exists(over) else kres.extract(game, name, "2da")
@@ -56,6 +100,7 @@ def main():
             text = tlk(int(name)).strip()
             if text and icon not in names:
                 names[icon] = text
+    item_names(game, tlk, names)
     out = os.path.join(game, "kvr", "actions.txt")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         for icon in sorted(names):
