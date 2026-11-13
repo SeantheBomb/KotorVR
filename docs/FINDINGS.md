@@ -60,6 +60,9 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
   new-game hang, 2026-10-26). Fixed by clearing it during our work (kvr_game.cpp h_SwapBuffers).
 - Movie window proc `0x405190`: WM_ACTIVATEAPP 0 (app deactivated) or Alt+Enter = interrupted (replayed later from
   the start); Escape, or a click per setting = skipped. We subclass it to drop WM_ACTIVATEAPP 0.
+  Subclassing on the first decoded frame was too late (2026-11-13: 05_1C after 06a interrupted at frame 1, STUNT_07's
+  turret cutscene then waited ~100 s for the replay): the class (registered once in `0x4053E0`) now gets our procedure.
+  Player object `[0x7A3CF4]`: +0x1C/+0x20 interrupted (focus 0 / Alt+Enter 1), +0x14/+0x18 stopped / skipped.
 - Queued script movies (k_pend_area01: PlayMovie "01A") play at module start via `0x602650` (client internal +0x1F8
   must be 0), or later when replayed; immediate ones via `0x602AF0`.
 - Opening: character creation -> the crawl + dream (640x272, 3605 frames) -> Endar Spire -> Trask (m01aa_c01).

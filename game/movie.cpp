@@ -37,11 +37,30 @@ bool g_playing;
 unsigned g_frames;
 bool g_skipWas;
 HWND g_subclassed;
-WNDPROC g_movieProc;
+const WNDPROC kGameMovieProc = (WNDPROC)0x405190;  // the movie window's procedure (FINDINGS "Cutscene movies")
 
 LRESULT CALLBACK MovieWndProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_ACTIVATEAPP && wp == 0) return 0;  // losing the foreground must not interrupt the movie
-    return CallWindowProcA(g_movieProc, w, msg, wp, lp);
+    if (msg == WM_ACTIVATEAPP && wp == 0) {  // losing the foreground must not interrupt the movie
+        static int n;
+        if (n++ < 20) Log("movie: app deactivation dropped (window %p, frame %u)", w, g_frames);
+        return 0;
+    }
+    return CallWindowProcA(kGameMovieProc, w, msg, wp, lp);
+}
+
+// Why the movie ended, from the player object [0x7A3CF4] the window procedure 0x405190 writes: +0x1C/+0x20 interrupted
+// (focus 0 / Alt+Enter 1; the game replays it later and the module waits for it), +0x14/+0x18 stopped / skipped.
+void LogEnd() {
+    __try {
+        BYTE* p = *(BYTE**)0x7A3CF4;
+        if (!p) {
+            Log("movie: end state unknown (no player object)");
+            return;
+        }
+        int stop = *(int*)(p + 0x14), param = *(int*)(p + 0x18), intr = *(int*)(p + 0x1C), how = *(int*)(p + 0x20);
+        Log("movie: end state stop %d param %d interrupted %d (%s)", stop, param, intr,
+            !intr ? "-" : how ? "Alt+Enter" : "focus lost - the game replays it later");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 void SubclassMovieWindow() {
@@ -57,10 +76,25 @@ void SubclassMovieWindow() {
     }, (LPARAM)&f);
     if (!f.w || f.w == g_subclassed) return;
     WNDPROC prev = (WNDPROC)GetWindowLongPtrA(f.w, GWLP_WNDPROC);
-    if (prev == MovieWndProc) return;
-    g_movieProc = prev;
-    SetWindowLongPtrA(f.w, GWLP_WNDPROC, (LONG_PTR)MovieWndProc);
     g_subclassed = f.w;
+    if (prev == MovieWndProc) {  // created from the patched class: guarded from its first message
+        Log("movie: window %p guarded from creation", f.w);
+        return;
+    }
+    // always hand on to the game's own procedure (RegisterClassA in 0x4053E0), never to whatever the window had:
+    // with the class patched, a hook that wrapped it would otherwise call back into us
+    SetWindowLongPtrA(f.w, GWLP_WNDPROC, (LONG_PTR)MovieWndProc);
+    // Subclassing on the first decoded frame is too late when the window is deactivated as it opens (playtest
+    // 2026-11-13: the second of two back-to-back Taris escape movies, 05_1C, was interrupted after 1 frame; STUNT_07
+    // then waited ~100 s for its replay with the turret cutscene held back). Every later movie window gets our
+    // procedure from its creation.
+    static bool classPatched;
+    if (!classPatched) {
+        classPatched = true;
+        SetLastError(0);
+        ULONG_PTR was = SetClassLongPtrA(f.w, GCLP_WNDPROC, (LONG_PTR)MovieWndProc);
+        Log("movie: class procedure %p -> ours (error %lu); window had %p", (void*)was, GetLastError(), (void*)prev);
+    }
     Log("movie: window %p kept playing through focus changes", f.w);
 }
 
@@ -104,7 +138,10 @@ int __stdcall h_DoFrame(void* bink) {
 }
 
 void __stdcall h_Close(void* bink) {
-    if (g_playing) Log("movie: closed after %u frames t=%lu", g_frames, GetTickCount());
+    if (g_playing) {
+        Log("movie: closed after %u frames t=%lu", g_frames, GetTickCount());
+        LogEnd();
+    }
     g_playing = false;
     VR_MovieEnded();
     r_Close(bink);

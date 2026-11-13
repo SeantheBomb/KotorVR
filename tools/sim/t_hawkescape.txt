@@ -1,0 +1,31 @@
+# Playtest 2026-11-13 softlock: after boarding the Ebon Hawk on Taris, STUNT_07 (the Ebon Hawk interior) loaded but its
+# cutscene (scene_start, started by the CutStart placeable from k_scene_start on enter) never opened, so the turret
+# minigame m12ab (loaded by the cutscene's last node, k_ren_taris03) never came. Fixture taris_davik (Sean's Davik's
+# Estate save); warps straight into STUNT_07.
+#   .\tools\run_sim.ps1 -Script t_hawkescape -Fixture taris_davik -Cheats -AllowDiscord -Force
+# Pass: the cutscene opens, and the turret minigame follows.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+shot loaded
+key grave
+type warp STUNT_07
+key enter
+wait 8
+wait_world 120
+shot arrived
+wait_new_log dialogue: 30
+shot after30
+wait 10
+shot after40
+wait_new_log minigame: turret 120
+shot turret
