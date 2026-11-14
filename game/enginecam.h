@@ -6,6 +6,11 @@ bool EngineCam_EyeWorld(float out[3]);
 // KotOR world -> tracking space (the frame of WORLD-anchored text panels), from the gameplay camera base.
 bool EngineCam_WorldToTracking(const float w[3], float out[3]);
 
+// The turret minigame (false outside it): the gunner seat the view is fixed to (world position and rotation rows:
+// world = seatPos + seatRows * tracking), the turret's aim (the game camera's forward, world), a counter bumped on
+// every camera frame, and one bumped each time a turret starts.
+bool EngineCam_Turret(float seatPos[3], float seatRows[9], float gunFwd[3], unsigned* frame, unsigned* session);
+
 bool EngineCam_Install();
 // true while the current frame's world camera was replaced at the engine level
 bool EngineCam_Applied();

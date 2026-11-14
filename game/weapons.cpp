@@ -15,6 +15,7 @@
 #include "guard.h"
 #include "fight.h"
 #include "hints.h"
+#include "turret.h"
 
 #include <GL/gl.h>
 #include <cmath>
@@ -786,7 +787,8 @@ static void DrawGuardBars(const float worldView[16], const GuardBar* bars, int n
 //   blade there (Until You Fall's block line).
 // Drawn in eye space so they always face the player, through walls (Arkham's counter icons).
 void Weapons_DrawWarnings(const float worldView[16]) {
-    if (!Features().cues || !LoadGl()) return;
+    bool turretDraw = Turret_Drawing();  // the turret's reticles: drawn with cues off too (they are the aim)
+    if ((!Features().cues && !turretDraw) || !LoadGl()) return;
     CombatWarning w[8];
     int n = Combat_IncomingWarnings(w, 8);
     // bolts: fix each one's world muzzle the first frame it flies, then draw it in this eye
@@ -914,7 +916,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     bool showDamage = dmgAge < 0.4f && CreaturePos(g_damageOn, dmgAt);
     bool fightDraw = Fight_Active() && !(hshm && hshm->cinematic) && !Dialogue_Showing();
     bool hintDraw = Hints_Drawing();
-    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage && !fightDraw && !hintDraw) return;
+    if (n == 0 && nb == 0 && !anyBolt && !showHover && !showOpen && !showDamage && !fightDraw && !hintDraw && !turretDraw) return;
     p_glPushAttrib(GL_ALL_ATTRIB_BITS);
     p_glMatrixMode(GL_MODELVIEW);
     p_glPushMatrix();
@@ -1127,6 +1129,7 @@ void Weapons_DrawWarnings(const float worldView[16]) {
     if (!Fight_Active()) DrawGuardBars(worldView, bars, nb);  // (choreo: fight.cpp draws them as shields)
     if (fightDraw) Fight_Draw(worldView);
     if (hintDraw) Hints_Draw(worldView);
+    if (turretDraw) Turret_Draw(worldView);
     if (showHover) {  // a faint, steady ring on the floor around what the hand points at: there when you look for it
         float pulse = 0.42f;
         if (p_glLineWidth) p_glLineWidth(1.5f);

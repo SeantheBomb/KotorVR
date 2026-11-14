@@ -67,6 +67,19 @@ Attack data struct (in `esi` inside the resolver): `+0x5C` result code, `+0xC1` 
   must be 0), or later when replayed; immediate ones via `0x602AF0`.
 - Opening: character creation -> the crawl + dream (640x272, 3605 frames) -> Endar Spire -> Trask (m01aa_c01).
 
+## Minigames (found 2026-11-10 / 2026-11-13)
+
+- Area minigame `[area + 0x264]` (CSWMiniGame, loaded from the .are's MiniGame struct by `0x6723D0`): Type +0x80
+  (1 swoop, 2 turret), CameraViewAngle +0x70, player +0x24 (CSWMiniPlayer, ctor `0x66EB50`, vtable `0x7525F0`; the
+  turret's is built by `0x6719D0`), mouse axis map +0x84 / +0x88 (`Mouse` AxisX / AxisY 0..3, negated by FlipAxisX /
+  FlipAxisY; setters `0x671BC0` / `0x671BE0`).
+- The turret aims with the mouse; the game re-centres the cursor every frame (SetCursorPos only in `0x5E0960`, via
+  `0x5DF5D0`, which also writes the input system's mouse axis values). The hand pointer's cursor warps therefore
+  turned the turret, fighting the stick (2026-11-13 playtest). turret.cpp measures which channel (DirectInput mouse
+  or cursor) moves it, and its degrees per count, with a short probe when the turret starts.
+- Escape chain: STUNT_06 (movie 05) -> STUNT_07 (`k_scene_start` -> `scene_start.dlg`, last reply `k_ren_taris03`:
+  K_TURRET_SKYBOX 5, `StartNewModule("m12ab")`). Only m12ab has a turret.
+
 ## Target action menu (found 2026-10-26)
 - In-game interface: `[[[[0x7A39FC]+4]+4]+0x40]+0x90` (client app -> ... -> GUI -> main interface); action block at +0xBC.
 - Per target column c (0..2): list at block+c*0xC (entries pointer, count); entries 0x38 bytes: +0x04 kind, +0x08 id

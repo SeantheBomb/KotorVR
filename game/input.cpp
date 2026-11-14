@@ -9,6 +9,7 @@
 #define DIRECTINPUT_VERSION 0x0800
 #include "input.h"
 #include "minigame.h"
+#include "turret.h"
 
 #include <dinput.h>
 #include <cmath>
@@ -152,6 +153,38 @@ void Input_Update(HWND wnd) {
             PostMessageA(root, WM_ACTIVATE, WA_ACTIVE, 0);
             static int told;
             if (told++ < 3) Log("input: game is in the background; posted activation so controller input still lands");
+        }
+        // The turret minigame (turret.cpp): the right hand aims, the trigger fires. Nothing else - no pointer, cursor,
+        // picks or gestures, which fought the aim (2026-11-13 playtest). Its pause menu takes the usual panel input.
+        if (Minigame_Type() == MG_TURRET && !(VR_Shared() && VR_Shared()->menuOpen)) {
+            int ch = Turret_Input(in, keys, &dx, &dy);
+            g_targetValid = false;
+            if (ch == TURRET_CURSOR && wnd && (dx || dy)) {
+                // the game re-centres the cursor every frame and reads how far it moved
+                POINT c = g_cursorScreen;
+                if (!g_haveCursor) {
+                    RECT rc;
+                    GetClientRect(wnd, &rc);
+                    c = {rc.right / 2, rc.bottom / 2};
+                    ClientToScreen(wnd, &c);
+                }
+                POINT p = {c.x + dx, c.y + dy}, cl = p;
+                SetCursorPos(p.x, p.y);
+                ScreenToClient(wnd, &cl);
+                PostMessageA(wnd, WM_MOUSEMOVE, 0, MAKELPARAM(cl.x, cl.y));
+            }
+            if (ch != TURRET_DI_MOUSE) dx = dy = 0;
+            for (int b = 0; b < 2; b++) {  // a button held as the turret started is let go
+                if (g_msgButtons[b] && wnd) PostMessageA(wnd, b ? WM_RBUTTONUP : WM_LBUTTONUP, 0, 0);
+                g_msgButtons[b] = false;
+            }
+            Lock();
+            memcpy(g_wantKeys, keys, sizeof keys);
+            g_wantMouse[0] = g_wantMouse[1] = false;
+            g_pendDx = dx;
+            g_pendDy = dy;
+            Unlock();
+            return;
         }
         // movement: left stick in head space -> rotate into the game camera's frame -> W/S forward/back, Z/C strafe
         // (KotOR keymap.2da). KotOR moves relative to its camera, which only turns with the right stick, so without
@@ -671,8 +704,8 @@ void Input_Update(HWND wnd) {
     }
     // Minigames read their own keys (keymap.2da MGAction*: W/S/A/D, MGshoot Space, PauseMinigame Escape), not the
     // camera-relative W/S/Z/C walk: the left stick as it is (left / right steer the swoop, up / down its throttle;
-    // the turret's aim), right trigger or A shoots, B / menu pause. A game menu over it (the pause screen) keeps the
-    // usual panel input.
+    // the turret is turret.cpp's, above), right trigger or A shoots, B / menu pause. A game menu over it (the pause
+    // screen) keeps the usual panel input.
     if (in.active && Minigame_Type() && !(VR_Shared() && VR_Shared()->menuOpen)) {
         memset(keys, 0, sizeof keys);
         if (in.lx < -0.4f) keys[DIK_A] = 0x80;

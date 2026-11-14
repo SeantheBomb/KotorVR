@@ -1,0 +1,44 @@
+# The Ebon Hawk turret (m12ab) aimed with the right hand (turret.cpp): the view stays in the seat, the guns follow the
+# hand. Fixture taris_davik (Sean's Davik's Estate save); warps into STUNT_07, skips the escape movie, sweeps the hand.
+#   .\tools\run_sim.ps1 -Script t_turret -Fixture taris_davik -Cheats -AllowDiscord -Force
+# Pass: the probe measures a response on both axes, and the guns land within a few degrees of each hand pose.
+wait_menu 90
+wait_calm 8 120
+click u=0.559 v=0.521      # Load Game
+wait 1
+wait_calm 2 60
+click u=0.411 v=0.382      # the top row (the fixture is the only save)
+wait 0.5
+wait_calm 1.5 60
+click u=0.499 v=0.671      # Load
+pointer none
+wait_world 120
+wait 3
+key grave
+type warp STUNT_07
+key enter
+wait 8
+wait_world 120
+aimhand
+hand R yaw=0 pitch=0
+wait_log turret:~started 150
+check_log probe turret:~aiming~with~the~hand 15
+wait 1
+shot seat
+hand R yaw=35 pitch=12
+wait 2
+shot right_up
+hand R yaw=-40 pitch=-5
+wait 2
+shot left
+hand R yaw=-40 pitch=-5
+trigger for=1.0
+wait 1
+shot fire
+hand R yaw=10 pitch=30
+wait 2
+shot high
+hand R yaw=-20 pitch=20
+wait 2
+shot left_high
+check_log tracking turret:~hand 5

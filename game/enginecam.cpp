@@ -113,6 +113,11 @@ float g_subject[3];  // the point the current shot looks at
 // 0 none, 1 first person, 2 cut, 3 subject probe this frame, 4 waiting for it, 5 eye probe this frame, 6 waiting
 int g_shotMode;
 
+// the turret minigame's seat (see the minigame branch in EngineCam_Pre)
+bool g_turretValid;
+float g_turretSeatYaw, g_turretPos[3], g_turretRows[9], g_turretFwd[3];
+unsigned g_turretFrame, g_turretSession;
+
 // aim picks (VR_BeginAimPick): the camera looks along the hand and is left that way for the game's own mouse picking
 bool g_pickApplied, g_leftAimed;
 float g_aimedPos[3], g_aimedQ[4];
@@ -212,17 +217,38 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         lastMode = gameplay;
     }
     int mg = Minigame_Type();
+    if (mg != MG_TURRET || gameplay) g_turretValid = false;
     if (mg && !gameplay) {
         // A minigame (swoop race, turret): the game's own chase / gunner camera, with your head on top. Never the
         // cutscene rules - its camera moves every frame, so each frame was a "new shot" and you stayed at your body on
         // the start line while the bike raced off, the track (drawn only near the bike) leaving a black world
         // (2026-11-10 playtest, Taris). Never rolled; the swoop also keeps the horizon level (the bike's heading
-        // only), the turret keeps its pitch (it is the aim).
+        // only). The turret is a fixed seat instead (below).
         float M0[9];
         QuatWxyzToRows(g_origQ, M0);
         float f[3] = {-M0[2], -M0[5], mg == MG_SWOOP ? 0.0f : -M0[8]};  // forward = -Z column
         static float mgQ[4];
-        QuatLookAlong(f, mgQ);
+        if (mg == MG_TURRET) {
+            // The turret: you sit in the gunner's seat and the guns swing around you, not the world (2026-11-13
+            // playtest: riding the gunner camera turned your whole body with every aim). The seat faces where the
+            // turret starts, level; right-stick turns rotate it. The turret's own aim is read by turret.cpp.
+            if (!g_turretValid) {
+                g_turretSeatYaw = atan2f(f[1], f[0]);
+                g_turretSession++;
+                Log("enginecam: turret - seat fixed at heading %.0f deg, the guns move on their own",
+                    g_turretSeatYaw * 57.29578f);
+            }
+            g_turretSeatYaw = WrapPi(g_turretSeatYaw + g_pendingTurn);
+            g_pendingTurn = 0;
+            QuatFromYaw(g_turretSeatYaw, mgQ);
+            memcpy(g_turretPos, g_origPos, sizeof g_turretPos);
+            QuatWxyzToRows(mgQ, g_turretRows);
+            memcpy(g_turretFwd, f, sizeof g_turretFwd);
+            g_turretFrame++;
+            g_turretValid = true;
+        } else {
+            QuatLookAlong(f, mgQ);
+        }
         baseQ = mgQ;
         g_shotMode = 0;
         g_fovSaved = fov;  // cull with the gameplay cone: you look around the narrow chase view
@@ -471,6 +497,16 @@ bool EngineCam_EyeWorld(float out[3]) {
     if (!g_eyeWorldValid) return false;
     // the midpoint of the last two eyes (the game renders one eye per frame, alternately: NPCs looked at the left one)
     for (int i = 0; i < 3; i++) out[i] = (g_eyeWorldHist[0][i] + g_eyeWorldHist[1][i]) * 0.5f;
+    return true;
+}
+
+bool EngineCam_Turret(float seatPos[3], float seatRows[9], float gunFwd[3], unsigned* frame, unsigned* session) {
+    if (!g_turretValid) return false;
+    memcpy(seatPos, g_turretPos, sizeof g_turretPos);
+    memcpy(seatRows, g_turretRows, sizeof g_turretRows);
+    memcpy(gunFwd, g_turretFwd, sizeof g_turretFwd);
+    *frame = g_turretFrame;
+    *session = g_turretSession;
     return true;
 }
 
