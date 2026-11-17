@@ -237,6 +237,18 @@ struct BoneX {
 };
 }  // namespace
 
+// Stealth (the character's stealth mode): hands and weapons drawn see-through with a slow shimmer, 0 = solid.
+static float g_stealth;
+void WeaponModels_SetStealth(float amount) { g_stealth = amount; }
+static void StealthColor() {
+    float t = GetTickCount() * 0.001f;
+    float a = 1.0f - g_stealth * (0.72f - 0.08f * sinf(t * 3.1f));
+    p_glEnable(GL_BLEND);
+    p_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    p_glDepthMask(GL_FALSE);
+    p_glColor4f(0.72f - 0.15f * g_stealth, 0.72f, 0.75f + 0.2f * g_stealth, a);
+}
+
 bool WeaponModels_DrawHand(const char* model, const char* texture, int side, const KvrPose* joints, const KvrPose* grip,
                            float curl, float indexCurl, float forceGlow) {
     if (!model || !*model || !LoadGl() || (!joints && !grip)) return false;
@@ -318,6 +330,8 @@ bool WeaponModels_DrawHand(const char* model, const char* texture, int side, con
             p_glBlendFunc(GL_SRC_ALPHA, GL_ONE);
             p_glDepthMask(GL_FALSE);
             p_glColor4f(0.45f, 0.65f, 1.0f, forceGlow);
+        } else if (g_stealth > 0.01f) {
+            StealthColor();
         } else {
             p_glColor4f(0.72f, 0.72f, 0.75f, 1);
         }
@@ -493,6 +507,7 @@ bool WeaponModels_Draw(int row, int variation, float glow, float blade, const fl
             }
             // unlit: dim the opaque parts a little so they sit in KotOR's dark scenes; blades stay full bright
             if (isBlade) p_glColor4f(1, 1, 1, 1);
+            else if (g_stealth > 0.01f) StealthColor();
             else p_glColor4f(0.72f, 0.72f, 0.75f, 1);
             EmitMesh(me, blade);
         }

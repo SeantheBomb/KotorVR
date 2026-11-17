@@ -708,6 +708,46 @@ static DWORD WINAPI EarlyPatchThread(LPVOID) {
     return 0;
 }
 
+// The last session's log is kept (kvr\logs\probe_<date>_<time>.log, the newest 5) instead of being overwritten
+// by the next launch (2026-11-17: two nights of playtest logs were lost that way).
+static void KeepLastLog(const char* path) {
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &a) || (a.nFileSizeLow == 0 && a.nFileSizeHigh == 0)) return;
+    char dir[MAX_PATH], to[MAX_PATH];
+    sprintf_s(dir, "%s\kvr\logs", g_dir);
+    CreateDirectoryA(dir, nullptr);
+    FILETIME lt;
+    SYSTEMTIME st;
+    FileTimeToLocalFileTime(&a.ftLastWriteTime, &lt);
+    FileTimeToSystemTime(&lt, &st);
+    sprintf_s(to, "%s\probe_%04d%02d%02d_%02d%02d%02d.log", dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    MoveFileExA(path, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED);
+    // the newest 5 stay (the names sort by time)
+    char pat[MAX_PATH];
+    sprintf_s(pat, "%s\probe_*.log", dir);
+    static char names[64][64];
+    int n = 0;
+    WIN32_FIND_DATAA f;
+    HANDLE h = FindFirstFileA(pat, &f);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (n < 64) strcpy_s(names[n++], f.cFileName);
+    } while (FindNextFileA(h, &f));
+    FindClose(h);
+    for (int i = 0; i < n; i++)  // oldest first
+        for (int j = i + 1; j < n; j++)
+            if (strcmp(names[j], names[i]) < 0) {
+                char t[64];
+                strcpy_s(t, names[i]);
+                strcpy_s(names[i], names[j]);
+                strcpy_s(names[j], t);
+            }
+    for (int i = 0; i + 5 < n; i++) {
+        sprintf_s(to, "%s\%s", dir, names[i]);
+        DeleteFileA(to);
+    }
+}
+
 BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(self);
@@ -717,6 +757,7 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
         sprintf_s(path, "%s\\kvr", g_dir);
         CreateDirectoryA(path, nullptr);
         sprintf_s(path, "%s\\kvr\\probe.log", g_dir);
+        KeepLastLog(path);
         g_log = _fsopen(path, "w", _SH_DENYNO);
         char sys[MAX_PATH];
         GetSystemDirectoryA(sys, MAX_PATH);  // SysWOW64 for a 32-bit process

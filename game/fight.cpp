@@ -44,6 +44,7 @@
 #include "hover.h"
 #include "melee.h"
 #include "simcmd.h"
+#include "stun.h"
 #include "vr.h"
 #include "weapons.h"
 
@@ -238,6 +239,7 @@ static void PlayAnimSeen(void* gob, const char** nameSlot, const char* name, flo
             g.at = t;
             g.speed = speed > 0.05f && speed < 5 ? speed : 1;
         }
+        if (gob == Anim_PlayerGob()) Stun_OnPlayerAnim(n.c_str());
         if (g_animLog && n.size() == 4 && n[1] >= '0' && n[1] <= '9' && n[2] != 'r') {  // combat rows only (not the ready loops)
             static int logged;
             if (logged++ < 4000) Log("anim: %p plays %s x%.2f", gob, n.c_str(), speed);

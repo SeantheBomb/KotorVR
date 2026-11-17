@@ -1300,6 +1300,20 @@ void Weapons_Draw(const float invEye[16]) {
     memcpy(&in, (const void*)&shm->input, sizeof in);  // a torn read only costs one frame of pose
     if (!in.active || !(in.gripValid & 3)) return;
     UpdateSaber(in);
+    {
+        // stealth mode (server creature +0x9FC bit 0, the creature loader 0x5026D0 "StealthMode"): your hands show it
+        static float stealth;
+        static bool was;
+        bool on = false;
+        __try {
+            BYTE* c = (BYTE*)Weapon_PlayerCreature();
+            on = c && (*(DWORD*)(c + 0x9FC) & 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        if (on != was) Log("weapons: stealth %s - your hands %s", on ? "on" : "off", on ? "shimmer" : "solid again");
+        was = on;
+        stealth += ((on ? 1.0f : 0.0f) - stealth) * 0.08f;  // ease in / out over ~0.3 s
+        WeaponModels_SetStealth(stealth);
+    }
     bool drawHands = Features().hands && !g_handModel.empty();
     if (g_right == WC_NONE && g_left == WC_NONE && !drawHands) return;
 

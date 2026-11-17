@@ -530,6 +530,24 @@ int Anim_PlayerHooks(float out[][3], int max) {
     return n;
 }
 
+int Anim_OtherHeadHooks(const float nearPos[3], float radius, float out[][3], int max) {
+    int n = 0;
+    DWORD now = GetTickCount();
+    for (auto& kv : g_seenGobs) {
+        if (n >= max) break;
+        if (kv.first == g_playerGob || now - kv.second > 1000) continue;
+        __try {
+            const float* g = (const float*)(kv.first + 0x78);
+            float dx = g[0] - nearPos[0], dy = g[1] - nearPos[1], dz = g[2] - nearPos[2];
+            if (dx * dx + dy * dy + dz * dz > radius * radius || !*(void**)(kv.first + 0x6C)) continue;
+        } __except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+        if (Anim_PartPos(kv.first, "headhook", out[n])) n++;
+    }
+    return n;
+}
+
+void* Anim_PlayerGob() { return g_playerGob; }
+
 bool Anim_PlayerBodyPos(float out[3]) {
     BYTE* g = g_playerGob;
     if (!g) return false;

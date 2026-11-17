@@ -339,12 +339,27 @@ BYTE Dialogue_Update(const KvrInput& in) {
         for (auto& r : g_replies) text += "\n" + r;
         g_shownReplies = (int)g_replies.size();
         LeaveCriticalSection(&g_lock);
-        if (!g_showing) {
-            // world-locked in the direction of whoever you are talking to (the dialog panel's owner, +0x19C0), a
-            // little low so they stay visible above it; where you look when there is no one to face
+        // World-locked toward whoever you are talking to (the dialog panel's owner, +0x19C0), a little low so they stay
+        // visible above it - but never more than 70 deg from where you are looking: an owner behind you, unknown or
+        // not a creature puts it in front of you, and a new line whose panel has ended up off to the side (you
+        // turned, the scene moved you) brings it back in front (2026-11-17 playtest: turning round to read / reply).
+        float headYaw = VR_HeadYaw();
+        bool place = !g_showing;
+        if (g_showing) {
+            const KvrTextPanel& t = shm->text[kSlot];
+            float py = 2.0f * atan2f(t.pose.quat[1], t.pose.quat[3]);  // the panel's yaw (tilt is about its own x)
+            float off = py - headYaw;
+            while (off > 3.14159265f) off -= 6.2831853f;
+            while (off < -3.14159265f) off += 6.2831853f;
+            if (fabsf(off) > 1.22f) {
+                place = true;
+                Log("dialogue: panel %.0f deg off your view - brought in front of you", off * 57.29578f);
+            }
+        }
+        if (place) {
             float head[3];
             VR_HeadPos(head);
-            float yaw = VR_HeadYaw();
+            float yaw = headYaw;
             float spk[3], st[3];
             DWORD owner = SpeakerOf(g_replyPanel ? g_replyPanel : g_panel);
             if (owner && Weapon_ObjectPos(owner & 0x7FFFFFFF, spk)) {
@@ -352,8 +367,17 @@ BYTE Dialogue_Update(const KvrInput& in) {
                 if (EngineCam_WorldToTracking(spk, st)) {
                     float dx = st[0] - head[0], dz = st[2] - head[2];
                     if (dx * dx + dz * dz > 0.3f * 0.3f) {
-                        yaw = atan2f(-dx, -dz);  // facing direction: -Z forward
-                        Log("dialogue: panel placed toward the speaker %08lX (%.0f deg)", owner, yaw * 57.29578f);
+                        float toward = atan2f(-dx, -dz);  // facing direction: -Z forward
+                        float off = toward - headYaw;
+                        while (off > 3.14159265f) off -= 6.2831853f;
+                        while (off < -3.14159265f) off += 6.2831853f;
+                        if (fabsf(off) <= 1.22f) {
+                            yaw = toward;
+                            Log("dialogue: panel placed toward the speaker %08lX (%.0f deg)", owner, yaw * 57.29578f);
+                        } else {
+                            Log("dialogue: the speaker %08lX is %.0f deg off your view - panel in front of you", owner,
+                                off * 57.29578f);
+                        }
                     }
                 }
             }

@@ -165,3 +165,14 @@ bones to < 1 mm; only undrawn hooks (LightsaberHook, headconjure, camerahook...)
 
 Body nodes are the `*_g` bones (pelvis_g, torso_g, torsoUpr_g, r/lbicep_g, R/Lforearm_g, R/Lhand_g, fingers, thighs,
 shins, feet) plus hooks: rhand / lhand (weapon roots), headhook, Impact, LightsaberHook, DeflectHook, camerahook.
+
+## Creature states (found 2026-11-17)
+
+- Stealth mode: server creature +0x9FC bit 0 (the creature loader `0x5026D0` reads "StealthMode" into it; bits 2/3
+  are related flags).
+- Debilitated (GetIsDebilitated, script routine 732): the creature plays a looping animations.2da row - `paralyzed`,
+  `sleep`, `horror`, `choke` - which the model PlayAnimation hook (`0x485BD0`) sees. The HUD line "Player
+  debilitated. Cancelling combat actions." is strref 47915 (client switch at `0x6877A9`).
+- Own-body cull: the body's drawn root can sit ~9 cm from the game object's position (+0x78) for a frame while
+  walking; the 5 cm exact match then missed it and the whole body (head included) was drawn. Matched to last frame's
+  drawn root now; "modelcull: your body not found ..." counts real misses per 5 s.

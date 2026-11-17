@@ -24,8 +24,14 @@ void* Anim_ModelAt(const float pos[3]);
 int Anim_BoneSegments(void* model, AnimBone* out, int max);
 // A named node of that model (e.g. "rhand", the weapon hook), world position.
 bool Anim_PartPos(void* model, const char* name, float out[3]);
+// The head hooks ("headhook") of every other animated creature within radius of a point (world), up to max: their
+// heads, which the own-body cull must never take for yours.
+int Anim_OtherHeadHooks(const float nearPos[3], float radius, float out[][3], int max);
 // Freeze the animation of the creature with this server object id for `seconds` (a hit landing on it).
 void Anim_HitPause(unsigned long targetId, float seconds);
 // Play the controlled character's (hidden) body animations 6x fast for a moment: a finished attack animation
 // frees its movement.
 void Anim_FastForwardPlayer(float seconds);
+
+// The controlled character's (hidden) body model, nullptr before it is seen.
+void* Anim_PlayerGob();

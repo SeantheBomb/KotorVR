@@ -396,6 +396,13 @@ static int g_rootDepth = -1;        // matrix stack depth of model roots (where 
 // models whose root sits exactly on a bone (hand, neck). The game draws them before the body, so last frame's bones.
 static void NearEyeFrameEnd();
 static float g_hooks[8][3];  // the body's attachment points this frame (Anim_PlayerHooks)
+static float g_bodyRootT[3];  // where your body's root was drawn (last match)
+static bool g_bodyRootValid, g_bodyFound;  // ... and whether this frame found it
+static int g_bodyMissFrames, g_bodyFrames;
+static float g_bodyNearest = 1e9f;  // this frame: the closest model origin to your body's game position (squared)
+static int g_missNear, g_missMid, g_missFar;  // missed frames by that distance: < 0.3 m, < 1 m, beyond (not drawn)
+static float g_otherHeads[16][3];  // other creatures' head hooks near you this frame (never your head)
+static int g_otherHeadCount;
 static int g_hookCount;
 static volatile bool g_traceNow;  // the test harness asked for a trace of the next world frame
 static float g_lastRootT[3];  // the latest model root (root depth) seen by VR_IsOwnBody, world
@@ -688,6 +695,30 @@ void VR_OnSwap(HDC dc) {
     g_nearestOwn = 1e9f;
     NearEyeFrameEnd();
     g_hookCount = Anim_PlayerHooks(g_hooks, 8);
+    // frames of first-person play whose world pass never found your body (it was drawn): logged per 5 s
+    if (g_worldThisFrame && g_vrActive && !VR_ShowingOwnBody() && Features().modelCull && g_playerPosValid) {
+        g_bodyFrames++;
+        if (!g_bodyFound) {
+            g_bodyMissFrames++;
+            if (g_bodyNearest < 0.3f * 0.3f) g_missNear++;
+            else if (g_bodyNearest < 1.0f) g_missMid++;
+            else g_missFar++;
+        }
+        static int missStreak;  // last frame's root stays usable through a short run of misses
+        if (g_bodyFound) g_bodyRootValid = true, missStreak = 0;
+        else if (++missStreak > 10) g_bodyRootValid = false;
+        static DWORD last;
+        if (GetTickCount() - last > 5000) {
+            last = GetTickCount();
+            if (g_missNear + g_missMid)  // (frames without your body drawn at all are fine)
+                g_log("modelcull: your body not found in %d of %d frames (nearest model origin < 0.3 m: %d, < 1 m: %d, "
+                      "none near - not drawn: %d)", g_bodyMissFrames, g_bodyFrames, g_missNear, g_missMid, g_missFar);
+            g_bodyMissFrames = g_bodyFrames = g_missNear = g_missMid = g_missFar = 0;
+        }
+    }
+    g_bodyFound = false;
+    g_bodyNearest = 1e9f;
+    g_otherHeadCount = g_playerPosValid ? Anim_OtherHeadHooks(g_playerPos, 4.0f, g_otherHeads, 16) : 0;
     g_ownNodeCur ^= 1;  // this frame's bones become "last frame's"
     g_ownNodeCount[g_ownNodeCur] = 0;
     RefreshPlayerPos();
@@ -863,11 +894,62 @@ int VR_IsOwnBody(const float t[3], int depth) {
         if (oldRadius < 0) oldRadius = GetPrivateProfileIntA("Debug", "OldOwnBodyRadius", 0, Features_IniPath());
         bool exact = !oldRadius && Anim_PlayerBodyPos(bp);
         float bx = t[0] - bp[0], by = t[1] - bp[1], bz = t[2] - bp[2];
+        if (exact) {
+            float bd = bx * bx + by * by + bz * bz;
+            if (bd < g_bodyNearest) g_bodyNearest = bd;
+        }
         if (exact ? (bx * bx + by * by + bz * bz < 0.05f * 0.05f) : (h2 < 0.25f * 0.25f && fabsf(dz) < 0.35f)) {
             g_rootDepth = depth;
+            memcpy(g_bodyRootT, t, sizeof g_bodyRootT);
+            g_bodyFound = true;
             return 2;
         }
+        // ... or where it was drawn last frame (within 12 cm, and still at your feet): walking, the drawn root can
+        // run more than 5 cm from the game object's position for a frame, and then your whole body - head included -
+        // was drawn in your eyes (2026-11-17 playtest: the head flashing while walking; the log's "near miss root
+        // at 0.00 m horizontal" lines are frames without the body found)
+        if (exact && g_bodyRootValid && depth == g_rootDepth && h2 < 0.4f * 0.4f && fabsf(dz) < 0.4f) {
+            float lx = t[0] - g_bodyRootT[0], ly = t[1] - g_bodyRootT[1], lz = t[2] - g_bodyRootT[2];
+            if (lx * lx + ly * ly + lz * lz < 0.12f * 0.12f) {
+                static DWORD lastLog;
+                if (GetTickCount() - lastLog > 2000) {
+                    lastLog = GetTickCount();
+                    g_log("modelcull: body drawn %.1f cm from its game position - matched to last frame's (hidden)",
+                          sqrtf(bx * bx + by * by + bz * bz) * 100);
+                }
+                memcpy(g_bodyRootT, t, sizeof g_bodyRootT);
+                g_bodyFound = true;
+                return 2;
+            }
+        }
         if (depth == g_rootDepth) memcpy(g_lastRootT, t, sizeof g_lastRootT);
+        // another creature's head (rooted on its own head hook): never yours, however close your hidden body's hands
+        // or your eye come to it (2026-11-17 playtest: enemies' heads vanished in melee - your character's attack
+        // animation swung its hand bones, and the rules below, through the enemy's head)
+        if (depth == g_rootDepth) {
+            for (int i = 0; i < g_otherHeadCount; i++) {
+                float ex = t[0] - g_otherHeads[i][0], ey = t[1] - g_otherHeads[i][1], ez = t[2] - g_otherHeads[i][2];
+                if (ex * ex + ey * ey + ez * ez < 0.08f * 0.08f) {
+                    // logged when one of the rules below would have taken it for yours (the old bug)
+                    bool wouldHide = false;
+                    for (int k = 0; k < g_hookCount && !wouldHide; k++) {
+                        float hx = t[0] - g_hooks[k][0], hy = t[1] - g_hooks[k][1], hz = t[2] - g_hooks[k][2];
+                        wouldHide = hx * hx + hy * hy + hz * hz < 0.12f * 0.12f;
+                    }
+                    float eye[3];
+                    if (!wouldHide && EngineCam_EyeWorld(eye)) {
+                        float hx = t[0] - eye[0], hy = t[1] - eye[1], hz = t[2] - eye[2];
+                        wouldHide = hx * hx + hy * hy + hz * hz < 0.35f * 0.35f;
+                    }
+                    static DWORD lastLog;
+                    if (wouldHide && GetTickCount() - lastLog > 1000) {
+                        lastLog = GetTickCount();
+                        g_log("modelcull: another creature's head next to your hands / eyes - kept (theirs)");
+                    }
+                    return 0;
+                }
+            }
+        }
         // a model rooted on one of the body's attachment points (head on the headhook, weapons in the hands), as
         // the animation has them this frame: the bone list below misses them in attacks, where the skeleton is
         // skinned on the GPU (2026-11-05: your own head drawn in your eyes mid-swing)

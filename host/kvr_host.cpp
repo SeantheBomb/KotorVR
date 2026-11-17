@@ -2132,9 +2132,16 @@ static void Frame() {
         // HUD lazily follows head yaw: once you have looked more than 35 deg away for 0.6 s it swings round to face you
         static float hudYaw;
         static DWORD awaySince;
+        // ... and a menu, or a screen without the world (loading, level-up, the main menu), opens right where you are
+        // looking (2026-11-17 playtest: having to look around for menus); the cinema screen does the same below
+        static bool wasMenuUp, wasWorld = true;
         if (tracked) {
             XrPosef headRel = PoseMul(PoseInv(g_origin), views[0].pose);
             float headYaw = YawOf(headRel.orientation);
+            if ((menuUp && !wasMenuUp) || (!world && wasWorld)) {
+                hudYaw = headYaw;
+                awaySince = 0;
+            }
             float diff = remainderf(headYaw - hudYaw, 6.2831853f);
             if (fabsf(diff) > 0.61f) {
                 if (!awaySince) awaySince = GetTickCount();
@@ -2145,7 +2152,9 @@ static void Frame() {
             if (awaySince && fabsf(diff) < 0.05f) awaySince = 0;
         }
         XrPosef hudYawPose{{0, sinf(hudYaw / 2), 0, cosf(hudYaw / 2)}, {0, 0, 0}};
-        XrPosef panelLocal = world ? PoseMul(hudYawPose, XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}}) : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}};
+        wasMenuUp = menuUp;
+        wasWorld = world;
+        XrPosef panelLocal = PoseMul(hudYawPose, world ? XrPosef{{0, 0, 0, 1}, {0, -0.1f, -1.6f}} : XrPosef{{0, 0, 0, 1}, {0, 0, -2.4f}});
         float panelW = world ? 2.0f : 2.4f, panelH = panelW * 0.75f;
         // movies: a cinema screen 3.6 m wide, 3 m out where you were looking when it started, at the movie's aspect
         static bool wasMovie;

@@ -10,6 +10,7 @@
 #include "input.h"
 #include "minigame.h"
 #include "turret.h"
+#include "stun.h"
 
 #include <dinput.h>
 #include <cmath>
@@ -43,7 +44,15 @@ extern void Log(const char* fmt, ...);
 
 // ---------------------------------------------------------------- desired state (computed per frame)
 static BYTE g_wantKeys[256];
-static double g_attackWatchAt = -10;  // an action we just started (swing / shot / use / talk): see the movement rules in Input_Update
+static double g_attackWatchAt = -10;
+static DWORD g_reachOn;       // the enemy a blade contact just attacked (see "just out of reach")
+static double g_reachAt = -10;
+static int g_reachTries;
+static float WrapAngle(float a) {
+    while (a > 3.14159265f) a -= 6.2831853f;
+    while (a < -3.14159265f) a += 6.2831853f;
+    return a;
+}  // an action we just started (swing / shot / use / talk): see the movement rules in Input_Update
 static bool g_stickAway;              // the left stick is pushed, and not towards the nearest enemy
 static float g_attackFrom[3];
 static void WatchAttack(double now) {
@@ -230,6 +239,7 @@ void Input_Update(HWND wnd) {
         Gestures_Update(in, headPos);
         Combat_Update();
         Cues_Update();
+        Stun_Update();
         Tutorial_Update();
         Hud_Update();
         Anim_Update();
@@ -349,6 +359,9 @@ void Input_Update(HWND wnd) {
                 g_attackPin = startOn;
                 WatchAttack(now);
                 Log("input: blade contact -> attack %08lX", startOn);
+                g_reachOn = startOn;
+                g_reachAt = now;
+                g_reachTries = 0;
             } else if (startOn) {
                 static double lastWhy = -10;
                 if (now - lastWhy > 1.0) {  // a contact that starts nothing: why (stuck-fight diagnosis)
@@ -454,6 +467,49 @@ void Input_Update(HWND wnd) {
             Cues_Fire(CUE_FORCE);
         }
         if (!Combat_ContactMode() && Gestures_TakeForcePull() && inWorld) { g_gestureKey = DIK_4; g_gestureKeyAt = now; Cues_Fire(CUE_FORCE); }  // personal power slot
+        // Just out of reach (2026-11-17 playtest: the enemy's blows reached you, yours never rolled until you nudged
+        // closer - KotOR doesn't walk you in mid-round and the enemy shuffles back): when an attack you started hasn't
+        // rolled after 0.5 s and the enemy stands 1.25-3 m off, step in along the floor and press the attack again.
+        {
+            static double lungeUntil = -1;
+            float pp[3], ep[3];
+            BYTE* ec = g_reachOn ? (BYTE*)Weapon_CreatureById(g_reachOn) : nullptr;
+            bool have = ec && Weapon_PlayerPos(pp);
+            float d = 99, ex = 0, ey = 0;
+            if (have) {
+                __try { memcpy(ep, ec + 0x90, sizeof ep); } __except (EXCEPTION_EXECUTE_HANDLER) { have = false; }
+                if (have) ex = ep[0] - pp[0], ey = ep[1] - pp[1], d = sqrtf(ex * ex + ey * ey);
+            }
+            bool rolled = Combat_LastPlayerRollAge() < now - g_reachAt;
+            if (!have || rolled || !fighting || mag > 0.3f || now - g_reachAt > 4.0) {
+                if (lungeUntil > 0 && rolled) Log("input: stepped in - your attack rolled");
+                lungeUntil = -1;
+                if (!have || rolled || now - g_reachAt > 4.0) g_reachOn = 0;
+            } else if (lungeUntil < 0 && now - g_reachAt > 0.5 && d > 1.25f && d < 3.0f && g_reachTries < 2) {
+                lungeUntil = now + 0.5;
+                g_reachTries++;
+                Log("input: enemy %08lX just out of reach (%.2f m) - stepping in", g_reachOn, d);
+            }
+            if (lungeUntil > 0) {
+                if (d > 1.1f && now < lungeUntil) {
+                    // toward the enemy, in the game camera's frame (the movement keys walk relative to it)
+                    float rel = WrapAngle(atan2f(ey, ex) - EngineCam_GameYaw());
+                    float f = cosf(rel), r = -sinf(rel);
+                    if (f > 0.38f) keys[DIK_W] = 0x80;
+                    if (f < -0.38f) keys[DIK_S] = 0x80;
+                    if (r < -0.38f) keys[DIK_Z] = 0x80;
+                    if (r > 0.38f) keys[DIK_C] = 0x80;
+                } else {  // close enough (or the step is over): the attack again
+                    lungeUntil = -1;
+                    Weapon_SetTarget(g_reachOn | 0x80000000);
+                    g_gestureKey = DIK_R;
+                    g_gestureKeyAt = now;
+                    g_reachAt = now;
+                    WatchAttack(now);
+                    Log("input: stepped to %.2f m - attacking %08lX again", d, g_reachOn);
+                }
+            }
+        }
         if (g_gestureKeyAt >= 0) {
             if (now - g_gestureKeyAt < 0.1) keys[g_gestureKey] = 0x80;
             else g_gestureKeyAt = -1;

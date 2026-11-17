@@ -869,6 +869,7 @@ bool Combat_PostureInfo(unsigned long id, float* value, float* max, float* openL
 float Combat_Guard() { return g_guard; }
 
 bool Combat_PlayerAttacking() { return Now() - g_playerRolls[1] < 3.5; }
+double Combat_LastPlayerRollAge() { return Now() - g_playerRolls[1]; }
 void Combat_ResetAttacking() { g_playerRolls[0] = g_playerRolls[1] = -100; }
 
 // The player's combat round holds the character in place until its timer runs out (KotOR: an attack plays out its

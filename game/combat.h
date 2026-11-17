@@ -14,6 +14,8 @@ bool Combat_Threatening(unsigned long attacker);
 // The controlled character is already attacking (rolled within the last 3.5 s): KotOR repeats the attack every
 // round by itself, so gestures only count for timing; pressing attack again just fills its action queue.
 bool Combat_PlayerAttacking();
+// Seconds since the player's last attack roll (large when none yet).
+double Combat_LastPlayerRollAge();
 // v2: your blade / barrel decides what lands ([Combat] Mode=contact, the default).
 bool Combat_ContactMode();
 // Posture (fight.cpp): damage it, read it (openLeft > 0: the opening is live, seconds left). Your guard 0..100.

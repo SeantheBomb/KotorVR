@@ -27,6 +27,7 @@
 #include "minigame.h"
 #include "vr.h"
 #include "weapons.h"
+#include "stun.h"
 
 extern void Log(const char* fmt, ...);
 
@@ -319,7 +320,10 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
                     // show the game's shot of you, as it was before
                     g_shotMode = 2;
                     Log("cutscene: you are lying / sitting (head %.2f m up) -> the game's shot", headUp);
-                } else if (rel > 1.92f || (lookAtMe > 0.906f && dm < 8.0f)) {  // > 110 deg / within 25 deg of you
+                } else if ((rel > 1.92f && dm < 8.0f) || (lookAtMe > 0.906f && dm < 8.0f)) {
+                    // > 110 deg / within 25 deg of you - and only a camera near you: one facing back from across the
+                    // ship is a scene somewhere else (2026-11-17 playtest: the Leviathan's bridge scenes stayed in your
+                    // eyes), which the line-of-sight probes below judge
                     g_shotMode = 1;
                     Log("cutscene: reverse shot (%.0f deg from your facing%s, head %.2f m up) -> stay first person",
                         rel * 57.29578f, lookAtMe > 0.906f && dm < 8.0f ? ", looking at you" : "", headUp);
@@ -442,13 +446,15 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
         static double deadSince = -1;
         static float startPos[3], deathPos[3], deathQ[4];
         bool dead = PlayerDead();
+        // stunned (stun.cpp): the same step out of your body, so you see yourself reeling ([Comfort] StunCamera)
+        bool stunOut = !dead && gameplay && !mg && Stun_Active() && Stun_Camera();
         float body[3];
-        if (dead && CreaturePos(body)) {
+        if ((dead || stunOut) && CreaturePos(body)) {
             double now = GetTickCount() / 1000.0;
             if (deadSince < 0) {
                 deadSince = now;
                 memcpy(startPos, basePos, sizeof startPos);
-                Log("enginecam: you died - camera out of your body");
+                Log(dead ? "enginecam: you died - camera out of your body" : "enginecam: stunned - camera out of your body");
             }
             float t = (float)((now - deadSince) / 1.5);
             if (t > 1) t = 1;
@@ -459,11 +465,18 @@ extern "C" void __cdecl EngineCam_Pre(BYTE* cam) {
             QuatLookAlong(f, deathQ);
             basePos = deathPos;
             baseQ = deathQ;
-        } else if (!dead) {
-            if (deadSince >= 0) Log("enginecam: alive again - back in first person");
+        } else if (!dead && !stunOut) {
+            if (deadSince >= 0) Log("enginecam: back in first person");
             deadSince = -1;
         }
-        VR_SetShowOwnBody(dead);
+        // ... and in the game's own shot of a cutscene (cut away from your eyes) your character is in the picture:
+        // show the body and hide the VR hands, as for the death camera (2026-11-17 playtest: you were a floating arm
+        // in cut-away shots - the body hidden, a piece the cull missed still drawn)
+        bool cutAway = !gameplay && !mg && g_shotMode == 2;
+        static bool wasCut;
+        if (cutAway != wasCut) Log("enginecam: %s", cutAway ? "the game's shot - your character shown" : "back in your eyes - body hidden");
+        wasCut = cutAway;
+        VR_SetShowOwnBody(dead || stunOut || cutAway);
     }
     if (gameplay) g_shotMode = 0;
     VR_SetCinematic(!gameplay);

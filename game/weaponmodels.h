@@ -28,3 +28,6 @@ bool WeaponModels_DrawHand(const char* model, const char* texture, int side, con
 // Body model + texture for appearance.2da row `appearance`, body letter 0..9 (a..j) and armor TextureVar (from
 // kvr\handsppearance.txt). False if the row has no body model for that letter.
 bool WeaponModels_BodyFor(int appearance, int letter, int texVar, std::string* model, std::string* texture);
+
+// Stealth: hands and weapons drawn see-through with a shimmer (0 solid .. 1 fully stealthed).
+void WeaponModels_SetStealth(float amount);
