@@ -904,13 +904,14 @@ int VR_IsOwnBody(const float t[3], int depth) {
             g_bodyFound = true;
             return 2;
         }
-        // ... or where it was drawn last frame (within 12 cm, and still at your feet): walking, the drawn root can
+        // ... or where it was drawn last frame (within 20 cm, and still at your feet): walking, the drawn root can
         // run more than 5 cm from the game object's position for a frame, and then your whole body - head included -
-        // was drawn in your eyes (2026-11-17 playtest: the head flashing while walking; the log's "near miss root
+        // was drawn in your eyes (2026-11-17 playtest video, 4:02: for one frame your whole body - the back of your head, neck and shoulders -
+        // drawn 30 cm in front of the eye while walking; the log's "near miss root
         // at 0.00 m horizontal" lines are frames without the body found)
-        if (exact && g_bodyRootValid && depth == g_rootDepth && h2 < 0.4f * 0.4f && fabsf(dz) < 0.4f) {
+        if (exact && g_bodyRootValid && depth == g_rootDepth && h2 < 0.5f * 0.5f && fabsf(dz) < 0.4f) {
             float lx = t[0] - g_bodyRootT[0], ly = t[1] - g_bodyRootT[1], lz = t[2] - g_bodyRootT[2];
-            if (lx * lx + ly * ly + lz * lz < 0.12f * 0.12f) {
+            if (lx * lx + ly * ly + lz * lz < 0.20f * 0.20f) {  // (running: ~6 cm a frame, plus the drift itself)
                 static DWORD lastLog;
                 if (GetTickCount() - lastLog > 2000) {
                     lastLog = GetTickCount();
